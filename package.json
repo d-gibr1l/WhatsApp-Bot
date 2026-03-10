@@ -1,0 +1,23 @@
+{
+  "name": "whatsapp-media-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp Bot with Supabase session storage and admin commands",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@supabase/supabase-js": "^2.98.0",
+    "@whiskeysockets/baileys": "^6.7.0",
+    "dotenv": "^16.0.0",
+    "express": "^5.2.1",
+    "pino": "^10.3.1",
+    "qrcode": "^1.5.3",
+    "sharp": "^0.33.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
