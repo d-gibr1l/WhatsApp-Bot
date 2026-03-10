@@ -11,6 +11,7 @@ import { hydrateSessionFromSupabase, saveSessionToSupabase, clearSessionFromSupa
 import { handleMessage, startReminderPoller } from "./src/handler.js";
 import { loadWordFilter } from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
+import { loadAliases } from "./src/commands/aliases.js";
 import { handleAntiDelete, storeMessage } from "./src/commands/antidelete.js";
 import { loadCache } from "./src/cache.js";
 import { startServer, setQR, setConnected, setDisconnected, setStarting } from "./src/server.js";
@@ -62,6 +63,7 @@ async function startBot(attempt = 1) {
         await loadCache();
         await loadWordFilter();
         await loadAllowedLinks();
+        await loadAliases();
 
         // ─── Anti-delete listener ────────────────────────────────────
         sock.ev.on("messages.delete", async (item) => {

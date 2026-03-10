@@ -164,7 +164,8 @@ export async function handleMessage(sock, msg) {
 
   // Command routing
   const args = text.slice(prefix.length).trim().split(/\s+/);
-  const cmdName = args.shift().toLowerCase();
+  const rawCmd = args.shift().toLowerCase();
+  const cmdName = resolveAlias(rawCmd);
   const command = commands[cmdName];
 
   if (!command) return;

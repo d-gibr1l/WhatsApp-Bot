@@ -118,6 +118,22 @@ export const generalCommands = {
         );
       }
 
+      // Append active aliases
+      const { getAllAliases } = await import("./aliases.js");
+      const aliases = getAllAliases();
+      if (aliases.size > 0) {
+        const aliasLines = [...aliases.entries()]
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([alias, cmd]) => `│ ${p}${alias.padEnd(12)} → ${p}${cmd}`);
+        menu.push(
+          ``,
+          `⚡ *ACTIVE ALIASES*`,
+          `┌─────────────────────────`,
+          ...aliasLines,
+          `└─────────────────────────`,
+        );
+      }
+
       menu.push(``, `_📌 Admin commands only visible to admins._`);
       await replyMsg(sock, from, msg, menu.join("\n"));
     },
