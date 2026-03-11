@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_KEY } from "../config.js";
 import { setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
+import { botConfig } from "../config.js";
 import { replyMsg } from "./helpers.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -55,9 +56,8 @@ export async function handleAntiDelete(sock, deletedKey) {
 
   try {
     const antideleteDest = cachedGetSetting("antidelete_dest", "chat");
-    const { BOT_NUMBER } = await import("../config.js");
     const dest = antideleteDest === "dm"
-      ? `${BOT_NUMBER}@s.whatsapp.net`
+      ? `${botConfig.BOT_NUMBER}@s.whatsapp.net`
       : chatId;
 
     if (stored.text) {

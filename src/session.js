@@ -2,20 +2,34 @@ import { createClient } from "@supabase/supabase-js";
 import { writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
-import { SUPABASE_URL, SUPABASE_KEY, BOT_NUMBER, SESSION_DIR } from "./config.js";
+import { SUPABASE_URL, SUPABASE_KEY, botConfig, SESSION_DIR } from "./config.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 export async function loadSessionFromSupabase() {
   try {
-    const { data, error } = await supabase
-      .from("sessions")
-      .select("auth")
-      .eq("number", BOT_NUMBER)
-      .single();
+    // Try with known number first, fall back to any saved session
+    if (botConfig.BOT_NUMBER) {
+      const { data } = await supabase
+        .from("sessions").select("auth")
+        .eq("number", botConfig.BOT_NUMBER).single();
+      if (data?.auth) return data.auth;
+    }
 
-    if (error || !data?.auth) return null;
-    return data.auth;
+    // No number yet (first scan) — load the most recent session
+    const { data } = await supabase
+      .from("sessions").select("auth, number")
+      .limit(1).single();
+
+    if (data?.auth) {
+      // Pre-populate BOT_NUMBER from saved session
+      if (data.number && !botConfig.BOT_NUMBER) {
+        botConfig.BOT_NUMBER = data.number;
+        console.log(`📱 Bot number restored from session: ${data.number}`);
+      }
+      return data.auth;
+    }
+    return null;
   } catch (err) {
     console.error("❌ Failed to load session:", err.message);
     return null;
@@ -27,7 +41,7 @@ export async function saveSessionToSupabase(creds, keys) {
     const { error } = await supabase
       .from("sessions")
       .upsert(
-        { number: BOT_NUMBER, auth: { creds, keys } },
+        { number: botConfig.BOT_NUMBER, auth: { creds, keys } },
         { onConflict: "number" }
       );
     if (error) console.error("❌ Failed to save session:", error.message);
@@ -38,7 +52,7 @@ export async function saveSessionToSupabase(creds, keys) {
 
 export async function clearSessionFromSupabase() {
   try {
-    await supabase.from("sessions").delete().eq("number", BOT_NUMBER);
+    await supabase.from("sessions").delete().eq("number", botConfig.BOT_NUMBER);
     console.log("🗑️  Supabase session cleared");
   } catch (err) {
     console.error("❌ Failed to clear session:", err.message);

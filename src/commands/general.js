@@ -1,4 +1,4 @@
-import { BOT_NUMBER } from "../config.js";
+import { botConfig } from "../config.js";
 import { getSetting } from "../db.js";
 import { cachedGetSetting } from "../cache.js";
 import { replyMsg, isAdmin, alertOwner } from "./helpers.js";
@@ -199,7 +199,7 @@ export const generalCommands = {
       await replyMsg(sock, from, msg,
         `*🤖 Bot Status*\n\n` +
         `${active === "true" ? "✅ Online" : "🔴 Inactive"}\n` +
-        `📱 Number: ${BOT_NUMBER}\n` +
+        `📱 Number: ${botConfig.BOT_NUMBER}\n` +
         `⏱️ Uptime: ${h}h ${m}m ${s}s\n` +
         `🔧 Prefix: ${prefix}`
       );

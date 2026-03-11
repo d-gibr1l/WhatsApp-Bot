@@ -1,4 +1,4 @@
-import { BOT_NUMBER } from "../config.js";
+import { botConfig } from "../config.js";
 import { isAdminNumber } from "../db.js";
 import { cachedIsAdmin, rememberBotSent } from "../cache.js";
 
@@ -28,7 +28,7 @@ export function isAdmin(msg) {
 
 export async function alertOwner(sock, context, err) {
   try {
-    const ownerJid = `${BOT_NUMBER}@s.whatsapp.net`;
+    const ownerJid = `${botConfig.BOT_NUMBER}@s.whatsapp.net`;
     await sock.sendMessage(ownerJid, {
       text:
         `⚠️ *Bot Error Alert*\n\n` +
@@ -45,9 +45,9 @@ export async function alertOwner(sock, context, err) {
 export function normalizeNumber(raw) {
   // Remove all non-digits
   let number = raw.replace(/\D/g, "");
-  // Convert local format (leading 0) to international using BOT_NUMBER country code
+  // Convert local format (leading 0) to international using botConfig.BOT_NUMBER country code
   if (number.startsWith("0")) {
-    const countryCode = BOT_NUMBER.slice(0, BOT_NUMBER.length - 9); // extract country code
+    const countryCode = botConfig.BOT_NUMBER.slice(0, botConfig.BOT_NUMBER.length - 9); // extract country code
     number = countryCode + number.slice(1);
   }
   return number;

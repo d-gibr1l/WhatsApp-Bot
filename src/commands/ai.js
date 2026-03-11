@@ -2,7 +2,7 @@ import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
 import { setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings, isBotSentMessage } from "../cache.js";
 import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_KEY, BOT_NUMBER } from "../config.js";
+import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "../config.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const MAX_HISTORY = 20;
@@ -265,11 +265,11 @@ export async function handleAiReply(sock, msg, from) {
 
   const quotedId          = contextInfo.stanzaId ?? "";
   const quotedParticipant = contextInfo.participant ?? "";
-  const botJid            = `${BOT_NUMBER}@s.whatsapp.net`;
+  const botJid            = `${botConfig.BOT_NUMBER}@s.whatsapp.net`;
 
   // Fix #7: primary check is isBotSentMessage — the participant fallbacks
   // only apply in groups where the bot's JID is unambiguous as a participant.
-  // We no longer fall back to BOT_NUMBER string match alone (too broad).
+  // We no longer fall back to botConfig.BOT_NUMBER string match alone (too broad).
   const isReplyToBot =
     isBotSentMessage(quotedId) ||       // bot sent it — most reliable check
     (quotedParticipant === botJid &&     // group: quoted sender is exactly bot JID

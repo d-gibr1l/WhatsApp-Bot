@@ -1,4 +1,4 @@
-import { BOT_NUMBER } from "./config.js";
+import { botConfig } from "./config.js";
 import { commands, replyMsg, isAdmin } from "./commands/index.js";
 import { logMessage, getPendingReminders, markReminderDone } from "./db.js";
 import {
@@ -36,7 +36,7 @@ export function getMessageType(msg) {
 // ─── getSenderNumber ──────────────────────────────────────────────────────────
 
 export function getSenderNumber(msg) {
-  if (msg.key.fromMe) return BOT_NUMBER;
+  if (msg.key.fromMe) return botConfig.BOT_NUMBER;
   const participant = msg.key.participant;
   const remoteJid   = msg.key.remoteJid ?? "";
   if (participant && participant.endsWith("@s.whatsapp.net")) {
@@ -52,7 +52,7 @@ export function getSenderNumber(msg) {
 
 export async function alertOwner(sock, context, err, extra = {}) {
   try {
-    const ownerJid = `${BOT_NUMBER}@s.whatsapp.net`;
+    const ownerJid = `${botConfig.BOT_NUMBER}@s.whatsapp.net`;
     await sock.sendMessage(ownerJid, {
       text:
         `⚠️ *Bot Error Alert*\n\n` +
