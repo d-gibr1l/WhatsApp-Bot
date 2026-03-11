@@ -1,8 +1,5 @@
-import { writeFileSync, unlinkSync, existsSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
-import { getSetting } from "../db.js";
+import { cachedGetSetting } from "../cache.js";
 
 // ─── Google TTS ───────────────────────────────────────────────────────────────
 
@@ -69,7 +66,7 @@ export const voiceCommands = {
       await reactMsg(sock, from, msg, "🎙️");
 
       try {
-        const geminiKey = await getSetting("gemini_api_key", null);
+        const geminiKey = cachedGetSetting("gemini_api_key", null);
         if (!geminiKey) return replyMsg(sock, from, msg,
           `❌ Gemini API key not set. Admin can set it with: *!setgeminikey <key>*`
         );

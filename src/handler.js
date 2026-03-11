@@ -144,10 +144,6 @@ export async function handleMessage(sock, msg) {
   const isGrp    = from.endsWith("@g.us");
   const prefix   = cachedGetSetting("bot_prefix", "!");
   const userIsAdmin = msg.key.fromMe ? true : cachedIsAdmin(sender);
-  // Temporary debug — remove after confirming admin check works
-  if (text?.startsWith(cachedGetSetting("bot_prefix", "!"))) {
-    console.log(`🔑 Admin check — sender: "${sender}", isAdmin: ${userIsAdmin}, fromMe: ${msg.key.fromMe}`);
-  }
 
   if (msg.key.fromMe && !text) return;
 

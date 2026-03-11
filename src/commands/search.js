@@ -1,6 +1,5 @@
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
-import { getSetting, setSetting } from "../db.js";
-import { refreshSettings } from "../cache.js";
+import { cachedGetSetting } from "../cache.js";
 
 async function geminiSearch(query, apiKey) {
   const res = await fetch(
@@ -53,7 +52,7 @@ export const searchCommands = {
         `📖 *How to use ${prefix}search*\n\n🔧 *Syntax:*\n${prefix}search <query>\n\n💡 *Examples:*\n• ${prefix}search latest news in Ghana\n• ${prefix}search Bitcoin price today`
       );
 
-      const apiKey = await getSetting("gemini_api_key", null);
+      const apiKey = cachedGetSetting("gemini_api_key", null);
       if (!apiKey) return replyMsg(sock, from, msg,
         `❌ Gemini API key not set.\n\n📌 Admin can set it with: *${prefix}setgeminikey <key>*`
       );
@@ -79,27 +78,7 @@ export const searchCommands = {
         await alertOwner(sock, `${prefix}search`, err);
       }
     },
-  },
-
-  setgeminikey: {
-    adminOnly: true,
-    requiresArgs: true,
-    description: "Set the Google Gemini API key for web search",
-    usage: "!setgeminikey <key>",
-    handler: async (sock, msg, args, from, prefix) => {
-      const key = args[0]?.trim();
-      if (!key) return replyMsg(sock, from, msg,
-        `📖 *How to use ${prefix}setgeminikey*\n\n🔧 *Syntax:*\n${prefix}setgeminikey <your-api-key>`
-      );
-      try {
-        await setSetting("gemini_api_key", key);
-        await refreshSettings();
-        await replyMsg(sock, from, msg, `✅ Gemini API key saved. Try *${prefix}search hello world* to test.`);
-      } catch (err) {
-        await replyMsg(sock, from, msg, `❌ ${err.message}`);
-        await alertOwner(sock, `${prefix}setgeminikey`, err);
-      }
-    },
-  },
+  }
 
 };
+
