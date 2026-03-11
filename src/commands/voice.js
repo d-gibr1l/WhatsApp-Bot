@@ -24,29 +24,30 @@ async function textToSpeech(text, lang = "en") {
 
 // ─── AI + TTS combined ────────────────────────────────────────────────────────
 
-async function getAiResponse(prompt, groqKey) {
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${groqKey}`,
-    },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      max_tokens: 200, // keep short for voice
-      messages: [
-        {
-          role: "system",
-          content: "You are a helpful assistant. Keep responses short and conversational — under 3 sentences. No markdown, no bullet points, just plain speech.",
-        },
-        { role: "user", content: prompt },
-      ],
-    }),
-  });
+async function getAiResponse(prompt, geminiKey) {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: `[System]: You are a helpful assistant. Keep responses short and conversational — under 3 sentences. No markdown, no bullet points, just plain speech.\n\n${prompt}` }],
+          },
+        ],
+        generationConfig: { maxOutputTokens: 200 },
+      }),
+    }
+  );
 
-  if (!res.ok) throw new Error(`Groq API error: ${res.status}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message ?? `Gemini API error: ${res.status}`);
+  }
   const data = await res.json();
-  return data.choices?.[0]?.message?.content ?? "I could not generate a response.";
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "I could not generate a response.";
 }
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
@@ -68,13 +69,13 @@ export const voiceCommands = {
       await reactMsg(sock, from, msg, "🎙️");
 
       try {
-        const groqKey = await getSetting("groq_api_key", null);
-        if (!groqKey) return replyMsg(sock, from, msg,
-          `❌ Groq API key not set. Admin can set it with: *!setgroqkey <key>*`
+        const geminiKey = await getSetting("gemini_api_key", null);
+        if (!geminiKey) return replyMsg(sock, from, msg,
+          `❌ Gemini API key not set. Admin can set it with: *!setgeminikey <key>*`
         );
 
         // Get AI response
-        const aiText = await getAiResponse(prompt, groqKey);
+        const aiText = await getAiResponse(prompt, geminiKey);
 
         // Convert to speech
         const audioBuffer = await textToSpeech(aiText);

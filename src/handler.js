@@ -176,7 +176,8 @@ export async function handleMessage(sock, msg) {
       if (handled) return;
     }
     if (text) {
-      const autoResponse = cachedGetAutoReply(text);
+      // Check specific keyword match first, then wildcard fallback
+      const autoResponse = cachedGetAutoReply(text) ?? cachedGetAutoReply("*");
       if (autoResponse) await replyMsg(sock, from, msg, autoResponse);
     }
     return;

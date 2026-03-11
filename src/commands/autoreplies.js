@@ -76,5 +76,47 @@ export const autoreplyCommands = {
       }
     },
   },
+,
+
+  replyall: {
+    adminOnly: true,
+    requiresArgs: true,
+    description: "Set a reply that goes to every single message (wildcard)",
+    usage: "!replyall <message>",
+    examples: ["!replyall Sorry, I am busy right now!", "!replyall This number is unavailable."],
+    notes: "Use !stopreplyall to disable. Specific keyword replies still take priority.",
+    handler: async (sock, msg, args, from, prefix) => {
+      const response = args.join(" ").trim();
+      if (!response) return replyMsg(sock, from, msg,
+        `📖 *How to use ${prefix}replyall*\n\n🔧 *Syntax:*\n${prefix}replyall <message>`
+      );
+      try {
+        await addAutoReply("*", response);
+        await refreshAutoReplies();
+        await replyMsg(sock, from, msg,
+          `✅ Wildcard reply set!\n\nThe bot will now reply to *every message* with:\n_${response}_\n\n📌 Disable with: *${prefix}stopreplyall*`
+        );
+      } catch (err) {
+        await replyMsg(sock, from, msg, `❌ ${err.message}`);
+        await alertOwner(sock, `${prefix}replyall`, err);
+      }
+    },
+  },
+
+  stopreplyall: {
+    adminOnly: true,
+    requiresArgs: false,
+    description: "Disable the wildcard reply-to-everything",
+    handler: async (sock, msg, _args, from, prefix) => {
+      try {
+        await removeAutoReply("*");
+        await refreshAutoReplies();
+        await replyMsg(sock, from, msg, `✅ Wildcard reply disabled. Bot will no longer reply to everything.`);
+      } catch (err) {
+        await replyMsg(sock, from, msg, `❌ ${err.message}`);
+        await alertOwner(sock, `${prefix}stopreplyall`, err);
+      }
+    },
+  },
 
 };

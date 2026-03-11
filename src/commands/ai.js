@@ -29,7 +29,6 @@ async function saveMessage(chatId, role, content) {
   try {
     await supabase.from("ai_conversations").insert({ chat_id: chatId, role, content });
 
-    // Keep only last MAX_HISTORY messages per chat — delete older ones
     const { data } = await supabase
       .from("ai_conversations")
       .select("id")
@@ -50,49 +49,55 @@ async function clearHistory(chatId) {
   await supabase.from("ai_conversations").delete().eq("chat_id", chatId);
 }
 
-// ─── Claude API Call ──────────────────────────────────────────────────────────
+// ─── Gemini API Call ──────────────────────────────────────────────────────────
 
-async function askClaude(chatId, userMessage) {
-  const history = await getHistory(chatId);
+async function askGemini(chatId, userMessage) {
+  const geminiKey = cachedGetSetting("gemini_api_key", null);
+  if (!geminiKey) throw new Error("Gemini API key not set. Use !setgeminikey <key> to set it.");
+
   const systemPrompt = cachedGetSetting(
     "ai_system_prompt",
     "You are a helpful WhatsApp bot assistant. Be concise, friendly, and helpful. Keep responses brief and suitable for WhatsApp."
   );
 
-  const messages = [
-    ...history.map((h) => ({ role: h.role, content: h.content })),
-    { role: "user", content: userMessage },
+  const history = await getHistory(chatId);
+
+  // Build Gemini contents array from history
+  const contents = [
+    // Inject system prompt as first user/model exchange
+    { role: "user",  parts: [{ text: `[System]: ${systemPrompt}` }] },
+    { role: "model", parts: [{ text: "Understood. I will follow those instructions." }] },
+    // Conversation history
+    ...history.map((h) => ({
+      role: h.role === "assistant" ? "model" : "user",
+      parts: [{ text: h.content }],
+    })),
+    // Current message
+    { role: "user", parts: [{ text: userMessage }] },
   ];
 
-  const groqKey = cachedGetSetting("groq_api_key", null);
-  if (!groqKey) throw new Error("Groq API key not set. Use !setgroqkey <key> to set it.");
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents,
+        generationConfig: { maxOutputTokens: 1024 },
+      }),
+    }
+  );
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${groqKey}`,
-    },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      max_tokens: 1024,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...messages,
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Groq API error: ${response.status} — ${err}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message ?? `Gemini API error: ${res.status}`);
   }
 
-  const data = await response.json();
-  const reply = data.choices?.[0]?.message?.content;
-  if (!reply) throw new Error("No response from Groq");
+  const data = await res.json();
+  const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!reply) throw new Error("No response from Gemini.");
 
-  // Save both sides to history
+  // Save to history
   await saveMessage(chatId, "user", userMessage);
   await saveMessage(chatId, "assistant", reply);
 
@@ -109,27 +114,25 @@ export const aiCommands = {
     description: "Chat with the AI assistant (remembers conversation context)",
     usage: "!ai <message>",
     examples: [
-      "!ai What is the capital of France?",
+      "!ai What is the capital of Ghana?",
       "!ai Write me a short poem about rain",
       "!ai Explain quantum physics simply",
     ],
-    notes: "The AI remembers the last 20 messages in each chat.",
+    notes: "The AI remembers the last 20 messages in each chat. Powered by Google Gemini.",
     handler: async (sock, msg, args, from, prefix) => {
       const aiActive = cachedGetSetting("ai_active", "true");
-      if (aiActive !== "true") {
-        return replyMsg(sock, from, msg, "🤖 AI chat is currently disabled.");
-      }
+      if (aiActive !== "true") return replyMsg(sock, from, msg, "🤖 AI chat is currently disabled.");
 
-      const groqKey = cachedGetSetting("groq_api_key", null);
-      if (!groqKey) {
-        return replyMsg(sock, from, msg, `❌ Groq API key not set. Admin must run ${prefix}setgroqkey <key> first.`);
-      }
+      const geminiKey = cachedGetSetting("gemini_api_key", null);
+      if (!geminiKey) return replyMsg(sock, from, msg,
+        `❌ Gemini API key not set. Admin must run *${prefix}setgeminikey <key>* first.`
+      );
 
       const userMessage = args.join(" ");
       await reactMsg(sock, from, msg, "🤖");
 
       try {
-        const reply = await askClaude(from, userMessage);
+        const reply = await askGemini(from, userMessage);
         await replyMsg(sock, from, msg, reply);
       } catch (err) {
         console.error("❌ AI error:", err.message);
@@ -175,30 +178,25 @@ export const aiCommands = {
     },
   },
 
-  setgroqkey: {
+  setgeminikey: {
     adminOnly: true,
     requiresArgs: true,
-    description: "Set the Groq API key for AI chat",
-    usage: "!setgroqkey <key>",
-    examples: ["!setgroqkey gsk_xxxxxxxxxxxx"],
-    notes: "Get your free key from console.groq.com",
+    description: "Set the Google Gemini API key for AI chat and search",
+    usage: "!setgeminikey <key>",
+    examples: ["!setgeminikey AIzaSy..."],
+    notes: "Get your free key from aistudio.google.com",
     handler: async (sock, msg, args, from, prefix) => {
       const key = args[0]?.trim();
       if (!key) return replyMsg(sock, from, msg,
-        `📖 *How to use ${prefix}setgroqkey*
-
-🔧 *Syntax:*
-${prefix}setgroqkey <key>
-
-📌 Get your free key from console.groq.com`
+        `📖 *How to use ${prefix}setgeminikey*\n\n🔧 *Syntax:*\n${prefix}setgeminikey <key>\n\n📌 Get your free key from aistudio.google.com`
       );
       try {
-        await setSetting("groq_api_key", key);
+        await setSetting("gemini_api_key", key);
         await refreshSettings();
-        await replyMsg(sock, from, msg, "✅ Groq API key updated successfully.");
+        await replyMsg(sock, from, msg, "✅ Gemini API key saved. Try *!ai hello* to test.");
       } catch (err) {
         await replyMsg(sock, from, msg, `❌ ${err.message}`);
-        await alertOwner(sock, `${prefix}setgroqkey`, err);
+        await alertOwner(sock, `${prefix}setgeminikey`, err);
       }
     },
   },
@@ -206,9 +204,9 @@ ${prefix}setgroqkey <key>
   setaiprompt: {
     adminOnly: true,
     requiresArgs: true,
-    description: "Set a custom system prompt for the AI",
+    description: "Set a custom system prompt for the AI personality",
     usage: "!setaiprompt <prompt>",
-    examples: ["!setaiprompt You are a customer support agent for Acme Store. Be professional and helpful."],
+    examples: ["!setaiprompt You are a customer support agent for Acme Store. Be professional."],
     notes: "This sets the AI's personality and behavior.",
     handler: async (sock, msg, args, from, prefix) => {
       try {
@@ -225,25 +223,32 @@ ${prefix}setgroqkey <key>
 };
 
 // ─── Reply-to-bot trigger ─────────────────────────────────────────────────────
-// Called from handler.js when someone replies to a bot message
 
 export async function handleAiReply(sock, msg, from) {
   const aiActive = cachedGetSetting("ai_active", "true");
   if (aiActive !== "true") return false;
-  if (!cachedGetSetting('groq_api_key', null)) return false;
+  if (!cachedGetSetting("gemini_api_key", null)) return false;
 
-  const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant;
-  const quotedFromMe = msg.message?.extendedTextMessage?.contextInfo?.fromMe;
+  const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
+  if (!contextInfo) return false;
 
-  // Only trigger if replying to the bot's own message
-  if (!quotedFromMe && quotedParticipant !== `${BOT_NUMBER}@s.whatsapp.net`) return false;
+  const quotedFromMe      = contextInfo.fromMe;
+  const quotedParticipant = contextInfo.participant ?? "";
+  const botJid            = `${BOT_NUMBER}@s.whatsapp.net`;
+
+  const isReplyToBot =
+    quotedFromMe === true ||
+    quotedParticipant === botJid ||
+    quotedParticipant.split("@")[0] === BOT_NUMBER;
+
+  if (!isReplyToBot) return false;
 
   const text = msg.message?.extendedTextMessage?.text?.trim();
   if (!text) return false;
 
   try {
     await reactMsg(sock, from, msg, "🤖");
-    const reply = await askClaude(from, text);
+    const reply = await askGemini(from, text);
     await replyMsg(sock, from, msg, reply);
     return true;
   } catch (err) {
