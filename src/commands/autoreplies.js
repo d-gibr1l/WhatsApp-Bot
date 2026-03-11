@@ -76,7 +76,6 @@ export const autoreplyCommands = {
       }
     },
   },
-,
 
   replyall: {
     adminOnly: true,
