@@ -13,6 +13,7 @@ export function setQR(qr)         { lastQR = qr; botStatus = "waiting_qr"; }
 export function setConnected()    { lastQR = null; botStatus = "connected"; }
 export function setDisconnected() { botStatus = "disconnected"; }
 export function setStarting()     { botStatus = "starting"; }
+export function setConnecting()   { botStatus = "connecting"; }
 
 const app = express();
 
