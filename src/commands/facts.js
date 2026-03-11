@@ -60,13 +60,6 @@ async function getNumberFact(number) {
   return `🔢 *Number Fact*\n\n${data.text}`;
 }
 
-async function getAnimeFact() {
-  const data = await fetchJson("https://anime-facts-rest-api.herokuapp.com/api/v1");
-  const facts = data.data ?? [];
-  if (!facts.length) throw new Error("No anime facts returned.");
-  const fact = facts[Math.floor(Math.random() * facts.length)];
-  return `🎌 *Anime Fact*\n\n${fact.fact}`;
-}
 
 async function getQuote() {
   const data = await fetchJson("https://api.quotable.io/random");
@@ -95,7 +88,6 @@ const factHandlers = {
   kanye:     getKanye,
   advice:    getAdvice,
   today:     getOnThisDay,
-  anime:     getAnimeFact,
   quote:     getQuote,
   bored:     getBored,
 };
@@ -107,7 +99,6 @@ const aliases = {
   meowfact: "meow",
   uselessfact: "useless",
   onthisday: "today",
-  animefact: "anime",
 };
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
@@ -127,12 +118,11 @@ export const factsCommands = {
       "!fact kanye",
       "!fact advice",
       "!fact today",
-      "!fact anime",
       "!fact useless",
       "!fact bored",
       "!fact quote",
     ],
-    notes: "Leave blank for a random category. Categories: cat, dog, meow, useless, chuck, kanye, advice, today, anime, quote, bored",
+    notes: "Leave blank for a random category. Categories: cat, dog, meow, useless, chuck, kanye, advice, today, quote, bored",
     handler: async (sock, msg, args, from, prefix) => {
       let category = args[0]?.toLowerCase().trim();
 
