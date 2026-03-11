@@ -6,7 +6,6 @@ import makeWASocket, {
 import { Boom } from "@hapi/boom";
 import pino from "pino";
 
-import { SESSION_DIR, MAX_RECONNECTS, BASE_DELAY_MS, botConfig } from "./src/config.js";
 import { hydrateSessionFromSupabase, saveSessionToSupabase, clearSessionFromSupabase } from "./src/session.js";
 import { handleMessage, startReminderPoller, extractText } from "./src/handler.js";
 import { loadWordFilter } from "./src/commands/wordfilter.js";
