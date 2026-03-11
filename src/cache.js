@@ -231,3 +231,23 @@ export function rememberMessage(id) {
   messageCache.set(id);
   stats.messagesSeen++;
 }
+
+// ─── Bot Sent Message Tracker ─────────────────────────────────────────────────
+// Tracks IDs of messages the bot itself sent, so AI only replies to those
+
+const botSentIds = new Set();
+const BOT_SENT_MAX = 500;
+
+export function rememberBotSent(id) {
+  if (!id) return;
+  botSentIds.add(id);
+  // Keep set from growing unbounded
+  if (botSentIds.size > BOT_SENT_MAX) {
+    const first = botSentIds.values().next().value;
+    botSentIds.delete(first);
+  }
+}
+
+export function isBotSentMessage(id) {
+  return id ? botSentIds.has(id) : false;
+}

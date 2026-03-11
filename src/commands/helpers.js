@@ -1,9 +1,12 @@
 import { BOT_NUMBER } from "../config.js";
 import { isAdminNumber } from "../db.js";
-import { cachedIsAdmin } from "../cache.js";
+import { cachedIsAdmin, rememberBotSent } from "../cache.js";
 
-export function replyMsg(sock, from, msg, text) {
-  return sock.sendMessage(from, { text }, { quoted: msg });
+export async function replyMsg(sock, from, msg, text) {
+  const result = await sock.sendMessage(from, { text }, { quoted: msg });
+  // Track this message ID so AI knows it was sent by the bot
+  if (result?.key?.id) rememberBotSent(result.key.id);
+  return result;
 }
 
 export function reactMsg(sock, from, msg, emoji) {

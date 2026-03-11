@@ -1,6 +1,6 @@
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
 import { getSetting, setSetting } from "../db.js";
-import { cachedGetSetting, refreshSettings } from "../cache.js";
+import { cachedGetSetting, refreshSettings, isBotSentMessage } from "../cache.js";
 import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_KEY, BOT_NUMBER } from "../config.js";
 
@@ -232,14 +232,17 @@ export async function handleAiReply(sock, msg, from) {
   const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
   if (!contextInfo) return false;
 
-  const quotedFromMe      = contextInfo.fromMe;
+  // Only trigger if the quoted message was actually sent by the bot.
+  // We check the stanzaId against our tracked sent-message IDs.
+  // This prevents triggering when someone replies to a human's message.
+  const quotedId          = contextInfo.stanzaId ?? "";
   const quotedParticipant = contextInfo.participant ?? "";
   const botJid            = `${BOT_NUMBER}@s.whatsapp.net`;
 
   const isReplyToBot =
-    quotedFromMe === true ||
-    quotedParticipant === botJid ||
-    quotedParticipant.split("@")[0] === BOT_NUMBER;
+    isBotSentMessage(quotedId) ||                          // bot sent it (DM or group)
+    quotedParticipant === botJid ||                        // group: quoted sender is bot
+    quotedParticipant.split("@")[0] === BOT_NUMBER;        // group: number matches
 
   if (!isReplyToBot) return false;
 
