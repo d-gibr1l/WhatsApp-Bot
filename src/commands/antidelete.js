@@ -1,8 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_KEY } from "../config.js";
+import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "../config.js";
 import { setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
-import { botConfig } from "../config.js";
 import { replyMsg } from "./helpers.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
