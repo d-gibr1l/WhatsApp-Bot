@@ -6,72 +6,81 @@ import { replyMsg, alertOwner } from "./helpers.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ─── Word Filter DB Helpers ───────────────────────────────────────────────────
+// ─── Cache: per-chat words only ───────────────────────────────────────────────
+// chatWords: Map of chat_id -> Set of words
 
-let wordFilterCache = new Set();
+let chatWords = new Map();
 
 export async function loadWordFilter() {
   try {
-    const { data, error } = await supabase.from("word_filter").select("word");
+    const { data, error } = await supabase.from("word_filter").select("word, chat_id");
     if (error) throw error;
-    wordFilterCache = new Set(data.map((r) => r.word.toLowerCase()));
-    console.log(`✅ Word filter loaded — ${wordFilterCache.size} words`);
+    chatWords = new Map();
+    for (const r of data) {
+      const word   = r.word.toLowerCase();
+      const chatId = r.chat_id;
+      if (!chatId || chatId === "global") continue; // ignore old global entries
+      if (!chatWords.has(chatId)) chatWords.set(chatId, new Set());
+      chatWords.get(chatId).add(word);
+    }
+    console.log(`✅ Word filter loaded — ${chatWords.size} chats with filters`);
   } catch (err) {
     console.error("❌ loadWordFilter:", err.message);
   }
 }
 
-export function checkWordFilter(text) {
+export function checkWordFilter(text, chatId) {
   const lower = text.toLowerCase();
-  for (const word of wordFilterCache) {
+  const words = chatWords.get(chatId);
+  if (!words) return null;
+  for (const word of words) {
     if (lower.includes(word)) return word;
   }
   return null;
 }
 
-async function addWord(word) {
+// ─── DB helpers ───────────────────────────────────────────────────────────────
+
+async function addWord(word, chatId) {
   const { error } = await supabase
     .from("word_filter")
-    .upsert({ word: word.toLowerCase() }, { onConflict: "word" });
+    .upsert({ word: word.toLowerCase(), chat_id: chatId }, { onConflict: "word,chat_id" });
   if (error) throw error;
-  wordFilterCache.add(word.toLowerCase());
+  if (!chatWords.has(chatId)) chatWords.set(chatId, new Set());
+  chatWords.get(chatId).add(word.toLowerCase());
 }
 
-async function removeWord(word) {
+async function removeWord(word, chatId) {
   const { error } = await supabase
     .from("word_filter")
     .delete()
-    .eq("word", word.toLowerCase());
+    .eq("word", word.toLowerCase())
+    .eq("chat_id", chatId);
   if (error) throw error;
-  wordFilterCache.delete(word.toLowerCase());
+  chatWords.get(chatId)?.delete(word.toLowerCase());
 }
 
-async function getWordList() {
+async function getWordList(chatId) {
   const { data, error } = await supabase
     .from("word_filter")
     .select("word")
+    .eq("chat_id", chatId)
     .order("word", { ascending: true });
   if (error) throw error;
   return data.map((r) => r.word);
 }
 
-// ─── Filter Action (called from handler.js) ───────────────────────────────────
+// ─── Filter Action ────────────────────────────────────────────────────────────
 
 export async function handleWordFilter(sock, msg, text, sender, from) {
   const filterActive = cachedGetSetting("word_filter_active", "true");
   if (filterActive !== "true") return false;
 
-  const matched = checkWordFilter(text);
+  const matched = checkWordFilter(text, from);
   if (!matched) return false;
 
-  // Try to delete the message
-  try {
-    await sock.sendMessage(from, { delete: msg.key });
-  } catch {
-    // Can't delete — bot may not be group admin, ignore silently
-  }
+  try { await sock.sendMessage(from, { delete: msg.key }); } catch {}
 
-  // Warn the user
   const maxWarns = parseInt(cachedGetSetting("max_warnings", "3"));
   try {
     const count = await warnUser(sender, `Used filtered word: "${matched}"`);
@@ -101,18 +110,17 @@ export const wordFilterCommands = {
   addword: {
     adminOnly: true,
     requiresArgs: true,
-    description: "Add a word to the filter list",
+    description: "Add a word to the filter for this chat/group",
     usage: "!addword <word>",
-    examples: ["!addword badword", "!addword spam"],
-    notes: "Not case-sensitive. Matches partial words too.",
+    examples: ["!addword badword"],
     handler: async (sock, msg, args, from, prefix) => {
       const word = args[0]?.toLowerCase().trim();
       if (!word) return replyMsg(sock, from, msg,
         `📖 *How to use ${prefix}addword*\n\n🔧 *Syntax:*\n${prefix}addword <word>`
       );
       try {
-        await addWord(word);
-        await replyMsg(sock, from, msg, `✅ "*${word}*" added to word filter.`);
+        await addWord(word, from);
+        await replyMsg(sock, from, msg, `✅ "*${word}*" added to the filter for this chat.`);
       } catch (err) {
         await replyMsg(sock, from, msg, `❌ ${err.message}`);
         await alertOwner(sock, `${prefix}addword`, err);
@@ -123,7 +131,7 @@ export const wordFilterCommands = {
   removeword: {
     adminOnly: true,
     requiresArgs: true,
-    description: "Remove a word from the filter list",
+    description: "Remove a word from this chat/group's filter",
     usage: "!removeword <word>",
     examples: ["!removeword badword"],
     handler: async (sock, msg, args, from, prefix) => {
@@ -132,8 +140,8 @@ export const wordFilterCommands = {
         `📖 *How to use ${prefix}removeword*\n\n🔧 *Syntax:*\n${prefix}removeword <word>`
       );
       try {
-        await removeWord(word);
-        await replyMsg(sock, from, msg, `✅ "*${word}*" removed from word filter.`);
+        await removeWord(word, from);
+        await replyMsg(sock, from, msg, `✅ "*${word}*" removed from this chat's filter.`);
       } catch (err) {
         await replyMsg(sock, from, msg, `❌ ${err.message}`);
         await alertOwner(sock, `${prefix}removeword`, err);
@@ -144,15 +152,15 @@ export const wordFilterCommands = {
   wordlist: {
     adminOnly: true,
     requiresArgs: false,
-    description: "List all filtered words",
+    description: "List filtered words for this chat/group",
     handler: async (sock, msg, _args, from, prefix) => {
       try {
-        const words = await getWordList();
+        const words = await getWordList(from);
         if (!words.length) return replyMsg(sock, from, msg,
-          `No filtered words yet.\n\n📌 Add one with: *${prefix}addword <word>*`
+          `No filtered words for this chat.\n\n📌 Add one with: *${prefix}addword <word>*`
         );
         await replyMsg(sock, from, msg,
-          `*🚫 Filtered Words (${words.length})*\n\n${words.map((w) => `• ${w}`).join("\n")}`
+          `*🔤 Filtered Words for this chat (${words.length})*\n\n${words.map((w) => `• ${w}`).join("\n")}`
         );
       } catch (err) {
         await replyMsg(sock, from, msg, "❌ Failed to fetch word list.");

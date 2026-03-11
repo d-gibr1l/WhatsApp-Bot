@@ -1,5 +1,5 @@
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
-import { getSetting, setSetting } from "../db.js";
+import { setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings, isBotSentMessage } from "../cache.js";
 import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_KEY, BOT_NUMBER } from "../config.js";
@@ -7,41 +7,62 @@ import { SUPABASE_URL, SUPABASE_KEY, BOT_NUMBER } from "../config.js";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const MAX_HISTORY = 20;
 
+// ─── Per-user rate limiting (fix #10) ────────────────────────────────────────
+const COOLDOWN_MS  = 10_000; // 10 seconds between requests per user
+const lastUsed     = new Map();
+
+function checkCooldown(userId) {
+  const now  = Date.now();
+  const last = lastUsed.get(userId) ?? 0;
+  if (now - last < COOLDOWN_MS) {
+    const remaining = Math.ceil((COOLDOWN_MS - (now - last)) / 1000);
+    return remaining; // seconds remaining
+  }
+  lastUsed.set(userId, now);
+  // Prevent map growing unbounded
+  if (lastUsed.size > 1000) {
+    const oldest = lastUsed.keys().next().value;
+    lastUsed.delete(oldest);
+  }
+  return 0;
+}
+
 // ─── DB Helpers ───────────────────────────────────────────────────────────────
 
 async function getHistory(chatId) {
-  try {
-    const { data, error } = await supabase
-      .from("ai_conversations")
-      .select("role, content")
-      .eq("chat_id", chatId)
-      .order("created_at", { ascending: true })
-      .limit(MAX_HISTORY);
-    if (error) throw error;
-    return data ?? [];
-  } catch (err) {
-    console.error("❌ getHistory:", err.message);
-    return [];
-  }
+  const { data, error } = await supabase
+    .from("ai_conversations")
+    .select("role, content")
+    .eq("chat_id", chatId)
+    .order("created_at", { ascending: true })
+    .limit(MAX_HISTORY);
+
+  // Fix #4: throw instead of silently returning [] so caller knows context is lost
+  if (error) throw new Error(`Failed to load conversation history: ${error.message}`);
+  return data ?? [];
 }
 
-async function saveMessage(chatId, role, content) {
+async function saveConversationTurn(chatId, userMessage, assistantReply) {
+  // Fix #1 + #2: save both messages in one operation, trim once after
   try {
-    await supabase.from("ai_conversations").insert({ chat_id: chatId, role, content });
+    await supabase.from("ai_conversations").insert([
+      { chat_id: chatId, role: "user",      content: userMessage },
+      { chat_id: chatId, role: "assistant", content: assistantReply },
+    ]);
 
+    // Trim to MAX_HISTORY — one cleanup query per turn instead of two
     const { data } = await supabase
       .from("ai_conversations")
       .select("id")
       .eq("chat_id", chatId)
       .order("created_at", { ascending: false })
-      .range(MAX_HISTORY, 1000);
+      .range(MAX_HISTORY, 10000);
 
     if (data?.length) {
-      const ids = data.map((r) => r.id);
-      await supabase.from("ai_conversations").delete().in("id", ids);
+      await supabase.from("ai_conversations").delete().in("id", data.map((r) => r.id));
     }
   } catch (err) {
-    console.error("❌ saveMessage:", err.message);
+    console.error("❌ saveConversationTurn:", err.message);
   }
 }
 
@@ -51,7 +72,7 @@ async function clearHistory(chatId) {
 
 // ─── Gemini API Call ──────────────────────────────────────────────────────────
 
-async function askGemini(chatId, userMessage) {
+async function askGemini(chatId, userMessage, senderJid) {
   const geminiKey = cachedGetSetting("gemini_api_key", null);
   if (!geminiKey) throw new Error("Gemini API key not set. Use !setgeminikey <key> to set it.");
 
@@ -60,28 +81,31 @@ async function askGemini(chatId, userMessage) {
     "You are a helpful WhatsApp bot assistant. Be concise, friendly, and helpful. Keep responses brief and suitable for WhatsApp."
   );
 
-  const history = await getHistory(chatId);
+  // Fix #4: propagate history error to caller instead of silently losing context
+  let history = [];
+  try {
+    history = await getHistory(chatId);
+  } catch (err) {
+    console.error("❌ Could not load history:", err.message);
+    throw new Error("Could not load conversation history. Please try again.");
+  }
 
-  // Build Gemini contents array from history
   const contents = [
-    // Inject system prompt as first user/model exchange
-    { role: "user",  parts: [{ text: `[System]: ${systemPrompt}` }] },
-    { role: "model", parts: [{ text: "Understood. I will follow those instructions." }] },
-    // Conversation history
     ...history.map((h) => ({
       role: h.role === "assistant" ? "model" : "user",
       parts: [{ text: h.content }],
     })),
-    // Current message
     { role: "user", parts: [{ text: userMessage }] },
   ];
 
+  // Fix #6: use proper systemInstruction field instead of fake conversation turns
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
         contents,
         generationConfig: { maxOutputTokens: 1024 },
       }),
@@ -97,9 +121,8 @@ async function askGemini(chatId, userMessage) {
   const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!reply) throw new Error("No response from Gemini.");
 
-  // Save to history
-  await saveMessage(chatId, "user", userMessage);
-  await saveMessage(chatId, "assistant", reply);
+  // Fix #1: save both turns atomically in one call
+  await saveConversationTurn(chatId, userMessage, reply);
 
   return reply;
 }
@@ -128,11 +151,18 @@ export const aiCommands = {
         `❌ Gemini API key not set. Admin must run *${prefix}setgeminikey <key>* first.`
       );
 
+      // Fix #10: per-user cooldown
+      const senderJid = msg.key.participant ?? msg.key.remoteJid;
+      const wait = checkCooldown(senderJid);
+      if (wait > 0) return replyMsg(sock, from, msg,
+        `⏳ Please wait *${wait}s* before sending another AI message.`
+      );
+
       const userMessage = args.join(" ");
       await reactMsg(sock, from, msg, "🤖");
 
       try {
-        const reply = await askGemini(from, userMessage);
+        const reply = await askGemini(from, userMessage, senderJid);
         await replyMsg(sock, from, msg, reply);
       } catch (err) {
         console.error("❌ AI error:", err.message);
@@ -142,8 +172,9 @@ export const aiCommands = {
     },
   },
 
+  // Fix #5: clearai is now admin-only
   clearai: {
-    adminOnly: false,
+    adminOnly: true,
     requiresArgs: false,
     description: "Clear the AI conversation history for this chat",
     handler: async (sock, msg, _args, from) => {
@@ -232,26 +263,31 @@ export async function handleAiReply(sock, msg, from) {
   const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
   if (!contextInfo) return false;
 
-  // Only trigger if the quoted message was actually sent by the bot.
-  // We check the stanzaId against our tracked sent-message IDs.
-  // This prevents triggering when someone replies to a human's message.
   const quotedId          = contextInfo.stanzaId ?? "";
   const quotedParticipant = contextInfo.participant ?? "";
   const botJid            = `${BOT_NUMBER}@s.whatsapp.net`;
 
+  // Fix #7: primary check is isBotSentMessage — the participant fallbacks
+  // only apply in groups where the bot's JID is unambiguous as a participant.
+  // We no longer fall back to BOT_NUMBER string match alone (too broad).
   const isReplyToBot =
-    isBotSentMessage(quotedId) ||                          // bot sent it (DM or group)
-    quotedParticipant === botJid ||                        // group: quoted sender is bot
-    quotedParticipant.split("@")[0] === BOT_NUMBER;        // group: number matches
+    isBotSentMessage(quotedId) ||       // bot sent it — most reliable check
+    (quotedParticipant === botJid &&     // group: quoted sender is exactly bot JID
+     !contextInfo.fromMe === false);     // and it wasn't sent by a human fromMe
 
   if (!isReplyToBot) return false;
 
   const text = msg.message?.extendedTextMessage?.text?.trim();
   if (!text) return false;
 
+  // Fix #10: apply cooldown to reply-to-bot trigger too
+  const senderJid = msg.key.participant ?? msg.key.remoteJid;
+  const wait = checkCooldown(senderJid);
+  if (wait > 0) return true; // consume the event silently, don't spam cooldown msg
+
   try {
     await reactMsg(sock, from, msg, "🤖");
-    const reply = await askGemini(from, text);
+    const reply = await askGemini(from, text, senderJid);
     await replyMsg(sock, from, msg, reply);
     return true;
   } catch (err) {

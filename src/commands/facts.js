@@ -28,15 +28,7 @@ async function getUselessFact() {
   return `🧠 *Useless Fact*\n\n${data.text}`;
 }
 
-async function getChuckNorris() {
-  const data = await fetchJson("https://api.chucknorris.io/jokes/random");
-  return `💪 *Chuck Norris*\n\n${data.value}`;
-}
 
-async function getKanye() {
-  const data = await fetchJson("https://api.kanye.rest");
-  return `🎤 *Kanye West Said:*\n\n_"${data.quote}"_`;
-}
 
 async function getAdvice() {
   const data = await fetchJson("https://api.adviceslip.com/advice");
@@ -66,16 +58,6 @@ async function getQuote() {
   return `📜 *Quote*\n\n_"${data.content}"_\n\n— *${data.author}*`;
 }
 
-async function getBored() {
-  const data = await fetchJson("https://bored-api.appbrewery.com/random");
-  return (
-    `😴 *Bored? Try this!*\n\n` +
-    `🎯 *Activity:* ${data.activity}\n` +
-    `📂 *Type:* ${data.type}\n` +
-    `👥 *Participants:* ${data.participants}\n` +
-    `💰 *Cost:* ${data.price === 0 ? "Free" : `$${data.price}`}`
-  );
-}
 
 // ─── Command Map ──────────────────────────────────────────────────────────────
 
@@ -84,16 +66,12 @@ const factHandlers = {
   dog:       getDogFact,
   meow:      getMeowFact,
   useless:   getUselessFact,
-  chuck:     getChuckNorris,
-  kanye:     getKanye,
   advice:    getAdvice,
   today:     getOnThisDay,
   quote:     getQuote,
-  bored:     getBored,
 };
 
 const aliases = {
-  chucknorris: "chuck",
   catfact: "cat",
   dogfact: "dog",
   meowfact: "meow",
@@ -114,15 +92,12 @@ export const factsCommands = {
       "!fact",
       "!fact cat",
       "!fact dog",
-      "!fact chuck",
-      "!fact kanye",
       "!fact advice",
       "!fact today",
       "!fact useless",
-      "!fact bored",
       "!fact quote",
     ],
-    notes: "Leave blank for a random category. Categories: cat, dog, meow, useless, chuck, kanye, advice, today, quote, bored",
+    notes: "Leave blank for a random category. Categories: cat, dog, meow, useless, advice, today, quote",
     handler: async (sock, msg, args, from, prefix) => {
       let category = args[0]?.toLowerCase().trim();
 

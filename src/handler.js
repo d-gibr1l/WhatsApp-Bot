@@ -90,7 +90,7 @@ function buildUsageMessage(cmdName, command, prefix) {
 export function startReminderPoller(sock) {
   let running = false;
 
-  setInterval(async () => {
+  const intervalId = setInterval(async () => {
     if (running) return; // prevent overlap if DB is slow
     running = true;
     try {
@@ -113,6 +113,9 @@ export function startReminderPoller(sock) {
       running = false;
     }
   }, 30_000);
+
+  // Return cleanup function so caller can stop this poller before starting a new one
+  return () => clearInterval(intervalId);
 }
 
 // ─── Message Handler ──────────────────────────────────────────────────────────
@@ -141,6 +144,10 @@ export async function handleMessage(sock, msg) {
   const isGrp    = from.endsWith("@g.us");
   const prefix   = cachedGetSetting("bot_prefix", "!");
   const userIsAdmin = msg.key.fromMe ? true : cachedIsAdmin(sender);
+  // Temporary debug — remove after confirming admin check works
+  if (text?.startsWith(cachedGetSetting("bot_prefix", "!"))) {
+    console.log(`🔑 Admin check — sender: "${sender}", isAdmin: ${userIsAdmin}, fromMe: ${msg.key.fromMe}`);
+  }
 
   if (msg.key.fromMe && !text) return;
 
