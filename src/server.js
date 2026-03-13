@@ -487,47 +487,57 @@ app.get("/api/events", (req, res) => {
 });
 
 // Push stats to all SSE clients every 5 seconds
+// Push stats to all SSE clients every second (DB queried every 5s, cached in between)
+let cachedStatsPayload = null;
+let lastStatsFetch = 0;
+
 async function broadcastStats() {
   if (sseClients.size === 0) return;
   try {
-    const [logs, admins, banned, autoReplies, settings] = await Promise.all([
-      supabase.from("message_logs").select("number, is_group, sent_at"),
-      supabase.from("admins").select("number"),
-      supabase.from("banned_numbers").select("number"),
-      supabase.from("auto_replies").select("keyword"),
-      supabase.from("settings").select("key, value"),
-    ]);
-    const data  = logs.data ?? [];
-    const total = data.length;
-    const today = new Date().toISOString().split("T")[0];
-    const todayCount = data.filter(l => l.sent_at?.startsWith(today)).length;
-    const groups = data.filter(l => l.is_group).length;
-    const senderMap = {};
-    for (const l of data) {
-      if (!senderMap[l.number]) senderMap[l.number] = { count: 0, last: l.sent_at };
-      senderMap[l.number].count++;
-      if (l.sent_at > senderMap[l.number].last) senderMap[l.number].last = l.sent_at;
+    const now = Date.now();
+    if (!cachedStatsPayload || now - lastStatsFetch >= 5000) {
+      const [logs, admins, banned, autoReplies, settings] = await Promise.all([
+        supabase.from("message_logs").select("number, is_group, sent_at"),
+        supabase.from("admins").select("number"),
+        supabase.from("banned_numbers").select("number"),
+        supabase.from("auto_replies").select("keyword"),
+        supabase.from("settings").select("key, value"),
+      ]);
+      const data  = logs.data ?? [];
+      const total = data.length;
+      const today = new Date().toISOString().split("T")[0];
+      const todayCount = data.filter(l => l.sent_at?.startsWith(today)).length;
+      const groups = data.filter(l => l.is_group).length;
+      const senderMap = {};
+      for (const l of data) {
+        if (!senderMap[l.number]) senderMap[l.number] = { count: 0, last: l.sent_at };
+        senderMap[l.number].count++;
+        if (l.sent_at > senderMap[l.number].last) senderMap[l.number].last = l.sent_at;
+      }
+      const topSenders = Object.entries(senderMap)
+        .sort((a, b) => b[1].count - a[1].count).slice(0, 5)
+        .map(([number, v]) => ({ number, count: v.count, last: v.last }));
+      cachedStatsPayload = {
+        total, today: todayCount, groups, dms: total - groups,
+        adminCount: admins.data?.length ?? 0,
+        bannedCount: banned.data?.length ?? 0,
+        autoReplies: autoReplies.data?.length ?? 0,
+        topSenders,
+        settings: settings.data ?? [],
+      };
+      lastStatsFetch = now;
     }
-    const topSenders = Object.entries(senderMap)
-      .sort((a, b) => b[1].count - a[1].count).slice(0, 5)
-      .map(([number, v]) => ({ number, count: v.count, last: v.last }));
+
+    // Always recalculate uptime (cheap, no DB needed)
     const up = Math.floor(process.uptime());
     const h = String(Math.floor(up / 3600)).padStart(2, "0");
     const m = String(Math.floor((up % 3600) / 60)).padStart(2, "0");
     const s = String(up % 60).padStart(2, "0");
-    pushSSE("stats", {
-      total, today: todayCount, groups, dms: total - groups,
-      adminCount: admins.data?.length ?? 0,
-      bannedCount: banned.data?.length ?? 0,
-      autoReplies: autoReplies.data?.length ?? 0,
-      uptime: `${h}:${m}:${s}`,
-      topSenders,
-      settings: settings.data ?? [],
-    });
+    pushSSE("stats", { ...cachedStatsPayload, uptime: `${h}:${m}:${s}` });
   } catch {}
 }
 
-setInterval(broadcastStats, 5000);
+setInterval(broadcastStats, 1000);
 
 // ─── QR Image ─────────────────────────────────────────────────────────────────
 
