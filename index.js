@@ -1,13 +1,12 @@
 import makeWASocket, {
   DisconnectReason,
-  useMultiFileAuthState,
   fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import pino from "pino";
 
-import { SESSION_DIR, MAX_RECONNECTS, BASE_DELAY_MS, botConfig } from "./src/config.js";
-import { hydrateSessionFromSupabase, saveSessionToSupabase, clearSessionFromSupabase } from "./src/session.js";
+import { MAX_RECONNECTS, BASE_DELAY_MS, botConfig } from "./src/config.js";
+import { loadSession, saveSession, clearSession, useMemoryAuthState } from "./src/session.js";
 import { handleMessage, startReminderPoller, extractText } from "./src/handler.js";
 import { loadWordFilter } from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
@@ -45,18 +44,18 @@ function makeLimit(concurrency) {
 }
 const limit = makeLimit(5); // max 5 chats processed simultaneously
 
-// ─── Creds debounce (fix #3) ──────────────────────────────────────────────────
-
+// ─── Creds debounce ───────────────────────────────────────────────────────────
+// saveCreds() writes to RAM instantly. Supabase write is debounced 2s.
 function makeCredsDebounce(saveCreds) {
   let timer = null;
-  return async () => {
-    await saveCreds(); // always save locally immediately
+  return () => {
+    saveCreds(); // RAM write — instant, sync
     clearTimeout(timer);
     timer = setTimeout(async () => {
       try {
-        await saveSessionToSupabase(); // reads all key files from disk
+        await saveSession();
       } catch (err) {
-        console.error("❌ Supabase creds save failed:", err.message);
+        console.error("❌ Supabase session save failed:", err.message);
       }
     }, 2000);
   };
@@ -99,12 +98,10 @@ process.on("SIGTERM", async () => {
 // ─── Create Socket ────────────────────────────────────────────────────────────
 
 async function createSocket() {
-  await hydrateSessionFromSupabase();
-
   const { version, isLatest } = await fetchLatestBaileysVersion();
   console.log(`📦 Baileys ${version.join(".")} ${isLatest ? "(latest)" : "(outdated)"}`);
 
-  const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
+  const { state, saveCreds } = useMemoryAuthState(); // pure RAM — no disk
 
   const sock = makeWASocket({
     version,
@@ -128,6 +125,9 @@ async function createSocket() {
 
 async function runBot() {
   let attempt = 1;
+
+  // Load session from Supabase into RAM once at startup
+  await loadSession();
 
   while (attempt <= MAX_RECONNECTS) {
     console.log(`🔄 Starting bot (attempt ${attempt})...`);
@@ -230,7 +230,7 @@ async function runBot() {
 
             if (statusCode === DisconnectReason.loggedOut) {
               console.error("🚪 Logged out. Clearing session...");
-              await clearSessionFromSupabase();
+              await clearSession();
               botReady = false;  // allow full re-init on next QR scan
               if (stopPoller) { stopPoller(); stopPoller = null; }
               process.exit(0);

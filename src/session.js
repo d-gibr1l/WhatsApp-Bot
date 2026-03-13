@@ -1,69 +1,76 @@
 import { createClient } from "@supabase/supabase-js";
-import { writeFile, mkdir, readdir, readFile } from "fs/promises";
-import { existsSync } from "fs";
-import path from "path";
-import { SUPABASE_URL, SUPABASE_KEY, botConfig, SESSION_DIR } from "./config.js";
+import { initAuthCreds, BufferJSON } from "@whiskeysockets/baileys";
+import { gzipSync, gunzipSync } from "zlib";
+import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "./config.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-export async function loadSessionFromSupabase() {
+// ─── In-memory session store ───────────────────────────────────────────────────
+// Everything lives here — no disk reads/writes at all
+let SESSION = {
+  creds: null,
+  keys:  {}
+};
+
+// ─── Compression helpers ──────────────────────────────────────────────────────
+function compress(obj) {
+  return gzipSync(JSON.stringify(obj, BufferJSON.replacer)).toString("base64");
+}
+
+function decompress(str) {
+  return JSON.parse(gunzipSync(Buffer.from(str, "base64")).toString(), BufferJSON.reviver);
+}
+
+// ─── Load from Supabase into RAM ──────────────────────────────────────────────
+export async function loadSession() {
   try {
-    // Try with known number first, fall back to any saved session
+    // Try known number first
     if (botConfig.BOT_NUMBER) {
       const { data } = await supabase
-        .from("sessions").select("auth")
-        .eq("number", botConfig.BOT_NUMBER).single();
-      if (data?.auth) return data.auth;
+        .from("sessions")
+        .select("session, number")
+        .eq("number", botConfig.BOT_NUMBER)
+        .single();
+      if (data?.session) {
+        SESSION = decompress(data.session);
+        console.log(`📱 Session loaded for: ${botConfig.BOT_NUMBER}`);
+        return true;
+      }
     }
 
-    // No number yet (first scan) — load the most recent session
+    // Fallback — grab any saved session
     const { data } = await supabase
-      .from("sessions").select("auth, number")
-      .limit(1).single();
+      .from("sessions")
+      .select("session, number")
+      .limit(1)
+      .single();
 
-    if (data?.auth) {
+    if (data?.session) {
+      SESSION = decompress(data.session);
       if (data.number && !botConfig.BOT_NUMBER) {
         botConfig.BOT_NUMBER = data.number;
         console.log(`📱 Bot number restored from session: ${data.number}`);
       }
-      return data.auth;
+      return true;
     }
-    return null;
+
+    console.log("🆕 No saved session — fresh start, waiting for QR scan");
+    return false;
   } catch (err) {
-    console.error("❌ Failed to load session:", err.message);
-    return null;
+    console.log("🆕 No saved session — fresh start");
+    return false;
   }
 }
 
-// Read all session files from disk and save them to Supabase
-export async function saveSessionToSupabase() {
+// ─── Save RAM → Supabase (debounced externally) ───────────────────────────────
+export async function saveSession() {
   try {
-    if (!existsSync(SESSION_DIR)) return;
     if (!botConfig.BOT_NUMBER) return;
-
-    const files = await readdir(SESSION_DIR);
-    const keys = {};
-
-    let creds = null;
-
-    for (const file of files) {
-      if (!file.endsWith(".json")) continue;
-      const content = JSON.parse(await readFile(path.join(SESSION_DIR, file), "utf8"));
-      if (file === "creds.json") {
-        creds = content;
-      } else {
-        // Key files are named like "app-state-sync-key-XXXXX.json", "pre-key-X.json" etc
-        const keyName = file.replace(".json", "");
-        keys[keyName] = content;
-      }
-    }
-
-    if (!creds) return;
-
+    const compressed = compress(SESSION);
     const { error } = await supabase
       .from("sessions")
       .upsert(
-        { number: botConfig.BOT_NUMBER, auth: { creds, keys } },
+        { number: botConfig.BOT_NUMBER, session: compressed },
         { onConflict: "number" }
       );
     if (error) console.error("❌ Failed to save session:", error.message);
@@ -72,48 +79,57 @@ export async function saveSessionToSupabase() {
   }
 }
 
-export async function clearSessionFromSupabase() {
+// ─── Clear session ────────────────────────────────────────────────────────────
+export async function clearSession() {
+  SESSION = { creds: null, keys: {} };
   try {
-    await supabase.from("sessions").delete().eq("number", botConfig.BOT_NUMBER);
-    console.log("🗑️  Supabase session cleared");
+    if (botConfig.BOT_NUMBER) {
+      await supabase.from("sessions").delete().eq("number", botConfig.BOT_NUMBER);
+    }
+    console.log("🗑️  Session cleared");
   } catch (err) {
     console.error("❌ Failed to clear session:", err.message);
   }
 }
 
-export async function hydrateSessionFromSupabase() {
-  const saved = await loadSessionFromSupabase();
-  if (!saved) return false;
-
-  try {
-    if (!existsSync(SESSION_DIR)) {
-      await mkdir(SESSION_DIR, { recursive: true });
-    }
-
-    const { creds, keys } = saved;
-
-    if (creds) {
-      await writeFile(
-        path.join(SESSION_DIR, "creds.json"),
-        JSON.stringify(creds, null, 2)
-      );
-    }
-
-    if (keys && Object.keys(keys).length > 0) {
-      for (const [name, keyData] of Object.entries(keys)) {
-        await writeFile(
-          path.join(SESSION_DIR, `${name}.json`),
-          JSON.stringify(keyData, null, 2)
-        );
-      }
-      console.log(`✅ Session hydrated from Supabase (${Object.keys(keys).length} key files)`);
-    } else {
-      console.log("✅ Session hydrated from Supabase (creds only — keys will sync on connect)");
-    }
-
-    return true;
-  } catch (err) {
-    console.error("❌ Failed to hydrate session files:", err.message);
-    return false;
+// ─── Custom in-memory auth state (replaces useMultiFileAuthState) ─────────────
+export function useMemoryAuthState() {
+  // Fresh creds if none saved
+  if (!SESSION.creds) {
+    SESSION.creds = initAuthCreds();
   }
+
+  const state = {
+    creds: SESSION.creds,
+
+    keys: {
+      get(type, ids) {
+        const data = {};
+        for (const id of ids) {
+          const val = SESSION.keys?.[type]?.[id];
+          if (val !== undefined) data[id] = val;
+        }
+        return data;
+      },
+
+      set(data) {
+        for (const type in data) {
+          if (!SESSION.keys[type]) SESSION.keys[type] = {};
+          for (const id in data[type]) {
+            if (data[type][id] === null) {
+              delete SESSION.keys[type][id];
+            } else {
+              SESSION.keys[type][id] = data[type][id];
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const saveCreds = () => {
+    SESSION.creds = state.creds;
+  };
+
+  return { state, saveCreds };
 }
