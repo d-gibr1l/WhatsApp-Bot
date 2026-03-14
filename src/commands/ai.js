@@ -7,27 +7,20 @@ import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "../config.js";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const MAX_HISTORY = 20;
 
-// ─── Per-user rate limiting (fix #10) ────────────────────────────────────────
-const COOLDOWN_MS  = 10_000; // 10 seconds between requests per user
-const lastUsed     = new Map();
+// ─── Per-user cooldown ────────────────────────────────────────────────────────
+const COOLDOWN_MS = 10_000;
+const lastUsed    = new Map();
 
 function checkCooldown(userId) {
   const now  = Date.now();
   const last = lastUsed.get(userId) ?? 0;
-  if (now - last < COOLDOWN_MS) {
-    const remaining = Math.ceil((COOLDOWN_MS - (now - last)) / 1000);
-    return remaining; // seconds remaining
-  }
+  if (now - last < COOLDOWN_MS) return Math.ceil((COOLDOWN_MS - (now - last)) / 1000);
   lastUsed.set(userId, now);
-  // Prevent map growing unbounded
-  if (lastUsed.size > 1000) {
-    const oldest = lastUsed.keys().next().value;
-    lastUsed.delete(oldest);
-  }
+  if (lastUsed.size > 1000) lastUsed.delete(lastUsed.keys().next().value);
   return 0;
 }
 
-// ─── DB Helpers ───────────────────────────────────────────────────────────────
+// ─── Conversation history (Supabase) ─────────────────────────────────────────
 
 async function getHistory(chatId) {
   const { data, error } = await supabase
@@ -36,28 +29,22 @@ async function getHistory(chatId) {
     .eq("chat_id", chatId)
     .order("created_at", { ascending: true })
     .limit(MAX_HISTORY);
-
-  // Fix #4: throw instead of silently returning [] so caller knows context is lost
   if (error) throw new Error(`Failed to load conversation history: ${error.message}`);
   return data ?? [];
 }
 
 async function saveConversationTurn(chatId, userMessage, assistantReply) {
-  // Fix #1 + #2: save both messages in one operation, trim once after
   try {
     await supabase.from("ai_conversations").insert([
       { chat_id: chatId, role: "user",      content: userMessage },
       { chat_id: chatId, role: "assistant", content: assistantReply },
     ]);
-
-    // Trim to MAX_HISTORY — one cleanup query per turn instead of two
     const { data } = await supabase
       .from("ai_conversations")
       .select("id")
       .eq("chat_id", chatId)
       .order("created_at", { ascending: false })
       .range(MAX_HISTORY, 10000);
-
     if (data?.length) {
       await supabase.from("ai_conversations").delete().in("id", data.map((r) => r.id));
     }
@@ -70,18 +57,17 @@ async function clearHistory(chatId) {
   await supabase.from("ai_conversations").delete().eq("chat_id", chatId);
 }
 
-// ─── Gemini API Call ──────────────────────────────────────────────────────────
+// ─── Groq API Call ────────────────────────────────────────────────────────────
 
-async function askGemini(chatId, userMessage, senderJid) {
-  const geminiKey = cachedGetSetting("gemini_api_key", null);
-  if (!geminiKey) throw new Error("Gemini API key not set. Use !setgeminikey <key> to set it.");
+async function askGroq(chatId, userMessage) {
+  const groqKey = cachedGetSetting("groq_api_key", null);
+  if (!groqKey) throw new Error("Groq API key not set. Use !setgroqkey <key> to set it.");
 
   const systemPrompt = cachedGetSetting(
     "ai_system_prompt",
     "You are a helpful WhatsApp bot assistant. Be concise, friendly, and helpful. Keep responses brief and suitable for WhatsApp."
   );
 
-  // Fix #4: propagate history error to caller instead of silently losing context
   let history = [];
   try {
     history = await getHistory(chatId);
@@ -90,40 +76,36 @@ async function askGemini(chatId, userMessage, senderJid) {
     throw new Error("Could not load conversation history. Please try again.");
   }
 
-  const contents = [
-    ...history.map((h) => ({
-      role: h.role === "assistant" ? "model" : "user",
-      parts: [{ text: h.content }],
-    })),
-    { role: "user", parts: [{ text: userMessage }] },
+  const messages = [
+    { role: "system", content: systemPrompt },
+    ...history.map((h) => ({ role: h.role, content: h.content })),
+    { role: "user", content: userMessage },
   ];
 
-  // Fix #6: use proper systemInstruction field instead of fake conversation turns
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents,
-        generationConfig: { maxOutputTokens: 1024 },
-      }),
-    }
-  );
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${groqKey}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.1-8b-instant",
+      messages,
+      max_tokens: 1024,
+      temperature: 0.7,
+    }),
+  });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message ?? `Gemini API error: ${res.status}`);
+    throw new Error(err?.error?.message ?? `Groq API error: ${res.status}`);
   }
 
   const data = await res.json();
-  const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!reply) throw new Error("No response from Gemini.");
+  const reply = data.choices?.[0]?.message?.content?.trim();
+  if (!reply) throw new Error("No response from Groq.");
 
-  // Fix #1: save both turns atomically in one call
   await saveConversationTurn(chatId, userMessage, reply);
-
   return reply;
 }
 
@@ -141,17 +123,16 @@ export const aiCommands = {
       "!ai Write me a short poem about rain",
       "!ai Explain quantum physics simply",
     ],
-    notes: "The AI remembers the last 20 messages in each chat. Powered by Google Gemini.",
+    notes: "The AI remembers the last 20 messages in each chat. Powered by Groq (Llama 3.1).",
     handler: async (sock, msg, args, from, prefix) => {
       const aiActive = cachedGetSetting("ai_active", "true");
       if (aiActive !== "true") return replyMsg(sock, from, msg, "🤖 AI chat is currently disabled.");
 
-      const geminiKey = cachedGetSetting("gemini_api_key", null);
-      if (!geminiKey) return replyMsg(sock, from, msg,
-        `❌ Gemini API key not set. Admin must run *${prefix}setgeminikey <key>* first.`
+      const groqKey = cachedGetSetting("groq_api_key", null);
+      if (!groqKey) return replyMsg(sock, from, msg,
+        `❌ Groq API key not set. Admin must run *${prefix}setgroqkey <key>* first.\n\n📌 Get a free key at: console.groq.com`
       );
 
-      // Fix #10: per-user cooldown
       const senderJid = msg.key.participant ?? msg.key.remoteJid;
       const wait = checkCooldown(senderJid);
       if (wait > 0) return replyMsg(sock, from, msg,
@@ -162,7 +143,7 @@ export const aiCommands = {
       await reactMsg(sock, from, msg, "🤖");
 
       try {
-        const reply = await askGemini(from, userMessage, senderJid);
+        const reply = await askGroq(from, userMessage);
         await replyMsg(sock, from, msg, reply);
       } catch (err) {
         console.error("❌ AI error:", err.message);
@@ -172,7 +153,6 @@ export const aiCommands = {
     },
   },
 
-  // Fix #5: clearai is now admin-only
   clearai: {
     adminOnly: true,
     requiresArgs: false,
@@ -209,25 +189,25 @@ export const aiCommands = {
     },
   },
 
-  setgeminikey: {
+  setgroqkey: {
     adminOnly: true,
     requiresArgs: true,
-    description: "Set the Google Gemini API key for AI chat and search",
-    usage: "!setgeminikey <key>",
-    examples: ["!setgeminikey AIzaSy..."],
-    notes: "Get your free key from aistudio.google.com",
+    description: "Set the Groq API key for AI chat",
+    usage: "!setgroqkey <key>",
+    examples: ["!setgroqkey gsk_..."],
+    notes: "Get your free key from console.groq.com",
     handler: async (sock, msg, args, from, prefix) => {
       const key = args[0]?.trim();
       if (!key) return replyMsg(sock, from, msg,
-        `📖 *How to use ${prefix}setgeminikey*\n\n🔧 *Syntax:*\n${prefix}setgeminikey <key>\n\n📌 Get your free key from aistudio.google.com`
+        `📖 *How to use ${prefix}setgroqkey*\n\n🔧 *Syntax:*\n${prefix}setgroqkey <key>\n\n📌 Get your free key from console.groq.com`
       );
       try {
-        await setSetting("gemini_api_key", key);
+        await setSetting("groq_api_key", key);
         await refreshSettings();
-        await replyMsg(sock, from, msg, "✅ Gemini API key saved. Try *!ai hello* to test.");
+        await replyMsg(sock, from, msg, "✅ Groq API key saved. Try *!ai hello* to test.");
       } catch (err) {
         await replyMsg(sock, from, msg, `❌ ${err.message}`);
-        await alertOwner(sock, `${prefix}setgeminikey`, err);
+        await alertOwner(sock, `${prefix}setgroqkey`, err);
       }
     },
   },
@@ -258,7 +238,7 @@ export const aiCommands = {
 export async function handleAiReply(sock, msg, from) {
   const aiActive = cachedGetSetting("ai_active", "true");
   if (aiActive !== "true") return false;
-  if (!cachedGetSetting("gemini_api_key", null)) return false;
+  if (!cachedGetSetting("groq_api_key", null)) return false;
 
   const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
   if (!contextInfo) return false;
@@ -267,27 +247,22 @@ export async function handleAiReply(sock, msg, from) {
   const quotedParticipant = contextInfo.participant ?? "";
   const botJid            = `${botConfig.BOT_NUMBER}@s.whatsapp.net`;
 
-  // Fix #7: primary check is isBotSentMessage — the participant fallbacks
-  // only apply in groups where the bot's JID is unambiguous as a participant.
-  // We no longer fall back to botConfig.BOT_NUMBER string match alone (too broad).
   const isReplyToBot =
-    isBotSentMessage(quotedId) ||       // bot sent it — most reliable check
-    (quotedParticipant === botJid &&     // group: quoted sender is exactly bot JID
-     !contextInfo.fromMe === false);     // and it wasn't sent by a human fromMe
+    isBotSentMessage(quotedId) ||
+    (quotedParticipant === botJid && !contextInfo.fromMe === false);
 
   if (!isReplyToBot) return false;
 
   const text = msg.message?.extendedTextMessage?.text?.trim();
   if (!text) return false;
 
-  // Fix #10: apply cooldown to reply-to-bot trigger too
   const senderJid = msg.key.participant ?? msg.key.remoteJid;
   const wait = checkCooldown(senderJid);
-  if (wait > 0) return true; // consume the event silently, don't spam cooldown msg
+  if (wait > 0) return true;
 
   try {
     await reactMsg(sock, from, msg, "🤖");
-    const reply = await askGemini(from, text, senderJid);
+    const reply = await askGroq(from, text);
     await replyMsg(sock, from, msg, reply);
     return true;
   } catch (err) {

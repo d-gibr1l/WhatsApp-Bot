@@ -27,6 +27,7 @@ import { schedulerCommands }   from "./scheduler.js";
 import { aliasCommands }       from "./aliases.js";
 import { searchCommands }      from "./search.js";
 import { factsCommands }       from "./facts.js";
+import { jokeCommands }        from "./joke.js";
 
 export const commands = {
   ...generalCommands,
@@ -58,6 +59,7 @@ export const commands = {
   ...aliasCommands,
   ...searchCommands,
   ...factsCommands,
+  ...jokeCommands,
 };
 
 export { replyMsg, isAdmin } from "./helpers.js";

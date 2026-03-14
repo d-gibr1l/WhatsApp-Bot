@@ -1,36 +1,46 @@
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
 import { cachedGetSetting } from "../cache.js";
+import { setSetting } from "../db.js";
+import { refreshSettings } from "../cache.js";
 
-async function geminiSearch(query, apiKey) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: query }] }],
-        tools: [{ googleSearch: {} }],
-        generationConfig: { maxOutputTokens: 1024 },
-      }),
-    }
-  );
+async function tavilySearch(query, apiKey) {
+  const res = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: apiKey,
+      query,
+      search_depth: "basic",
+      include_answer: true,
+      include_images: true,
+      max_results: 5,
+    }),
+  });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message ?? `Gemini API error: ${res.status}`);
+    throw new Error(err?.message ?? err?.detail ?? `Tavily API error: ${res.status}`);
   }
 
   const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
-  if (!text) throw new Error("No response from Gemini.");
+  const answer  = data.answer ?? null;
+  const sources = (data.results ?? []).slice(0, 3)
+    .map((r) => ({ title: r.title, url: r.url, snippet: r.content?.slice(0, 120) }));
+  const imageUrl = data.images?.[0] ?? null;
 
-  // Extract grounding sources if available
-  const sources = data.candidates?.[0]?.groundingMetadata?.groundingChunks
-    ?.map((c) => c.web?.uri)
-    .filter(Boolean)
-    .slice(0, 3) ?? [];
+  return { answer, sources, imageUrl };
+}
 
-  return { text, sources };
+async function fetchImageBuffer(url) {
+  const res = await fetch(url, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`Image fetch failed: ${res.status}`);
+  const contentType = res.headers.get("content-type") ?? "image/jpeg";
+  if (!contentType.startsWith("image/")) throw new Error("Not an image");
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return { buffer, contentType };
 }
 
 export const searchCommands = {
@@ -38,38 +48,62 @@ export const searchCommands = {
   search: {
     adminOnly: false,
     requiresArgs: true,
-    description: "Search the internet using Google Gemini AI",
+    description: "Search the internet using Tavily AI",
     usage: "!search <query>",
     examples: [
       "!search latest news in Ghana today",
       "!search what is the price of Bitcoin",
       "!search who won the Champions League 2025",
     ],
-    notes: "Powered by Google Gemini with real-time Google Search.",
+    notes: "Powered by Tavily real-time web search.",
     handler: async (sock, msg, args, from, prefix) => {
       const query = args.join(" ").trim();
       if (!query) return replyMsg(sock, from, msg,
         `📖 *How to use ${prefix}search*\n\n🔧 *Syntax:*\n${prefix}search <query>\n\n💡 *Examples:*\n• ${prefix}search latest news in Ghana\n• ${prefix}search Bitcoin price today`
       );
 
-      const apiKey = cachedGetSetting("gemini_api_key", null);
+      const apiKey = cachedGetSetting("tavily_api_key", null);
       if (!apiKey) return replyMsg(sock, from, msg,
-        `❌ Gemini API key not set.\n\n📌 Admin can set it with: *${prefix}setgeminikey <key>*`
+        `❌ Tavily API key not set.\n\n📌 Admin can set it with: *${prefix}settavilykey <key>*\n\n🌐 Get a free key at: tavily.com`
       );
 
       await reactMsg(sock, from, msg, "🔍");
 
       try {
-        const { text, sources } = await geminiSearch(query, apiKey);
+        const { answer, sources, imageUrl } = await tavilySearch(query, apiKey);
 
-        let reply = `🔍 *Search: ${query}*\n\n${text}`;
+        let caption = `🔍 *${query}*\n\n`;
+
+        if (answer) {
+          caption += answer;
+        } else if (sources.length > 0) {
+          caption += sources.map(s => `*${s.title}*\n${s.snippet}...`).join("\n\n");
+        } else {
+          caption += "No results found.";
+        }
 
         if (sources.length > 0) {
-          reply += `\n\n🌐 *Sources:*\n${sources.map((s, i) => `${i + 1}. ${s}`).join("\n")}`;
+          caption += `\n\n🌐 *Sources:*\n${sources.map((s, i) => `${i + 1}. ${s.url}`).join("\n")}`;
+        }
+
+        // Try to send with image, fall back to text-only if image fails
+        if (imageUrl) {
+          try {
+            const { buffer, contentType } = await fetchImageBuffer(imageUrl);
+            await sock.sendMessage(from, {
+              image: buffer,
+              caption,
+              mimetype: contentType,
+            }, { quoted: msg });
+            await reactMsg(sock, from, msg, "✅");
+            return;
+          } catch {
+            // Image failed — fall through to plain text
+          }
         }
 
         await reactMsg(sock, from, msg, "✅");
-        await replyMsg(sock, from, msg, reply);
+        await replyMsg(sock, from, msg, caption);
 
       } catch (err) {
         console.error("❌ Search error:", err.message);
@@ -78,7 +112,28 @@ export const searchCommands = {
         await alertOwner(sock, `${prefix}search`, err);
       }
     },
-  }
+  },
+
+  settavilykey: {
+    adminOnly: true,
+    requiresArgs: false,
+    description: "Set the Tavily API key for web search",
+    usage: "!settavilykey <key>",
+    examples: ["!settavilykey tvly-xxxxxxxxxxxx"],
+    handler: async (sock, msg, args, from, prefix) => {
+      const key = args[0]?.trim();
+      if (!key) return replyMsg(sock, from, msg,
+        `📖 *How to use ${prefix}settavilykey*\n\n🔧 *Syntax:*\n${prefix}settavilykey <key>\n\n📌 Get your free key at: tavily.com`
+      );
+      try {
+        await setSetting("tavily_api_key", key);
+        await refreshSettings();
+        await replyMsg(sock, from, msg, "✅ Tavily API key saved. *!search* is now active.");
+      } catch (err) {
+        await replyMsg(sock, from, msg, `❌ Failed to save key: ${err.message}`);
+        await alertOwner(sock, `${prefix}settavilykey`, err);
+      }
+    },
+  },
 
 };
-
