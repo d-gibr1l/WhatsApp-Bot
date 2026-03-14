@@ -5,8 +5,8 @@ import makeWASocket, {
 import { Boom } from "@hapi/boom";
 import pino from "pino";
 
-import { MAX_RECONNECTS, BASE_DELAY_MS, botConfig } from "./src/config.js";
-import { loadSession, saveSession, clearSession, useMemoryAuthState } from "./src/session.js";
+import { SESSION_DIR, MAX_RECONNECTS, BASE_DELAY_MS, botConfig } from "./src/config.js";
+import { loadSession, saveSession, clearSession, getAuthState } from "./src/session.js";
 import { handleMessage, startReminderPoller, extractText } from "./src/handler.js";
 import { loadWordFilter } from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
@@ -44,21 +44,20 @@ function makeLimit(concurrency) {
 }
 const limit = makeLimit(5); // max 5 chats processed simultaneously
 
-// ─── Creds debounce ───────────────────────────────────────────────────────────
-// saveCreds() writes to RAM instantly. Supabase write is debounced 2s.
-function makeCredsDebounce(saveCreds) {
-  let timer = null;
-  return () => {
-    saveCreds(); // RAM write — instant, sync
-    clearTimeout(timer);
-    timer = setTimeout(async () => {
-      try {
-        await saveSession();
-      } catch (err) {
-        console.error("❌ Supabase session save failed:", err.message);
-      }
-    }, 2000);
-  };
+// ─── Periodic Supabase backup (every 60s) ────────────────────────────────────
+// creds.update → instant disk write only
+// Supabase backup runs on a timer — never on message arrival
+let sessionBackupInterval = null;
+
+function startSessionBackup() {
+  if (sessionBackupInterval) clearInterval(sessionBackupInterval);
+  sessionBackupInterval = setInterval(async () => {
+    try {
+      await saveSession();
+    } catch (err) {
+      console.error("❌ Session backup failed:", err.message);
+    }
+  }, 60_000);
 }
 
 // ─── SIGINT shutdown (fix #7) ─────────────────────────────────────────────────
@@ -83,6 +82,7 @@ process.on("SIGINT", async () => {
     try { currentSock.ev.removeAllListeners(); } catch {}
     try { currentSock.ws?.close(); } catch {}
   }
+  try { await saveSession(); console.log("💾 Session saved on exit."); } catch {}
   process.exit(0);
 });
 
@@ -92,6 +92,7 @@ process.on("SIGTERM", async () => {
     try { currentSock.ev.removeAllListeners(); } catch {}
     try { currentSock.ws?.close(); } catch {}
   }
+  try { await saveSession(); console.log("💾 Session saved on exit."); } catch {}
   process.exit(0);
 });
 
@@ -101,7 +102,7 @@ async function createSocket() {
   const { version, isLatest } = await fetchLatestBaileysVersion();
   console.log(`📦 Baileys ${version.join(".")} ${isLatest ? "(latest)" : "(outdated)"}`);
 
-  const { state, saveCreds } = useMemoryAuthState(); // pure RAM — no disk
+  const { state, saveCreds } = await getAuthState(); // uses useMultiFileAuthState
 
   const sock = makeWASocket({
     version,
@@ -112,7 +113,8 @@ async function createSocket() {
     syncFullHistory: false,
   });
 
-  sock.ev.on("creds.update", makeCredsDebounce(saveCreds));
+  // creds.update → instant disk write, no Supabase involvement
+  sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("messaging-history.set", ({ messages }) => {
     console.log(`📥 History sync (${messages.length} msgs) — ignored.`);
@@ -194,18 +196,20 @@ async function runBot() {
               await loadWordFilter();
               await loadAllowedLinks();
               await loadAliases();
-              if (stopPoller) stopPoller(); // kill any zombie poller
+              if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
-              startTime  = Date.now(); // reset startTime on fresh connect
+              startTime  = Date.now();
+              startSessionBackup(); // start 60s Supabase backup
               console.log("✅ Bot connected and ready!");
             } else {
               await loadCache();
               await loadWordFilter();
               await loadAllowedLinks();
               await loadAliases();
-              if (stopPoller) stopPoller(); // kill old poller
+              if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
-              startTime  = Date.now(); // reset so mid-downtime messages aren't ignored
+              startTime  = Date.now();
+              startSessionBackup(); // restart 60s backup on reconnect
               console.log("🔄 Bot reconnected — data refreshed.");
             }
           }
