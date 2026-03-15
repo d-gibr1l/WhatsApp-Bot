@@ -251,3 +251,22 @@ export function rememberBotSent(id) {
 export function isBotSentMessage(id) {
   return id ? botSentIds.has(id) : false;
 }
+
+// ─── AI Response Tracker ──────────────────────────────────────────────────────
+// Only tracks IDs of actual AI responses — prevents !ping, !menu etc from triggering AI
+
+const aiSentIds = new Set();
+const AI_SENT_MAX = 200;
+
+export function rememberAiSent(id) {
+  if (!id) return;
+  aiSentIds.add(id);
+  if (aiSentIds.size > AI_SENT_MAX) {
+    const first = aiSentIds.values().next().value;
+    aiSentIds.delete(first);
+  }
+}
+
+export function isAiSentMessage(id) {
+  return id ? aiSentIds.has(id) : false;
+}

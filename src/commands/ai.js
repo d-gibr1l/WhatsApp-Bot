@@ -1,6 +1,6 @@
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
 import { setSetting } from "../db.js";
-import { cachedGetSetting, refreshSettings, isBotSentMessage } from "../cache.js";
+import { cachedGetSetting, refreshSettings, isBotSentMessage, isAiSentMessage, rememberAiSent } from "../cache.js";
 import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "../config.js";
 
@@ -144,7 +144,9 @@ export const aiCommands = {
 
       try {
         const reply = await askGroq(from, userMessage);
-        await replyMsg(sock, from, msg, reply);
+        const sent = await replyMsg(sock, from, msg, reply);
+        // Track this message ID so replies to it trigger AI again
+        if (sent?.key?.id) rememberAiSent(sent.key.id);
       } catch (err) {
         console.error("❌ AI error:", err.message);
         await replyMsg(sock, from, msg, `❌ AI error: ${err.message}`);
@@ -248,8 +250,8 @@ export async function handleAiReply(sock, msg, from) {
   const botJid            = `${botConfig.BOT_NUMBER}@s.whatsapp.net`;
 
   const isReplyToBot =
-    isBotSentMessage(quotedId) ||
-    (quotedParticipant === botJid && !contextInfo.fromMe === false);
+    isAiSentMessage(quotedId) ||
+    (quotedParticipant === botJid && !contextInfo.fromMe === false && isAiSentMessage(quotedId));
 
   if (!isReplyToBot) return false;
 
@@ -263,7 +265,8 @@ export async function handleAiReply(sock, msg, from) {
   try {
     await reactMsg(sock, from, msg, "🤖");
     const reply = await askGroq(from, text);
-    await replyMsg(sock, from, msg, reply);
+    const sent = await replyMsg(sock, from, msg, reply);
+    if (sent?.key?.id) rememberAiSent(sent.key.id);
     return true;
   } catch (err) {
     console.error("❌ AI reply error:", err.message);
