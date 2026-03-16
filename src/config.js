@@ -11,6 +11,7 @@ for (const key of REQUIRED_ENV) {
 
 export const SUPABASE_URL   = process.env.SUPABASE_URL;
 export const SUPABASE_KEY   = process.env.SUPABASE_KEY;
+export const DATABASE_URL   = process.env.DATABASE_URL ?? null; // Postgres connection string for LISTEN/NOTIFY
 export const PORT           = parseInt(process.env.PORT || "3000", 10);
 export const SESSION_DIR    = "/app/session";
 export const MAX_RECONNECTS = 10;

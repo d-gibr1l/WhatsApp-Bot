@@ -1,6 +1,6 @@
 // ─── cache.js ──────────────────────────────────────────────
 // Production-ready in-memory cache with true LRU, trie-based auto-replies, atomic swaps,
-// metrics, validation, and auto-refresh.
+// metrics, validation, and instant LISTEN/NOTIFY refresh.
 
 import {
   getAdmins,
@@ -9,6 +9,8 @@ import {
   getAllSettings,
   getAllAutoReplies,
 } from "./db.js";
+import pg from "pg";
+import { DATABASE_URL } from "./config.js";
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -139,8 +141,53 @@ export async function loadCache() {
 }
 
 // Auto-refresh every N ms (call once in index.js after loadCache)
-export function startCacheAutoRefresh(interval = 5 * 60 * 1000) {
-  setInterval(loadCache, interval);
+export function startCacheAutoRefresh() {
+  // ── Postgres LISTEN/NOTIFY — instant push when DB rows change ────────────
+  if (DATABASE_URL) {
+    const client = new pg.Client({ connectionString: DATABASE_URL });
+
+    const channelMap = {
+      cache_admins:      refreshAdmins,
+      cache_banned:      refreshBanned,
+      cache_settings:    refreshSettings,
+      cache_groups:      refreshGroups,
+      cache_autoreplies: refreshAutoReplies,
+    };
+
+    client.connect()
+      .then(async () => {
+        client.on("notification", (msg) => {
+          const fn = channelMap[msg.channel];
+          if (fn) {
+            fn();
+            console.log(`🔄 Cache: ${msg.channel.replace("cache_", "")} updated instantly`);
+          }
+        });
+
+        for (const channel of Object.keys(channelMap)) {
+          await client.query(`LISTEN ${channel}`);
+        }
+
+        console.log("✅ LISTEN/NOTIFY cache active — instant DB updates enabled");
+
+        // Reconnect if connection drops
+        client.on("error", (err) => {
+          console.error("❌ PG notify connection error:", err.message);
+          setTimeout(() => startCacheAutoRefresh(), 5000);
+        });
+      })
+      .catch((err) => {
+        console.warn(`⚠️  LISTEN/NOTIFY unavailable (${err.message}) — falling back to 30s polling`);
+        setInterval(loadCache, 30_000);
+      });
+
+    // Safety net — full refresh every 10 minutes regardless
+    setInterval(loadCache, 10 * 60 * 1000);
+  } else {
+    // No DATABASE_URL set — use polling
+    console.log("ℹ️  No DATABASE_URL — using 30s polling for cache refresh");
+    setInterval(loadCache, 30_000);
+  }
 }
 
 // ─── Selective Refresh Helpers ────────────────────────────
