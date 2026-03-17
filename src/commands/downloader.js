@@ -55,18 +55,12 @@ export const downloaderCommands = {
       await reactMsg(sock, from, msg, "⏳");
 
       try {
-        // Fetch info first for a nice status message
+        // Get title silently for caption
         let title = "Video";
         try {
           const info = await getMediaInfo(url);
           title = info.title;
-          const dur = info.duration ? ` • ${Math.floor(info.duration / 60)}:${String(info.duration % 60).padStart(2, "0")}` : "";
-          await replyMsg(sock, from, msg,
-            `📥 *${title}*${dur}\n${audioOnly ? "🎵 Audio only" : `🎬 Video ${quality === "best" ? "best quality" : quality + "p"}`}\n\nDownloading...`
-          );
-        } catch {
-          await replyMsg(sock, from, msg, `📥 Downloading...\n${audioOnly ? "🎵 Audio" : "🎬 Video"}`);
-        }
+        } catch {}
 
         const { buffer, contentType } = await downloadWithYtDlp(url, audioOnly, quality);
         const mb = sizeMB(buffer);
@@ -90,7 +84,7 @@ export const downloaderCommands = {
           await sock.sendMessage(from, {
             video: buffer,
             mimetype: "video/mp4",
-            caption: `📥 ${title}`,
+            caption: title,
           }, { quoted: msg });
         }
 
@@ -144,7 +138,7 @@ export const downloaderCommands = {
         await sock.sendMessage(from, {
           video: buffer,
           mimetype: "video/mp4",
-          caption: `📥 ${title}`,
+          caption: title,
         }, { quoted: msg });
 
       } catch (err) {

@@ -28,6 +28,10 @@ import { aliasCommands }       from "./aliases.js";
 import { searchCommands }      from "./search.js";
 import { factsCommands }       from "./facts.js";
 import { jokeCommands }        from "./joke.js";
+import { ytToolsCommands }     from "./yttools.js";
+import { qrCommands }          from "./qr.js";
+import { videoToolsCommands }  from "./videotools.js";
+import { pollCommands, welcomeCommands } from "./groupevents.js";
 
 export const commands = {
   ...generalCommands,
@@ -60,6 +64,11 @@ export const commands = {
   ...searchCommands,
   ...factsCommands,
   ...jokeCommands,
+  ...ytToolsCommands,
+  ...qrCommands,
+  ...videoToolsCommands,
+  ...pollCommands,
+  ...welcomeCommands,
 };
 
 export { replyMsg, isAdmin } from "./helpers.js";

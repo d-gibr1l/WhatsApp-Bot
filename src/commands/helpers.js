@@ -15,6 +15,27 @@ export function reactMsg(sock, from, msg, emoji) {
   });
 }
 
+// React ❌ and send error details to owner DM silently
+export async function failMsg(sock, from, msg, err, context = "") {
+  try { await reactMsg(sock, from, msg, "❌"); } catch {}
+  try {
+    const ownerJid = `${botConfig.BOT_NUMBER}@s.whatsapp.net`;
+    const senderJid = msg.key.participant ?? msg.key.remoteJid ?? "unknown";
+    const errMsg = err instanceof Error ? err.message : String(err);
+    await sock.sendMessage(ownerJid, {
+      text:
+        `⚠️ *Command Failed*\n\n` +
+        `📍 *Command:* ${context}\n` +
+        `👤 *From:* ${senderJid}\n` +
+        `💬 *Chat:* ${from}\n` +
+        `❌ *Error:* ${errMsg.slice(0, 300)}\n` +
+        `🕐 *Time:* ${new Date().toLocaleString()}`,
+    });
+  } catch {
+    // silently fail — never crash on error reporting
+  }
+}
+
 export function isAdmin(msg) {
   if (msg.key.fromMe) return true;
   // In groups, participant holds the sender JID

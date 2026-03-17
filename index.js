@@ -327,6 +327,58 @@ async function runBot() {
           }
         });
 
+        // ─── Welcome / Goodbye ───────────────────────────────────────────────
+        sock.ev.on("group-participants.update", async ({ id, participants, action }) => {
+          try {
+            const { getSetting } = await import("./src/db.js");
+
+            for (const participant of participants) {
+              const number = participant.split("@")[0];
+
+              if (action === "add") {
+                const enabled = await getSetting(`welcome_enabled_${id}`, "false");
+                if (enabled !== "true") continue;
+
+                const groupMeta = await sock.groupMetadata(id).catch(() => null);
+                const groupName = groupMeta?.subject || "the group";
+                const memberName = number;
+
+                let template = await getSetting(`welcome_${id}`, null);
+                if (!template) template = `👋 Welcome *{name}* to *{group}*!`;
+
+                const text = template
+                  .replace(/{name}/g, memberName)
+                  .replace(/{group}/g, groupName)
+                  .replace(/{number}/g, number);
+
+                await sock.sendMessage(id, {
+                  text,
+                  mentions: [participant],
+                });
+
+              } else if (action === "remove") {
+                const enabled = await getSetting(`goodbye_enabled_${id}`, "false");
+                if (enabled !== "true") continue;
+
+                const groupMeta = await sock.groupMetadata(id).catch(() => null);
+                const groupName = groupMeta?.subject || "the group";
+
+                let template = await getSetting(`goodbye_${id}`, null);
+                if (!template) template = `👋 *{name}* has left *{group}*. Goodbye!`;
+
+                const text = template
+                  .replace(/{name}/g, number)
+                  .replace(/{group}/g, groupName)
+                  .replace(/{number}/g, number);
+
+                await sock.sendMessage(id, { text });
+              }
+            }
+          } catch (err) {
+            console.error("❌ Welcome/goodbye error:", err.message);
+          }
+        });
+
       }); // end Promise
 
       if (shouldReconnect) {
