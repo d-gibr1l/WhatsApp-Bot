@@ -1,7 +1,11 @@
-import { execSync, spawnSync } from "child_process";
-import { writeFileSync, unlinkSync, existsSync, readFileSync } from "fs";
+import { execSync } from "child_process";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { promises as fsPromises, existsSync, readdirSync } from "fs";
+import { writeFileSync, unlinkSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
+const execAsync = promisify(exec);
 import { getSetting } from "./db.js";
 
 // ─── Platform Detection ───────────────────────────────────────────────────────
@@ -68,62 +72,43 @@ export async function getMediaInfo(url) {
 
 export async function downloadWithYtDlp(url, audioOnly = false, quality = "720") {
   const cookiesFlag = await getCookiesFlag();
-  // Use a template path — yt-dlp will set the real extension
   const tmpBase = join(tmpdir(), `ytdlp_${Date.now()}`);
   const outTemplate = `${tmpBase}.%(ext)s`;
 
+  // Mobile User Agent helps with Instagram/TikTok
+  const userAgent = `"Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"`;
+
   try {
+    let cmd = "";
+
     if (audioOnly) {
-      execSync(
-        `yt-dlp -x --audio-format mp3 --audio-quality 0 ${cookiesFlag} -o "${tmpBase}.mp3" "${url}"`,
-        { timeout: 120000 }
-      );
-      const outPath = `${tmpBase}.mp3`;
-      if (!existsSync(outPath)) throw new Error("yt-dlp produced no output file.");
-      const buffer = readFileSync(outPath);
-      try { unlinkSync(outPath); } catch {}
-      return { buffer, contentType: "audio/mpeg" };
+      cmd = `yt-dlp -x --audio-format mp3 --audio-quality 0 ${cookiesFlag} --user-agent ${userAgent} -o "${tmpBase}.mp3" "${url}"`;
+    } else {
+      const height = quality === "best" ? "" : `[height<=${quality}]`;
+      cmd = `yt-dlp -f "bestvideo${height}[vcodec^=avc]+bestaudio[acodec^=mp4a]/best[ext=mp4]/best" ` +
+            `--merge-output-format mp4 ` +
+            `--user-agent ${userAgent} ` +
+            `${cookiesFlag} ` +
+            `--postprocessor-args "ffmpeg:-c:v libx264 -pix_fmt yuv420p -profile:v main -level 3.1 -c:a aac -movflags +faststart" ` +
+            `-o "${outTemplate}" "${url}"`;
     }
 
-    // Try simple download first (works for images and some platforms)
-    // Fall back to video-specific format filter if that fails
-    let downloadSucceeded = false;
-    try {
-      execSync(
-        `yt-dlp --no-playlist ${cookiesFlag} -o "${outTemplate}" "${url}"`,
-        { timeout: 60000 }
-      );
-      downloadSucceeded = true;
-    } catch {}
+    await execAsync(cmd, { timeout: 300000 });
 
-    if (!downloadSucceeded) {
-      // Video fallback — force H.264 + AAC for iPhone compatibility
-      const heightFilter = quality === "best" ? "" : `[height<=${quality}]`;
-      execSync(
-        `yt-dlp -f "bestvideo${heightFilter}[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/bestvideo${heightFilter}[ext=mp4]+bestaudio[ext=m4a]/best${heightFilter}[ext=mp4]/best${heightFilter}" --merge-output-format mp4 --postprocessor-args "ffmpeg:-c:v libx264 -c:a aac -movflags +faststart" ${cookiesFlag} -o "${outTemplate}" "${url}"`,
-        { timeout: 180000 }
-      );
-    }
+    // Find what file yt-dlp actually wrote
+    const tmpDir  = dirname(tmpBase);
+    const baseName = basename(tmpBase);
+    const files   = readdirSync(tmpDir).filter(f => f.startsWith(baseName));
+    if (files.length === 0) throw new Error("File not found after download.");
 
-    // Find what file was actually written
-    const { readdirSync } = await import("fs");
-    const tmpDir = dirname(tmpBase);
-    const base   = basename(tmpBase);
-    const files  = readdirSync(tmpDir).filter(f => f.startsWith(base));
+    const finalPath = join(tmpDir, files[0]);
+    const buffer    = await fsPromises.readFile(finalPath);
+    const ext       = files[0].split(".").pop().toLowerCase();
+    await fsPromises.unlink(finalPath).catch(() => {});
 
-    if (files.length === 0) throw new Error("yt-dlp produced no output file.");
-
-    const outFile = join(tmpDir, files[0]);
-    const ext     = files[0].split(".").pop().toLowerCase();
-    const buffer  = readFileSync(outFile);
-    try { unlinkSync(outFile); } catch {}
-
-    // Detect content type from extension
-    const imageExts = ["jpg", "jpeg", "png", "webp", "gif", "bmp"];
-    const audioExts = ["mp3", "m4a", "ogg", "flac", "wav"];
     let contentType = "video/mp4";
-    if (imageExts.includes(ext)) contentType = `image/${ext === "jpg" ? "jpeg" : ext}`;
-    else if (audioExts.includes(ext)) contentType = `audio/${ext}`;
+    if (["jpg", "jpeg", "png", "webp"].includes(ext)) contentType = "image/jpeg";
+    if (ext === "mp3") contentType = "audio/mpeg";
 
     return { buffer, contentType };
   } catch (err) {
