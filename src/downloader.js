@@ -85,12 +85,31 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
       return { buffer, contentType: "audio/mpeg" };
     }
 
-    // For images/video — let yt-dlp pick format, detect what came out
-    const heightFilter = quality === "best" ? "" : `[height<=${quality}]`;
-    execSync(
-      `yt-dlp -f "bestvideo${heightFilter}[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/bestvideo${heightFilter}[ext=mp4]+bestaudio[ext=m4a]/best${heightFilter}[ext=mp4]/best${heightFilter}" --merge-output-format mp4 --postprocessor-args "ffmpeg:-c:v libx264 -c:a aac -movflags +faststart" ${cookiesFlag} -o "${outTemplate}" "${url}"`,
-      { timeout: 180000 }
-    );
+    // Detect if image or video first
+    let isImagePost = false;
+    try {
+      const infoRaw = execSync(`yt-dlp --dump-json --no-playlist ${cookiesFlag} "${url}"`, { timeout: 30000, encoding: "utf8" });
+      const info = JSON.parse(infoRaw);
+      const formats = info.formats || [];
+      isImagePost = formats.length === 0 ||
+        formats.every(f => !f.vcodec || f.vcodec === "none") ||
+        ["jpg","jpeg","png","webp"].includes((info.ext || "").toLowerCase());
+    } catch {}
+
+    if (isImagePost) {
+      // Simple download for images — no format filter
+      execSync(
+        `yt-dlp ${cookiesFlag} -o "${outTemplate}" "${url}"`,
+        { timeout: 60000 }
+      );
+    } else {
+      // Video — force H.264 + AAC for iPhone compatibility
+      const heightFilter = quality === "best" ? "" : `[height<=${quality}]`;
+      execSync(
+        `yt-dlp -f "bestvideo${heightFilter}[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/bestvideo${heightFilter}[ext=mp4]+bestaudio[ext=m4a]/best${heightFilter}[ext=mp4]/best${heightFilter}" --merge-output-format mp4 --postprocessor-args "ffmpeg:-c:v libx264 -c:a aac -movflags +faststart" ${cookiesFlag} -o "${outTemplate}" "${url}"`,
+        { timeout: 180000 }
+      );
+    }
 
     // Find what file was actually written
     const { readdirSync } = await import("fs");
