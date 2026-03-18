@@ -1,7 +1,7 @@
 import { getSetting, setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
 import { getMediaInfo, downloadWithYtDlp, downloadWithApi, detectPlatform, extractUrl } from "../downloader.js";
-import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
+import { replyMsg, reactMsg, alertOwner, failMsg } from "./helpers.js";
 
 const MAX_MB = 64;
 
@@ -80,6 +80,12 @@ export const downloaderCommands = {
             fileName: `${title.slice(0, 50)}.mp3`,
             ptt: false,
           }, { quoted: msg });
+        } else if (contentType.includes("image")) {
+          await sock.sendMessage(from, {
+            image: buffer,
+            mimetype: contentType,
+            caption: title,
+          }, { quoted: msg });
         } else {
           await sock.sendMessage(from, {
             video: buffer,
@@ -144,7 +150,7 @@ export const downloaderCommands = {
       } catch (err) {
         console.error("❌ dlapi error:", err.message);
         await reactMsg(sock, from, msg, "❌");
-        await replyMsg(sock, from, msg, `❌ API download failed: ${err.message.slice(0, 200)}`);
+        await failMsg(sock, from, msg, err, "dlapi");
         await alertOwner(sock, `${prefix}dlapi — ${url}`, err);
       }
     },

@@ -1,7 +1,7 @@
 import { execSync, spawnSync } from "child_process";
 import { writeFileSync, unlinkSync, existsSync, readFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, dirname, basename } from "path";
 import { getSetting } from "./db.js";
 
 // ─── Platform Detection ───────────────────────────────────────────────────────
@@ -67,35 +67,53 @@ export async function getMediaInfo(url) {
 // ─── yt-dlp download ──────────────────────────────────────────────────────────
 
 export async function downloadWithYtDlp(url, audioOnly = false, quality = "720") {
-  const ext     = audioOnly ? "mp3" : "mp4";
-  const outPath = join(tmpdir(), `ytdlp_${Date.now()}.${ext}`);
   const cookiesFlag = await getCookiesFlag();
+  // Use a template path — yt-dlp will set the real extension
+  const tmpBase = join(tmpdir(), `ytdlp_${Date.now()}`);
+  const outTemplate = `${tmpBase}.%(ext)s`;
 
   try {
     if (audioOnly) {
       execSync(
-        `yt-dlp -x --audio-format mp3 --audio-quality 0 ${cookiesFlag} -o "${outPath}" "${url}"`,
+        `yt-dlp -x --audio-format mp3 --audio-quality 0 ${cookiesFlag} -o "${tmpBase}.mp3" "${url}"`,
         { timeout: 120000 }
       );
-    } else {
-      const heightFilter = quality === "best" ? "" : `[height<=${quality}]`;
-      execSync(
-        `yt-dlp -f "bestvideo${heightFilter}[ext=mp4]+bestaudio[ext=m4a]/best${heightFilter}[ext=mp4]/best${heightFilter}" --merge-output-format mp4 ${cookiesFlag} -o "${outPath}" "${url}"`,
-        { timeout: 180000 }
-      );
+      const outPath = `${tmpBase}.mp3`;
+      if (!existsSync(outPath)) throw new Error("yt-dlp produced no output file.");
+      const buffer = readFileSync(outPath);
+      try { unlinkSync(outPath); } catch {}
+      return { buffer, contentType: "audio/mpeg" };
     }
 
-    if (!existsSync(outPath)) throw new Error("yt-dlp produced no output file.");
+    // For images/video — let yt-dlp pick format, detect what came out
+    const heightFilter = quality === "best" ? "" : `[height<=${quality}]`;
+    execSync(
+      `yt-dlp -f "bestvideo${heightFilter}[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/bestvideo${heightFilter}[ext=mp4]+bestaudio[ext=m4a]/best${heightFilter}[ext=mp4]/best${heightFilter}" --merge-output-format mp4 --postprocessor-args "ffmpeg:-c:v libx264 -c:a aac -movflags +faststart" ${cookiesFlag} -o "${outTemplate}" "${url}"`,
+      { timeout: 180000 }
+    );
 
-    const buffer = readFileSync(outPath);
-    try { unlinkSync(outPath); } catch {}
+    // Find what file was actually written
+    const { readdirSync } = await import("fs");
+    const tmpDir = dirname(tmpBase);
+    const base   = basename(tmpBase);
+    const files  = readdirSync(tmpDir).filter(f => f.startsWith(base));
 
-    return {
-      buffer,
-      contentType: audioOnly ? "audio/mpeg" : "video/mp4",
-    };
+    if (files.length === 0) throw new Error("yt-dlp produced no output file.");
+
+    const outFile = join(tmpDir, files[0]);
+    const ext     = files[0].split(".").pop().toLowerCase();
+    const buffer  = readFileSync(outFile);
+    try { unlinkSync(outFile); } catch {}
+
+    // Detect content type from extension
+    const imageExts = ["jpg", "jpeg", "png", "webp", "gif", "bmp"];
+    const audioExts = ["mp3", "m4a", "ogg", "flac", "wav"];
+    let contentType = "video/mp4";
+    if (imageExts.includes(ext)) contentType = `image/${ext === "jpg" ? "jpeg" : ext}`;
+    else if (audioExts.includes(ext)) contentType = `audio/${ext}`;
+
+    return { buffer, contentType };
   } catch (err) {
-    try { if (existsSync(outPath)) unlinkSync(outPath); } catch {}
     throw new Error(`Download failed: ${err.message?.slice(0, 200)}`);
   }
 }
