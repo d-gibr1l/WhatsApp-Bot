@@ -1,45 +1,57 @@
-import { execSync } from "child_process";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { spawn } from "child_process";
 import { promises as fsPromises, existsSync, readdirSync } from "fs";
 import { writeFileSync, unlinkSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
-const execAsync = promisify(exec);
 import { getSetting } from "./db.js";
 
 // ─── Platform Detection ───────────────────────────────────────────────────────
 
 export function detectPlatform(url) {
-  if (/youtube\.com|youtu\.be/.test(url))  return "youtube";
-  if (/tiktok\.com/.test(url))             return "tiktok";
-  if (/instagram\.com/.test(url))          return "instagram";
-  if (/twitter\.com|x\.com/.test(url))     return "twitter";
-  if (/facebook\.com|fb\.watch/.test(url)) return "facebook";
-  if (/pinterest\.com|pin\.it/.test(url))  return "pinterest";
-  if (/vimeo\.com/.test(url))              return "vimeo";
-  if (/dailymotion\.com/.test(url))        return "dailymotion";
-  if (/reddit\.com/.test(url))             return "reddit";
-  if (/twitch\.tv/.test(url))              return "twitch";
+  if (!url) return null;
+  const patterns = {
+    youtube:     /youtube\.com|youtu\.be|youtube-nocookie\.com/,
+    tiktok:      /tiktok\.com/,
+    instagram:   /instagram\.com|ig\.me/,
+    twitter:     /twitter\.com|x\.com|fxtwitter\.com|vxtwitter\.com/,
+    facebook:    /facebook\.com|fb\.watch|fb\.com|messenger\.com/,
+    reddit:      /reddit\.com|redd\.it/,
+    twitch:      /twitch\.tv/,
+    vimeo:       /vimeo\.com/,
+    pinterest:   /pinterest\.com|pin\.it/,
+    soundcloud:  /soundcloud\.com/,
+    spotify:     /spotify\.com/,
+    snapchat:    /snapchat\.com/,
+    threads:     /threads\.net/,
+    tumblr:      /tumblr\.com/,
+    dailymotion: /dailymotion\.com|dai\.ly/,
+    rumble:      /rumble\.com/,
+    bilibili:    /bilibili\.com|b23\.tv/,
+    imgur:       /imgur\.com/,
+  };
+  for (const [platform, regex] of Object.entries(patterns)) {
+    if (regex.test(url.toLowerCase())) return platform;
+  }
   return null;
 }
 
 export function extractUrl(text) {
-  const match = text?.match(/https?:\/\/[^\s]+/);
+  if (!text) return null;
+  const match = text.match(/https?:\/\/[^\s()<>]*(?=[.,;:?!]?(?:\s|$))/);
   return match ? match[0] : null;
 }
 
 // ─── Cookies Helper ───────────────────────────────────────────────────────────
 
-async function getCookiesFlag() {
+async function getCookiesPath() {
   try {
     const cookies = await getSetting("yt_cookies", null);
-    if (!cookies || cookies.trim() === "") return "";
-    const cookiePath = join(tmpdir(), "yt_cookies.txt");
-    writeFileSync(cookiePath, cookies);
-    return `--cookies "${cookiePath}"`;
+    if (!cookies?.trim()) return null;
+    const cookiePath = join(tmpdir(), `cookies_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`);
+    await fsPromises.writeFile(cookiePath, cookies);
+    return cookiePath;
   } catch {
-    return "";
+    return null;
   }
 }
 
@@ -47,99 +59,117 @@ async function getCookiesFlag() {
 
 export async function getMediaInfo(url) {
   const platform = detectPlatform(url);
-  if (!platform) throw new Error("Unsupported link.");
+  if (!platform) throw new Error("Unsupported platform.");
 
-  const cookiesFlag = await getCookiesFlag();
-  try {
-    const infoJson = execSync(
-      `yt-dlp --dump-json --no-playlist ${cookiesFlag} "${url}"`,
-      { timeout: 30000, encoding: "utf8" }
-    );
-    const info = JSON.parse(infoJson);
-    return {
-      platform: info.extractor_key || platform,
-      title: info.title || `${platform} video`,
-      thumbnail: info.thumbnail || null,
-      duration: info.duration || null,
-      useYtDlp: true,
-    };
-  } catch (err) {
-    throw new Error(`Could not fetch media info: ${err.message?.slice(0, 120)}`);
-  }
+  const cookiePath = await getCookiesPath();
+  const args = [url, "--dump-json", "--no-playlist"];
+  if (cookiePath) args.push("--cookies", cookiePath);
+
+  return new Promise((resolve, reject) => {
+    let output = "";
+    const proc = spawn("yt-dlp", args);
+    proc.stdout.on("data", d => { output += d.toString(); });
+    proc.on("close", async (code) => {
+      if (cookiePath) await fsPromises.unlink(cookiePath).catch(() => {});
+      if (code !== 0) return reject(new Error(`Could not fetch media info.`));
+      try {
+        const info = JSON.parse(output);
+        resolve({
+          platform: info.extractor_key || platform,
+          title:    info.title || `${platform} video`,
+          thumbnail: info.thumbnail || null,
+          duration:  info.duration || null,
+          useYtDlp: true,
+        });
+      } catch { reject(new Error("Failed to parse media info.")); }
+    });
+    proc.on("error", reject);
+  });
 }
 
-// ─── yt-dlp download ──────────────────────────────────────────────────────────
+// ─── Core stream-based downloader ────────────────────────────────────────────
 
 export async function downloadWithYtDlp(url, audioOnly = false, quality = "720") {
-  const cookiesFlag = await getCookiesFlag();
-  const tmpBase = join(tmpdir(), `ytdlp_${Date.now()}`);
-  const outTemplate = `${tmpBase}.%(ext)s`;
+  const platform = detectPlatform(url);
+  if (!platform) throw new Error("Unsupported platform.");
 
-  // Mobile User Agent helps with Instagram/TikTok
-  const userAgent = `"Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"`;
+  const cookiePath = await getCookiesPath();
+  const tmpBase    = join(tmpdir(), `ytdlp_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+  const userAgent  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
 
-  try {
-    let cmd = "";
+  let args = [url, "--user-agent", userAgent, "--no-playlist"];
+  if (cookiePath) args.push("--cookies", cookiePath);
 
-    if (audioOnly) {
-      cmd = `yt-dlp -x --audio-format mp3 --audio-quality 0 ${cookiesFlag} --user-agent ${userAgent} -o "${tmpBase}.mp3" "${url}"`;
-    } else {
-      const height = quality === "best" ? "" : `[height<=${quality}]`;
-      cmd = `yt-dlp -f "bestvideo${height}[vcodec^=avc]+bestaudio[acodec^=mp4a]/best[ext=mp4]/best" ` +
-            `--merge-output-format mp4 ` +
-            `--user-agent ${userAgent} ` +
-            `${cookiesFlag} ` +
-            `--postprocessor-args "ffmpeg:-c:v libx264 -pix_fmt yuv420p -profile:v main -level 3.1 -c:a aac -movflags +faststart" ` +
-            `-o "${outTemplate}" "${url}"`;
-    }
-
-    await execAsync(cmd, { timeout: 300000 });
-
-    // Find what file yt-dlp actually wrote
-    const tmpDir  = dirname(tmpBase);
-    const baseName = basename(tmpBase);
-    const files   = readdirSync(tmpDir).filter(f => f.startsWith(baseName));
-    if (files.length === 0) throw new Error("File not found after download.");
-
-    const finalPath = join(tmpDir, files[0]);
-    const buffer    = await fsPromises.readFile(finalPath);
-    const ext       = files[0].split(".").pop().toLowerCase();
-    await fsPromises.unlink(finalPath).catch(() => {});
-
-    let contentType = "video/mp4";
-    if (["jpg", "jpeg", "png", "webp"].includes(ext)) contentType = "image/jpeg";
-    if (ext === "mp3") contentType = "audio/mpeg";
-
-    return { buffer, contentType };
-  } catch (err) {
-    throw new Error(`Download failed: ${err.message?.slice(0, 200)}`);
+  if (audioOnly) {
+    args.push("-x", "--audio-format", "mp3", "--audio-quality", "0", "-o", `${tmpBase}.mp3`);
+  } else {
+    const height = quality === "best" ? "" : `[height<=${quality}]`;
+    args.push(
+      "-f", `bestvideo${height}[vcodec^=avc]+bestaudio[acodec^=mp4a]/best[ext=mp4]/best`,
+      "--merge-output-format", "mp4",
+      "--postprocessor-args", "ffmpeg:-c:v libx264 -pix_fmt yuv420p -profile:v main -level 3.1 -c:a aac -movflags +faststart",
+      "-o", `${tmpBase}.%(ext)s`
+    );
   }
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn("yt-dlp", args);
+
+    let stderr = "";
+    proc.stderr.on("data", d => { stderr += d.toString(); });
+
+    proc.on("close", async (code) => {
+      if (cookiePath) await fsPromises.unlink(cookiePath).catch(() => {});
+
+      if (code !== 0) {
+        return reject(new Error(`yt-dlp failed (code ${code}): ${stderr.slice(-200)}`));
+      }
+
+      try {
+        const tmpDir   = dirname(tmpBase);
+        const baseName = basename(tmpBase);
+        const files    = (await fsPromises.readdir(tmpDir)).filter(f => f.startsWith(baseName));
+        if (files.length === 0) throw new Error("yt-dlp produced no output file.");
+
+        const finalPath = join(tmpDir, files[0]);
+        const ext       = files[0].split(".").pop().toLowerCase();
+        const buffer    = await fsPromises.readFile(finalPath);
+        await fsPromises.unlink(finalPath).catch(() => {});
+
+        let contentType = "video/mp4";
+        if (ext === "mp3")                         contentType = "audio/mpeg";
+        if (["jpg","jpeg","png","webp"].includes(ext)) contentType = "image/jpeg";
+
+        resolve({ buffer, contentType });
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    proc.on("error", reject);
+  });
 }
 
-// ─── Legacy API-based download (used by !dlapi command) ───────────────────────
+// ─── Legacy YouTube buffer export (used by mp3.js, sticker.js etc) ───────────
+export const downloadYouTubeToBuffer = (url, audioOnly) => downloadWithYtDlp(url, audioOnly);
+
+// ─── RapidAPI fallback ────────────────────────────────────────────────────────
 
 async function getApiKey() {
   const key = await getSetting("rapidapi_key", null);
-  if (!key || key.trim() === "") {
-    throw new Error("RapidAPI key not set. Use !setapikey <key> to set it.");
-  }
+  if (!key?.trim()) throw new Error("RapidAPI key not set. Use !setapikey <key> to set it.");
   return key.trim();
 }
 
 async function getTikTokMediaApi(url, apiKey) {
   const res = await fetch(
     `https://tiktok-video-no-watermark2.p.rapidapi.com/?url=${encodeURIComponent(url)}&hd=1`,
-    {
-      headers: {
-        "x-rapidapi-host": "tiktok-video-no-watermark2.p.rapidapi.com",
-        "x-rapidapi-key": apiKey,
-      },
-    }
+    { headers: { "x-rapidapi-host": "tiktok-video-no-watermark2.p.rapidapi.com", "x-rapidapi-key": apiKey } }
   );
   if (!res.ok) throw new Error(`TikTok API error: ${res.status}`);
   const data = await res.json();
-  if (data.code !== 0) throw new Error(data.msg || "TikTok API download failed.");
-  const videoUrl = data.data?.play || data.data?.hdplay || null;
+  if (data.code !== 0) throw new Error(data.msg || "TikTok API failed.");
+  const videoUrl = data.data?.play || data.data?.hdplay;
   if (!videoUrl) throw new Error("No downloadable video found.");
   return { title: data.data?.title || "TikTok Video", videoUrl, platform: "TikTok" };
 }
@@ -147,18 +177,13 @@ async function getTikTokMediaApi(url, apiKey) {
 async function getGenericMediaApi(url, platform, apiKey) {
   const res = await fetch(
     `https://social-media-video-downloader.p.rapidapi.com/smvd/get/all?url=${encodeURIComponent(url)}`,
-    {
-      headers: {
-        "x-rapidapi-host": "social-media-video-downloader.p.rapidapi.com",
-        "x-rapidapi-key": apiKey,
-      },
-    }
+    { headers: { "x-rapidapi-host": "social-media-video-downloader.p.rapidapi.com", "x-rapidapi-key": apiKey } }
   );
   if (!res.ok) throw new Error(`${platform} API error: ${res.status}`);
   const data = await res.json();
-  if (!data.success) throw new Error(data.message || "API download failed.");
+  if (!data.success) throw new Error(data.message || "API failed.");
   const links = data.links || [];
-  const best = links.find(l => l.quality === "720" || l.quality === "720p") || links[0];
+  const best  = links.find(l => l.quality === "720" || l.quality === "720p") || links[0];
   return { title: data.title || `${platform} Video`, videoUrl: best?.link || null, platform };
 }
 
@@ -173,17 +198,13 @@ export async function downloadWithApi(url) {
 
   if (!info.videoUrl) throw new Error("No downloadable link found.");
 
-  const res = await fetch(info.videoUrl, {
-    headers: { "User-Agent": "Mozilla/5.0" },
-    redirect: "follow",
-  });
+  const res = await fetch(info.videoUrl, { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow" });
   if (!res.ok) throw new Error(`Failed to download: ${res.status}`);
   const buffer = Buffer.from(await res.arrayBuffer());
   return { buffer, contentType: "video/mp4", title: info.title, platform: info.platform };
 }
 
-// Keep legacy exports for backward compat
-export const downloadYouTubeToBuffer = (url, audioOnly) => downloadWithYtDlp(url, audioOnly);
+// ─── Generic buffer download ──────────────────────────────────────────────────
 export async function downloadToBuffer(url) {
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow" });
   if (!res.ok) throw new Error(`Failed to download: ${res.status}`);
