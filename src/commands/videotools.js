@@ -113,20 +113,73 @@ export const videoToolsCommands = {
 
       await reactMsg(sock, from, msg, "⏳");
 
+      const ts     = Date.now();
       const ext    = media.type === "video" ? "mp4" : "mp3";
-      const tmpIn  = join(tmpdir(), `rev_in_${Date.now()}.${ext}`);
-      const tmpOut = join(tmpdir(), `rev_out_${Date.now()}.${ext}`);
+      const tmpIn  = join(tmpdir(), `rev_in_${ts}.${ext}`);
+      const tmpOut = join(tmpdir(), `rev_out_${ts}.${ext}`);
       writeFileSync(tmpIn, media.buffer);
 
       try {
         if (media.type === "video") {
+          // Get video duration first
+          let duration = 30; // default cap
+          try {
+            const probe = execSync(
+              `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${tmpIn}"`,
+              { encoding: "utf8", timeout: 10000 }
+            ).trim();
+            duration = parseFloat(probe) || 30;
+          } catch {}
+
+          if (duration > 60) {
+            return replyMsg(sock, from, msg, "❌ Video too long to reverse. Maximum 60 seconds.");
+          }
+
+          // Segment-based reverse: split into 2s chunks, reverse each, concat reversed
+          const segDir  = join(tmpdir(), `rev_segs_${ts}`);
+          execSync(`mkdir -p "${segDir}"`);
+
+          const segDuration = 2;
+          const numSegs = Math.ceil(duration / segDuration);
+          const reversedSegs = [];
+
+          for (let i = 0; i < numSegs; i++) {
+            const startTime = i * segDuration;
+            const segIn  = join(segDir, `seg_${i}.mp4`);
+            const segOut = join(segDir, `segr_${i}.mp4`);
+
+            // Extract segment
+            execSync(
+              `ffmpeg -ss ${startTime} -i "${tmpIn}" -t ${segDuration} -c:v libx264 -c:a aac -y "${segIn}"`,
+              { timeout: 30000 }
+            );
+
+            // Reverse segment
+            execSync(
+              `ffmpeg -i "${segIn}" -vf reverse -af areverse -y "${segOut}"`,
+              { timeout: 30000 }
+            );
+
+            reversedSegs.unshift(segOut); // prepend so order becomes reversed
+          }
+
+          // Write concat list
+          const listPath = join(segDir, "list.txt");
+          writeFileSync(listPath, reversedSegs.map(f => `file '${f}'`).join("\n"));
+
+          // Concat all reversed segments
           execSync(
-            `ffmpeg -i "${tmpIn}" -vf reverse -af areverse "${tmpOut}" -y`,
+            `ffmpeg -f concat -safe 0 -i "${listPath}" -c:v libx264 -c:a aac -movflags +faststart -y "${tmpOut}"`,
             { timeout: 120000 }
           );
+
+          // Cleanup segments
+          try { execSync(`rm -rf "${segDir}"`); } catch {}
+
         } else {
+          // Audio reverse — areverse handles audio fine
           execSync(
-            `ffmpeg -i "${tmpIn}" -af areverse "${tmpOut}" -y`,
+            `ffmpeg -i "${tmpIn}" -af areverse -y "${tmpOut}"`,
             { timeout: 60000 }
           );
         }
