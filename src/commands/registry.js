@@ -1,6 +1,6 @@
 import { generalCommands }     from "./general.js";
 import { downloaderCommands }  from "./downloader.js";
-import { stickerCommands }     from "./sticker.js";
+import { stickerCommands, bulkStickerCommands } from "./sticker.js";
 import { funCommands }         from "./fun.js";
 import { remindCommands }      from "./remind.js";
 import { menuCommands }        from "./menu.js";
@@ -32,11 +32,14 @@ import { ytToolsCommands }     from "./yttools.js";
 import { qrCommands }          from "./qr.js";
 import { videoToolsCommands }  from "./videotools.js";
 import { pollCommands, welcomeCommands } from "./groupevents.js";
+import { mediaToolsCommands }  from "./mediatools.js";
+import { miscCommands, callCommands } from "./misc.js";
 
 export const commands = {
   ...generalCommands,
   ...downloaderCommands,
   ...stickerCommands,
+  ...bulkStickerCommands,
   ...funCommands,
   ...remindCommands,
   ...menuCommands,
@@ -69,6 +72,9 @@ export const commands = {
   ...videoToolsCommands,
   ...pollCommands,
   ...welcomeCommands,
+  ...mediaToolsCommands,
+  ...miscCommands,
+  ...callCommands,
 };
 
 export { replyMsg, isAdmin } from "./helpers.js";

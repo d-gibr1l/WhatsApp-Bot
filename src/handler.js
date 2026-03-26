@@ -1,5 +1,5 @@
 import { botConfig } from "./config.js";
-import { commands, replyMsg, isAdmin } from "./commands/index.js";
+import { commands, replyMsg, isAdmin } from "./commands/registry.js";
 import { logMessage, getPendingReminders, markReminderDone } from "./db.js";
 import {
   cachedIsBanned, cachedIsGroupAllowed, cachedHasAllowedGroups,
@@ -10,6 +10,7 @@ import { handleAiReply } from "./commands/ai.js";
 import { handleWordFilter } from "./commands/wordfilter.js";
 import { handleAntiLink } from "./commands/antilink.js";
 import { resolveAlias } from "./commands/aliases.js";
+import { hasStickerSession, handleStickerSessionImage } from "./commands/sticker.js";
 
 // ─── extractText (fix #5 — simplified, removed poll noise) ───────────────────
 
@@ -158,6 +159,12 @@ export async function handleMessage(sock, msg) {
 
   const botActive = cachedGetSetting("bot_active", "true");
   if (botActive !== "true" && !userIsAdmin) return;
+
+  // ── Bulk sticker session — collect images silently ──────────────────────
+  if (hasStickerSession(from) && msg.message?.imageMessage) {
+    const handled = await handleStickerSessionImage(sock, msg, from);
+    if (handled) return;
+  }
 
   // Fix #3: Only run word filter + anti-link on non-command messages
   if (!text.startsWith(prefix)) {

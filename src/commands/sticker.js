@@ -420,3 +420,151 @@ export const stickerCommands = {
   },
 
 };
+
+// ─── Bulk Sticker Session Store ───────────────────────────────────────────────
+// Map<chatJid, { sender, images: Buffer[], timer: TimeoutId }>
+
+const stickerSessions = new Map();
+const SESSION_TIMEOUT = 5 * 60 * 1000; // 5 min auto-expire
+
+export function hasStickerSession(chatJid) {
+  return stickerSessions.has(chatJid);
+}
+
+export async function handleStickerSessionImage(sock, msg, from) {
+  const session = stickerSessions.get(from);
+  if (!session) return false;
+
+  const sender = msg.key.participant ?? msg.key.remoteJid;
+
+  // Only collect images from the user who started the session
+  if (sender !== session.sender) return false;
+
+  const imgMsg = msg.message?.imageMessage;
+  if (!imgMsg) return false;
+
+  try {
+    const buffer = await downloadMediaMessage(msg, "buffer", {});
+    session.images.push(buffer);
+    await reactMsg(sock, from, msg, "📸");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const bulkStickerCommands = {
+
+  stickers: {
+    adminOnly: false,
+    requiresArgs: false,
+    description: "Start a bulk sticker session — send multiple images then type !done",
+    usage: "!stickers",
+    examples: [
+      "!stickers → then send images → then !done",
+    ],
+    notes: "Session expires after 5 minutes of inactivity.",
+    handler: async (sock, msg, _args, from, prefix) => {
+      const sender = msg.key.participant ?? msg.key.remoteJid;
+
+      if (stickerSessions.has(from)) {
+        return replyMsg(sock, from, msg,
+          `📸 Session already active!\n\nSend your images then type *${prefix}done* when finished.\nType *${prefix}cancel* to cancel.`
+        );
+      }
+
+      // Start session
+      const timer = setTimeout(() => {
+        if (stickerSessions.has(from)) {
+          stickerSessions.delete(from);
+          sock.sendMessage(from, { text: "⏰ Sticker session expired — no images were collected." }).catch(() => {});
+        }
+      }, SESSION_TIMEOUT);
+
+      stickerSessions.set(from, { sender, images: [], timer });
+
+      await replyMsg(sock, from, msg,
+        `📸 *Sticker session started!*\n\n` +
+        `Send as many images as you want.\n` +
+        `Type *${prefix}done* when finished to convert them all.\n` +
+        `Type *${prefix}cancel* to cancel.\n\n` +
+        `_Session expires in 5 minutes._`
+      );
+    },
+  },
+
+  done: {
+    adminOnly: false,
+    requiresArgs: false,
+    description: "Finish a bulk sticker session and convert all collected images",
+    usage: "!done",
+    handler: async (sock, msg, _args, from, prefix) => {
+      const session = stickerSessions.get(from);
+      const sender  = msg.key.participant ?? msg.key.remoteJid;
+
+      if (!session) {
+        return replyMsg(sock, from, msg,
+          `ℹ️ No active sticker session.\n\nStart one with *${prefix}stickers*`
+        );
+      }
+
+      if (session.sender !== sender) {
+        return replyMsg(sock, from, msg, "❌ Only the person who started the session can finish it.");
+      }
+
+      if (session.images.length === 0) {
+        clearTimeout(session.timer);
+        stickerSessions.delete(from);
+        return replyMsg(sock, from, msg,
+          `❌ No images were collected.\n\nStart again with *${prefix}stickers* and send images before typing *${prefix}done*`
+        );
+      }
+
+      clearTimeout(session.timer);
+      stickerSessions.delete(from);
+
+      const total = session.images.length;
+      await reactMsg(sock, from, msg, "⏳");
+      await replyMsg(sock, from, msg, `⚙️ Converting ${total} image${total > 1 ? "s" : ""} to stickers...`);
+
+      let success = 0;
+      let failed  = 0;
+
+      for (const imgBuffer of session.images) {
+        try {
+          const webp = await imageToSticker(imgBuffer);
+          await sock.sendMessage(from, { sticker: webp }, { quoted: msg });
+          success++;
+        } catch {
+          failed++;
+        }
+      }
+
+      await reactMsg(sock, from, msg, "✅");
+    },
+  },
+
+  cancel: {
+    adminOnly: false,
+    requiresArgs: false,
+    description: "Cancel an active bulk sticker session",
+    usage: "!cancel",
+    handler: async (sock, msg, _args, from, prefix) => {
+      const session = stickerSessions.get(from);
+      const sender  = msg.key.participant ?? msg.key.remoteJid;
+
+      if (!session) {
+        return replyMsg(sock, from, msg, `ℹ️ No active sticker session to cancel.`);
+      }
+
+      if (session.sender !== sender) {
+        return replyMsg(sock, from, msg, "❌ Only the person who started the session can cancel it.");
+      }
+
+      clearTimeout(session.timer);
+      stickerSessions.delete(from);
+      await replyMsg(sock, from, msg, `🗑️ Sticker session cancelled. ${session.images.length} image${session.images.length !== 1 ? "s" : ""} discarded.`);
+    },
+  },
+
+};
