@@ -128,6 +128,12 @@ async function createSocket() {
 async function runBot() {
   let attempt = 1;
 
+  // ── Startup jitter — prevents multiple Render instances racing to connect ──
+  // Each instance waits a random 0–3s before starting so they don't all
+  // connect simultaneously and trigger connectionReplaced loops
+  const jitter = Math.floor(Math.random() * 3000);
+  if (jitter > 0) await new Promise(r => setTimeout(r, jitter));
+
   // Load session from Supabase into RAM once at startup
   await loadSession();
 
@@ -228,7 +234,8 @@ async function runBot() {
             console.warn(`⚠️  Disconnected — ${reason} (${statusCode})`);
 
             if (statusCode === DisconnectReason.connectionReplaced) {
-              console.error("🔄 Connection replaced by newer instance. Exiting cleanly.");
+              console.error("🔄 Connection replaced by newer instance. Waiting 10s before exit...");
+              await new Promise(r => setTimeout(r, 10000));
               process.exit(0);
             }
 
@@ -376,6 +383,23 @@ async function runBot() {
             }
           } catch (err) {
             console.error("❌ Welcome/goodbye error:", err.message);
+          }
+        });
+
+        // ─── Auto-reject calls ───────────────────────────────────────────────
+        sock.ev.on("call", async (calls) => {
+          try {
+            const { getSetting: getS } = await import("./src/db.js");
+            const rejectCalls = await getS("reject_calls", "false");
+            if (rejectCalls !== "true") return;
+            for (const call of calls) {
+              if (call.status === "offer") {
+                await sock.rejectCall(call.id, call.from);
+                console.log(`📵 Auto-rejected call from ${call.from}`);
+              }
+            }
+          } catch (err) {
+            console.error("❌ Call reject error:", err.message);
           }
         });
 
