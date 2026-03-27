@@ -140,6 +140,12 @@ export async function handleMessage(sock, msg) {
   const msgTs = (Number(msg.messageTimestamp) || 0) * 1000;
   if (msgTs && msgTs < BOT_START_TIME) return;
 
+  // ── Bulk sticker session — must be before fromMe check so sent images are caught
+  if (hasStickerSession(msg.key.remoteJid) && msg.message?.imageMessage) {
+    const handled = await handleStickerSessionImage(sock, msg, msg.key.remoteJid);
+    if (handled) return;
+  }
+
   const text     = extractText(msg).trim();
   const sender   = getSenderNumber(msg);
   const isGrp    = from.endsWith("@g.us");
@@ -147,24 +153,6 @@ export async function handleMessage(sock, msg) {
   const userIsAdmin = msg.key.fromMe ? true : cachedIsAdmin(sender);
 
   if (msg.key.fromMe && !text) return;
-
-  // Debug log
-  if (text) {
-    console.log(`📩 [${new Date().toLocaleTimeString()}] ${sender}${isGrp ? " @ Group" : ""}: "${text.slice(0, 30)}${text.length > 30 ? "..." : ""}"`);
-  }
-
-  // ── Cache-only checks (no DB) ────────────────────────────────────────────
-  if (cachedIsBanned(sender)) return;
-  if (isGrp && cachedHasAllowedGroups() && !cachedIsGroupAllowed(from)) return;
-
-  const botActive = cachedGetSetting("bot_active", "true");
-  if (botActive !== "true" && !userIsAdmin) return;
-
-  // ── Bulk sticker session — collect images silently ──────────────────────
-  if (hasStickerSession(from) && msg.message?.imageMessage) {
-    const handled = await handleStickerSessionImage(sock, msg, from);
-    if (handled) return;
-  }
 
   // Fix #3: Only run word filter + anti-link on non-command messages
   if (!text.startsWith(prefix)) {

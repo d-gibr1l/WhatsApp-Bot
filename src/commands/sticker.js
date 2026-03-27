@@ -435,7 +435,12 @@ export async function handleStickerSessionImage(sock, msg, from) {
   const session = stickerSessions.get(from);
   if (!session) return false;
 
-  const sender = msg.key.participant ?? msg.key.remoteJid;
+  // In groups: participant holds sender JID
+  // In DMs: remoteJid is the sender, participant is undefined
+  // fromMe messages: treat as the session owner
+  const sender = msg.key.fromMe
+    ? session.sender  // always accept own images
+    : (msg.key.participant ?? msg.key.remoteJid);
 
   // Only collect images from the user who started the session
   if (sender !== session.sender) return false;
