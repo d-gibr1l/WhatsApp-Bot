@@ -11,6 +11,14 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // ─── Load session files from Supabase → disk ──────────────────────────────────
 export async function loadSession() {
   try {
+    // Allow forcing a fresh session via env var (useful for number changes)
+    if (process.env.FORCE_FRESH_SESSION === "true") {
+      console.log("🆕 FORCE_FRESH_SESSION set — skipping session restore");
+      // Also wipe Supabase so old session doesn't get reloaded
+      await supabase.from("sessions").delete().neq("number", "");
+      return false;
+    }
+
     let data = null;
 
     if (botConfig.BOT_NUMBER) {
