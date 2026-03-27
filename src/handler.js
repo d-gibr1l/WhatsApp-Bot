@@ -207,6 +207,7 @@ export async function handleMessage(sock, msg) {
 
   const cmdName = resolveAlias(rawCmd);
   const command = commands[cmdName];
+  console.log(`🔧 CMD: "${rawCmd}" → resolved: "${cmdName}" → found: ${!!command}`);
   if (!command) return;
 
   if (command.adminOnly && !userIsAdmin) {
