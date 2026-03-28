@@ -89,6 +89,7 @@ async function createSocket() {
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
     syncFullHistory: false,
+    maxMsgRetryCount: 3,
   });
 
   // saveCreds → Supabase (supabase-baileys handles it)
@@ -221,6 +222,13 @@ async function runBot() {
               botReady = false;  // allow full re-init on next QR scan
               if (stopPoller) { stopPoller(); stopPoller = null; }
               process.exit(0);
+            }
+
+            // 411 = Bad Session / corrupted keys — auto-heal by clearing and restarting
+            if (statusCode === 411) {
+              console.error("💀 Bad session (411). Clearing session and restarting...");
+              await clearSession();
+              process.exit(1);
             }
 
             resolve(true);

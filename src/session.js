@@ -42,22 +42,24 @@ function buildCachedAuthState(state) {
     },
 
     set: async (data) => {
-      // Update RAM immediately — bot continues without waiting
-      for (const [category, categoryData] of Object.entries(data)) {
-        for (const [id, value] of Object.entries(categoryData)) {
-          const cacheKey = `${category}-${id}`;
-          if (value) {
-            keyCache.set(cacheKey, value);
-          } else {
-            keyCache.delete(cacheKey);
+      // Write to Supabase FIRST — then update cache only on success
+      // If we update RAM first and DB fails, Bad MACs happen on next restart
+      try {
+        await state.keys.set(data);
+        for (const [category, categoryData] of Object.entries(data)) {
+          for (const [id, value] of Object.entries(categoryData)) {
+            const cacheKey = `${category}-${id}`;
+            if (value) {
+              keyCache.set(cacheKey, value);
+            } else {
+              keyCache.delete(cacheKey);
+            }
           }
         }
+      } catch (err) {
+        console.error("❌ Critical key sync error:", err.message);
+        // Don't update cache — keep RAM consistent with last known good DB state
       }
-
-      // Persist to Supabase in background — non-blocking
-      state.keys.set(data).catch(err => {
-        console.error("❌ Background key save failed:", err.message);
-      });
     },
   };
 
