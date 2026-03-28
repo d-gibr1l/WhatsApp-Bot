@@ -44,36 +44,16 @@ function makeLimit(concurrency) {
 }
 const limit = makeLimit(5); // max 5 chats processed simultaneously
 
-// ─── Periodic Supabase backup (every 60s) ────────────────────────────────────
-// creds.update → instant disk write only
-// Supabase backup runs on a timer — never on message arrival
-let sessionBackupInterval = null;
-
-function startSessionBackup() {
-  if (sessionBackupInterval) clearInterval(sessionBackupInterval);
-  sessionBackupInterval = setInterval(async () => {
-    try {
-      await saveSession();
-    } catch (err) {
-      console.error("❌ Session backup failed:", err.message);
-    }
-  }, 60_000);
-}
-
-// ─── SIGINT shutdown (fix #7) ─────────────────────────────────────────────────
-
 // ─── Global crash recovery ────────────────────────────────────────────────────
 
 process.on("uncaughtException", (err) => {
   console.error("💥 Uncaught Exception:", err.message);
   console.error(err.stack);
-  // Don't exit — let the bot keep running
 });
 
 process.on("unhandledRejection", (reason, promise) => {
   console.error("💥 Unhandled Rejection at:", promise);
   console.error("Reason:", reason);
-  // Don't exit — let the bot keep running
 });
 
 process.on("SIGINT", async () => {
@@ -82,7 +62,6 @@ process.on("SIGINT", async () => {
     try { currentSock.ev.removeAllListeners(); } catch {}
     try { currentSock.ws?.close(); } catch {}
   }
-  try { await saveSession(); console.log("💾 Session saved on exit."); } catch {}
   process.exit(0);
 });
 
@@ -92,7 +71,6 @@ process.on("SIGTERM", async () => {
     try { currentSock.ev.removeAllListeners(); } catch {}
     try { currentSock.ws?.close(); } catch {}
   }
-  try { await saveSession(); console.log("💾 Session saved on exit."); } catch {}
   process.exit(0);
 });
 
@@ -102,7 +80,7 @@ async function createSocket() {
   const { version, isLatest } = await fetchLatestBaileysVersion();
   console.log(`📦 Baileys ${version.join(".")} ${isLatest ? "(latest)" : "(outdated)"}`);
 
-  const { state, saveCreds } = await getAuthState(); // uses useMultiFileAuthState
+  const { state, saveCreds } = await getAuthState(); // uses supabase-baileys
 
   const sock = makeWASocket({
     version,
@@ -113,7 +91,7 @@ async function createSocket() {
     syncFullHistory: false,
   });
 
-  // creds.update → instant disk write, no Supabase involvement
+  // saveCreds is provided by supabase-baileys — saves each key update directly to Supabase
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("messaging-history.set", ({ messages }) => {
@@ -205,7 +183,6 @@ async function runBot() {
               if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
               startTime  = Date.now();
-              startSessionBackup(); // start 60s Supabase backup
               console.log("✅ Bot connected and ready!");
             } else {
               await loadCache();
@@ -215,7 +192,6 @@ async function runBot() {
               if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
               startTime  = Date.now();
-              startSessionBackup(); // restart 60s backup on reconnect
               console.log("🔄 Bot reconnected — data refreshed.");
             }
           }

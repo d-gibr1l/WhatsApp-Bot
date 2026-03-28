@@ -435,27 +435,20 @@ export async function handleStickerSessionImage(sock, msg, from) {
   const session = stickerSessions.get(from);
   if (!session) return false;
 
-  // In groups: participant holds sender JID
-  // In DMs: remoteJid is the sender, participant is undefined
-  // fromMe messages: treat as the session owner
   const sender = msg.key.fromMe
-    ? session.sender  // always accept own images
+    ? session.sender
     : (msg.key.participant ?? msg.key.remoteJid);
 
-  // Only collect images from the user who started the session
   if (sender !== session.sender) return false;
 
   const imgMsg = msg.message?.imageMessage;
   if (!imgMsg) return false;
 
-  try {
-    const buffer = await downloadMediaMessage(msg, "buffer", {});
-    session.images.push(buffer);
-    await reactMsg(sock, from, msg, "📸");
-    return true;
-  } catch {
-    return false;
-  }
+  // Store the full message object — download happens at !done time
+  // This avoids race conditions when 30 images arrive simultaneously
+  session.messages.push(msg);
+  await reactMsg(sock, from, msg, "📸");
+  return true;
 }
 
 export const bulkStickerCommands = {
@@ -486,7 +479,7 @@ export const bulkStickerCommands = {
         }
       }, SESSION_TIMEOUT);
 
-      stickerSessions.set(from, { sender, images: [], timer });
+      stickerSessions.set(from, { sender, messages: [], timer });
 
       await replyMsg(sock, from, msg,
         `📸 *Sticker session started!*\n\n` +
@@ -517,7 +510,7 @@ export const bulkStickerCommands = {
         return replyMsg(sock, from, msg, "❌ Only the person who started the session can finish it.");
       }
 
-      if (session.images.length === 0) {
+      if (session.messages.length === 0) {
         clearTimeout(session.timer);
         stickerSessions.delete(from);
         return replyMsg(sock, from, msg,
@@ -528,16 +521,16 @@ export const bulkStickerCommands = {
       clearTimeout(session.timer);
       stickerSessions.delete(from);
 
-      const total = session.images.length;
+      const total = session.messages.length;
       await reactMsg(sock, from, msg, "⏳");
-      await replyMsg(sock, from, msg, `⚙️ Converting ${total} image${total > 1 ? "s" : ""} to stickers...`);
 
       let success = 0;
       let failed  = 0;
 
-      for (const imgBuffer of session.images) {
+      for (const imgMsg of session.messages) {
         try {
-          const webp = await imageToSticker(imgBuffer);
+          const buffer = await downloadMediaMessage(imgMsg, "buffer", {});
+          const webp   = await imageToSticker(buffer);
           await sock.sendMessage(from, { sticker: webp }, { quoted: msg });
           success++;
         } catch {
@@ -568,7 +561,7 @@ export const bulkStickerCommands = {
 
       clearTimeout(session.timer);
       stickerSessions.delete(from);
-      await replyMsg(sock, from, msg, `🗑️ Sticker session cancelled. ${session.images.length} image${session.images.length !== 1 ? "s" : ""} discarded.`);
+      await replyMsg(sock, from, msg, `🗑️ Sticker session cancelled. ${session.messages.length} image${session.messages.length !== 1 ? "s" : ""} discarded.`);
     },
   },
 
