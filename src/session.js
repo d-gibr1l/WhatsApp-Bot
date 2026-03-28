@@ -42,24 +42,33 @@ function buildCachedAuthState(state) {
     },
 
     set: async (data) => {
-      // Write to Supabase FIRST — then update cache only on success
-      // If we update RAM first and DB fails, Bad MACs happen on next restart
-      try {
-        await state.keys.set(data);
-        for (const [category, categoryData] of Object.entries(data)) {
-          for (const [id, value] of Object.entries(categoryData)) {
-            const cacheKey = `${category}-${id}`;
-            if (value) {
-              keyCache.set(cacheKey, value);
-            } else {
-              keyCache.delete(cacheKey);
-            }
+      // Update RAM immediately so bot never blocks on DB latency
+      for (const [category, categoryData] of Object.entries(data)) {
+        for (const [id, value] of Object.entries(categoryData)) {
+          const cacheKey = `${category}-${id}`;
+          if (value) {
+            keyCache.set(cacheKey, value);
+          } else {
+            keyCache.delete(cacheKey);
           }
         }
-      } catch (err) {
-        console.error("❌ Critical key sync error:", err.message);
-        // Don't update cache — keep RAM consistent with last known good DB state
       }
+
+      // Persist to Supabase with retry — up to 3 attempts
+      let attempts = 0;
+      const persist = async () => {
+        try {
+          await state.keys.set(data);
+        } catch (err) {
+          attempts++;
+          if (attempts < 3) {
+            setTimeout(persist, 500 * attempts); // 500ms, 1000ms backoff
+          } else {
+            console.error("❌ Key sync failed after 3 attempts:", err.message);
+          }
+        }
+      };
+      persist();
     },
   };
 
