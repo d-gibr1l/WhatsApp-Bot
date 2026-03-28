@@ -80,7 +80,7 @@ async function createSocket() {
   const { version, isLatest } = await fetchLatestBaileysVersion();
   console.log(`📦 Baileys ${version.join(".")} ${isLatest ? "(latest)" : "(outdated)"}`);
 
-  const { state, saveCreds } = await getAuthState(); // uses supabase-baileys
+  const { state, saveCreds } = await getAuthState(); // supabase-baileys + RAM cache
 
   const sock = makeWASocket({
     version,
@@ -91,7 +91,7 @@ async function createSocket() {
     syncFullHistory: false,
   });
 
-  // saveCreds is provided by supabase-baileys — saves each key update directly to Supabase
+  // saveCreds → Supabase (supabase-baileys handles it)
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("messaging-history.set", ({ messages }) => {

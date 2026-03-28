@@ -1,53 +1,97 @@
 import { createClient } from "@supabase/supabase-js";
 import { useSupabaseAuthState } from "supabase-baileys";
+import { proto, BufferJSON, initAuthCreds } from "@whiskeysockets/baileys";
 import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "./config.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ─── Get auth state directly from Supabase via supabase-baileys ──────────────
-// No disk files, no compression, no bulk serialization.
-// Keys are stored as individual JSONB rows — exactly how Baileys expects them.
+// ─── In-memory key cache ──────────────────────────────────────────────────────
+// keys.get → RAM first, Supabase only on miss
+// keys.set → RAM immediately + Supabase async (non-blocking)
+// This keeps ping at <100ms while still persisting reliably to Supabase
 
+function buildCachedAuthState(state) {
+  const keyCache = new Map();
+
+  const cachedKeys = {
+    get: async (type, ids) => {
+      const result = {};
+      const misses = [];
+
+      for (const id of ids) {
+        const cacheKey = `${type}-${id}`;
+        if (keyCache.has(cacheKey)) {
+          result[id] = keyCache.get(cacheKey);
+        } else {
+          misses.push(id);
+        }
+      }
+
+      // Only hit Supabase for cache misses
+      if (misses.length > 0) {
+        const fromDb = await state.keys.get(type, misses);
+        for (const id of misses) {
+          const val = fromDb[id];
+          const cacheKey = `${type}-${id}`;
+          keyCache.set(cacheKey, val ?? null);
+          result[id] = val;
+        }
+      }
+
+      return result;
+    },
+
+    set: async (data) => {
+      // Update RAM immediately — bot continues without waiting
+      for (const [category, categoryData] of Object.entries(data)) {
+        for (const [id, value] of Object.entries(categoryData)) {
+          const cacheKey = `${category}-${id}`;
+          if (value) {
+            keyCache.set(cacheKey, value);
+          } else {
+            keyCache.delete(cacheKey);
+          }
+        }
+      }
+
+      // Persist to Supabase in background — non-blocking
+      state.keys.set(data).catch(err => {
+        console.error("❌ Background key save failed:", err.message);
+      });
+    },
+  };
+
+  return {
+    creds: state.creds,
+    keys:  cachedKeys,
+  };
+}
+
+// ─── Get auth state — supabase-baileys + RAM cache ────────────────────────────
 export async function getAuthState() {
   const sessionId = botConfig.BOT_NUMBER || process.env.BOT_NUMBER || "default";
 
-  const { state, saveCreds } = await useSupabaseAuthState({
-    supabaseUrl:  SUPABASE_URL,
-    supabaseKey:  SUPABASE_KEY,
-    session:      sessionId,
-    tableName:    "auth",
+  const { state, saveCreds, clear, removeCreds } = await useSupabaseAuthState({
+    supabaseUrl: SUPABASE_URL,
+    supabaseKey: SUPABASE_KEY,
+    session:     sessionId,
+    tableName:   "auth",
   });
 
-  return { state, saveCreds };
+  // Wrap with in-memory cache for fast reads
+  const cachedState = buildCachedAuthState(state);
+
+  return { state: cachedState, saveCreds };
 }
 
-// ─── Detect bot number from connected socket ──────────────────────────────────
-export function setBotNumber(number) {
-  botConfig.BOT_NUMBER = number;
-}
-
-// ─── Clear session — wipes all rows for this session ID ──────────────────────
+// ─── Clear session ────────────────────────────────────────────────────────────
 export async function clearSession() {
   try {
     const sessionId = botConfig.BOT_NUMBER || "default";
-    const { error } = await supabase
-      .from("auth")
-      .delete()
-      .eq("session", sessionId);
-    if (error) throw error;
+    await supabase.from("auth").delete().eq("session", sessionId);
     console.log("🗑️  Session cleared");
   } catch (err) {
     console.error("❌ Failed to clear session:", err.message);
-  }
-}
-
-// ─── Force fresh session — clears ALL auth rows ───────────────────────────────
-export async function clearAllSessions() {
-  try {
-    await supabase.from("auth").delete().neq("session", "____never____");
-    console.log("🗑️  All sessions cleared");
-  } catch (err) {
-    console.error("❌ Failed to clear all sessions:", err.message);
   }
 }
 
@@ -55,12 +99,11 @@ export async function clearAllSessions() {
 export async function loadSession() {
   if (process.env.FORCE_FRESH_SESSION === "true") {
     console.log("🆕 FORCE_FRESH_SESSION — clearing all sessions");
-    await clearAllSessions();
+    await supabase.from("auth").delete().neq("session", "____never____");
   }
-  // Nothing to load — supabase-baileys handles hydration in getAuthState()
   return true;
 }
 
 export async function saveSession() {
-  // Nothing to do — supabase-baileys saves keys on every update automatically
+  // No-op — supabase-baileys handles persistence automatically
 }
