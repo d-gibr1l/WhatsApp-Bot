@@ -3,7 +3,7 @@ import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ─── Admins ───────────────────────────────────────────────────────────────────
+// ─── Bulk Loaders (used strictly by cache.js to populate RAM) ─────────────────
 
 export async function getAdmins() {
   try {
@@ -16,24 +16,51 @@ export async function getAdmins() {
   }
 }
 
-export async function addAdmin(number) {
-  const { error } = await supabase
-    .from("admins")
-    .upsert({ number }, { onConflict: "number" });
-  if (error) throw error;
+export async function getAllSettings() {
+  try {
+    const { data, error } = await supabase.from("settings").select("key, value");
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.error("❌ getAllSettings:", err.message);
+    return [];
+  }
 }
 
-export async function removeAdmin(number) {
-  const { error } = await supabase.from("admins").delete().eq("number", number);
-  if (error) throw error;
+export async function getBannedList() {
+  try {
+    const { data, error } = await supabase.from("banned_numbers").select("number, reason");
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.error("❌ getBannedList:", err.message);
+    return [];
+  }
 }
 
-export async function isAdminNumber(number) {
-  const admins = await getAdmins();
-  return admins.includes(number);
+export async function getAllowedGroups() {
+  try {
+    const { data, error } = await supabase.from("allowed_groups").select("group_id, name");
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.error("❌ getAllowedGroups:", err.message);
+    return [];
+  }
 }
 
-// ─── Settings ─────────────────────────────────────────────────────────────────
+export async function getAllAutoReplies() {
+  try {
+    const { data, error } = await supabase.from("auto_replies").select("keyword, response");
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.error("❌ getAllAutoReplies:", err.message);
+    return [];
+  }
+}
+
+// ─── Single setting read (used by commands that need a value not in cache) ────
 
 export async function getSetting(key, fallback = null) {
   try {
@@ -49,25 +76,24 @@ export async function getSetting(key, fallback = null) {
   }
 }
 
+// ─── Mutations (Writes) ───────────────────────────────────────────────────────
+
+export async function addAdmin(number) {
+  const { error } = await supabase.from("admins").upsert({ number }, { onConflict: "number" });
+  if (error) throw error;
+}
+
+export async function removeAdmin(number) {
+  const { error } = await supabase.from("admins").delete().eq("number", number);
+  if (error) throw error;
+}
+
 export async function setSetting(key, value) {
   const { error } = await supabase
     .from("settings")
     .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) throw error;
 }
-
-export async function getAllSettings() {
-  try {
-    const { data, error } = await supabase.from("settings").select("key, value");
-    if (error) throw error;
-    return data;
-  } catch (err) {
-    console.error("❌ getAllSettings:", err.message);
-    return [];
-  }
-}
-
-// ─── Banned Numbers ───────────────────────────────────────────────────────────
 
 export async function banNumber(number, reason = "No reason given") {
   const { error } = await supabase
@@ -77,34 +103,9 @@ export async function banNumber(number, reason = "No reason given") {
 }
 
 export async function unbanNumber(number) {
-  const { error } = await supabase
-    .from("banned_numbers").delete().eq("number", number);
+  const { error } = await supabase.from("banned_numbers").delete().eq("number", number);
   if (error) throw error;
 }
-
-export async function isBanned(number) {
-  try {
-    const { data, error } = await supabase
-      .from("banned_numbers").select("number").eq("number", number).single();
-    return !error && !!data;
-  } catch {
-    return false;
-  }
-}
-
-export async function getBannedList() {
-  try {
-    const { data, error } = await supabase
-      .from("banned_numbers").select("number, reason");
-    if (error) throw error;
-    return data;
-  } catch (err) {
-    console.error("❌ getBannedList:", err.message);
-    return [];
-  }
-}
-
-// ─── Allowed Groups ───────────────────────────────────────────────────────────
 
 export async function allowGroup(groupId, name = "") {
   const { error } = await supabase
@@ -114,34 +115,9 @@ export async function allowGroup(groupId, name = "") {
 }
 
 export async function removeGroup(groupId) {
-  const { error } = await supabase
-    .from("allowed_groups").delete().eq("group_id", groupId);
+  const { error } = await supabase.from("allowed_groups").delete().eq("group_id", groupId);
   if (error) throw error;
 }
-
-export async function isGroupAllowed(groupId) {
-  try {
-    const { data, error } = await supabase
-      .from("allowed_groups").select("group_id").eq("group_id", groupId).single();
-    return !error && !!data;
-  } catch {
-    return false;
-  }
-}
-
-export async function getAllowedGroups() {
-  try {
-    const { data, error } = await supabase
-      .from("allowed_groups").select("group_id, name");
-    if (error) throw error;
-    return data;
-  } catch (err) {
-    console.error("❌ getAllowedGroups:", err.message);
-    return [];
-  }
-}
-
-// ─── Auto Replies ─────────────────────────────────────────────────────────────
 
 export async function addAutoReply(keyword, response) {
   const { error } = await supabase
@@ -152,36 +128,11 @@ export async function addAutoReply(keyword, response) {
 
 export async function removeAutoReply(keyword) {
   const { error } = await supabase
-    .from("auto_replies").delete().eq("keyword", keyword.toLowerCase());
+    .from("auto_replies")
+    .delete()
+    .eq("keyword", keyword.toLowerCase());
   if (error) throw error;
 }
-
-export async function getAutoReply(text) {
-  try {
-    const { data, error } = await supabase
-      .from("auto_replies").select("keyword, response");
-    if (error || !data) return null;
-    const lower = text.toLowerCase();
-    const match = data.find((r) => lower.includes(r.keyword));
-    return match?.response ?? null;
-  } catch {
-    return null;
-  }
-}
-
-export async function getAllAutoReplies() {
-  try {
-    const { data, error } = await supabase
-      .from("auto_replies").select("keyword, response");
-    if (error) throw error;
-    return data;
-  } catch (err) {
-    console.error("❌ getAllAutoReplies:", err.message);
-    return [];
-  }
-}
-
-// ─── Warnings ─────────────────────────────────────────────────────────────────
 
 export async function warnUser(number, reason = "No reason given") {
   const { data } = await supabase
@@ -189,10 +140,8 @@ export async function warnUser(number, reason = "No reason given") {
     .select("count, reasons")
     .eq("number", number)
     .single();
-
   const count   = (data?.count ?? 0) + 1;
   const reasons = [...(data?.reasons ?? []), reason];
-
   const { error } = await supabase
     .from("warnings")
     .upsert({ number, count, reasons }, { onConflict: "number" });
@@ -203,7 +152,10 @@ export async function warnUser(number, reason = "No reason given") {
 export async function getWarnings(number) {
   try {
     const { data, error } = await supabase
-      .from("warnings").select("count, reasons").eq("number", number).single();
+      .from("warnings")
+      .select("count, reasons")
+      .eq("number", number)
+      .single();
     if (error || !data) return { count: 0, reasons: [] };
     return data;
   } catch {
@@ -212,21 +164,16 @@ export async function getWarnings(number) {
 }
 
 export async function clearWarnings(number) {
-  const { error } = await supabase
-    .from("warnings").delete().eq("number", number);
+  const { error } = await supabase.from("warnings").delete().eq("number", number);
   if (error) throw error;
 }
 
 // ─── Reminders ────────────────────────────────────────────────────────────────
 
 export async function addReminder(number, chatId, message, fireAt) {
-  const { error } = await supabase.from("reminders").insert({
-    number,
-    chat_id: chatId,
-    message,
-    fire_at: fireAt,
-    done: false,
-  });
+  const { error } = await supabase
+    .from("reminders")
+    .insert({ number, chat_id: chatId, message, fire_at: fireAt, done: false });
   if (error) throw error;
 }
 
@@ -249,20 +196,36 @@ export async function markReminderDone(id) {
   await supabase.from("reminders").update({ done: true }).eq("id", id);
 }
 
-// ─── Stats ────────────────────────────────────────────────────────────────────
+// ─── Buffered Stats Logging ───────────────────────────────────────────────────
+// Instead of 1 insert per message, batches them into one insert every 5 seconds.
+// Prevents Supabase connection pool exhaustion under high message volume.
 
-export async function logMessage(number, chatId, isGroup) {
-  try {
-    await supabase.from("message_logs").insert({
-      number,
-      chat_id: chatId,
-      is_group: isGroup,
-      sent_at: new Date().toISOString(),
-    });
-  } catch {
-    // non-critical, silently fail
-  }
+let logBuffer = [];
+let isFlushingLogs = false;
+
+export function logMessage(number, chatId, isGroup) {
+  logBuffer.push({
+    number,
+    chat_id:  chatId,
+    is_group: isGroup,
+    sent_at:  new Date().toISOString(),
+  });
 }
+
+setInterval(async () => {
+  if (logBuffer.length === 0 || isFlushingLogs) return;
+  isFlushingLogs = true;
+  const batch = [...logBuffer];
+  logBuffer = [];
+  try {
+    const { error } = await supabase.from("message_logs").insert(batch);
+    if (error) throw error;
+  } catch (err) {
+    console.error(`❌ Failed to flush ${batch.length} message logs:`, err.message);
+  } finally {
+    isFlushingLogs = false;
+  }
+}, 5000);
 
 export async function getStats() {
   try {

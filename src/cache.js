@@ -1,6 +1,6 @@
 // ─── cache.js ──────────────────────────────────────────────
-// Production-ready in-memory cache with true LRU, trie-based auto-replies, atomic swaps,
-// metrics, validation, and instant LISTEN/NOTIFY refresh.
+// Production-ready in-memory cache with true LRU, word-based Trie auto-replies, 
+// atomic swaps, metrics, validation, and instant LISTEN/NOTIFY refresh.
 
 import {
   getAdmins,
@@ -10,6 +10,7 @@ import {
   getAllAutoReplies,
 } from "./db.js";
 import pg from "pg";
+import { LRUCache } from "lru-cache";
 import { DATABASE_URL } from "./config.js";
 
 // ─── Helpers ──────────────────────────────────────────────
@@ -18,7 +19,7 @@ function normalizeNumber(num) {
   return String(num || "").replace(/\D/g, "");
 }
 
-// ─── Trie for Auto-Replies ─────────────────────────────────
+// ─── Trie for Auto-Replies (Word-Based) ───────────────────
 
 class TrieNode {
   constructor() {
@@ -33,21 +34,21 @@ class Trie {
   }
 
   insert(keyword, response) {
+    const words = keyword.toLowerCase().split(/\s+/);
     let node = this.root;
-    for (const char of keyword) {
-      if (!node.children.has(char)) node.children.set(char, new TrieNode());
-      node = node.children.get(char);
+    for (const word of words) {
+      if (!node.children.has(word)) node.children.set(word, new TrieNode());
+      node = node.children.get(word);
     }
     node.response = response;
   }
 
-  // Match whole words only to prevent partial matches (e.g. "hi" inside "this")
   search(text) {
     const words = text.toLowerCase().split(/\s+/);
-    for (const word of words) {
+    for (let i = 0; i < words.length; i++) {
       let node = this.root;
-      for (const char of word) {
-        node = node.children.get(char);
+      for (let j = i; j < words.length; j++) {
+        node = node.children.get(words[j]);
         if (!node) break;
         if (node.response) return node.response;
       }
@@ -56,47 +57,26 @@ class Trie {
   }
 }
 
-// ─── True LRU ─────────────────────────────────────────────
-
-class LRU {
-  constructor(maxSize) {
-    this.maxSize = maxSize;
-    this.map = new Map();
-  }
-
-  has(key) {
-    if (!this.map.has(key)) return false;
-    // Move to end to mark as recently used
-    const value = this.map.get(key);
-    this.map.delete(key);
-    this.map.set(key, value);
-    return true;
-  }
-
-  set(key, value = true) {
-    if (this.map.has(key)) this.map.delete(key);
-    this.map.set(key, value);
-    if (this.map.size > this.maxSize) {
-      this.map.delete(this.map.keys().next().value);
-    }
-  }
-}
-
 // ─── State ────────────────────────────────────────────────
 
-let cache = null;
-const messageCache = new LRU(1000);
-
-export const stats = {
-  cacheLoads: 0,
-  autoReplyHits: 0,
-  autoReplyMisses: 0,
-  messagesSeen: 0,
+export let cache = {
+  admins:        new Set(),
+  banned:        new Set(),
+  allowedGroups: new Set(),
+  settings:      new Map(),
+  autoReplyTrie: new Trie(),
 };
 
-function ensureLoaded() {
-  if (!cache) throw new Error("Cache not loaded yet");
-}
+const messageCache = new LRUCache({ max: 1000 });
+const botSentCache = new LRUCache({ max: 500 });
+const aiSentCache  = new LRUCache({ max: 200 });
+
+export const stats = {
+  cacheLoads:       0,
+  autoReplyHits:    0,
+  autoReplyMisses:  0,
+  messagesSeen:     0,
+};
 
 // ─── Build Auto-Reply Trie ────────────────────────────────
 
@@ -104,7 +84,7 @@ function buildAutoReplyTrie(autoReplies) {
   const trie = new Trie();
   for (const r of (autoReplies || [])) {
     if (!r.keyword || !r.response) continue;
-    trie.insert(r.keyword.toLowerCase(), r.response);
+    trie.insert(r.keyword, r.response);
   }
   return trie;
 }
@@ -122,11 +102,11 @@ export async function loadCache() {
     ]);
 
     cache = {
-      admins:         new Set((admins   || []).map(normalizeNumber)),
-      banned:         new Set((banned   || []).map((b) => normalizeNumber(b.number))),
-      allowedGroups:  new Set((groups   || []).map((g) => g.group_id)),
-      settings:       new Map((settings || []).map((s) => [s.key, s.value])),
-      autoReplyTrie:  buildAutoReplyTrie(autoReplies),
+      admins:        new Set((admins   || []).map(normalizeNumber)),
+      banned:        new Set((banned   || []).map((b) => normalizeNumber(b.number))),
+      allowedGroups: new Set((groups   || []).map((g) => g.group_id)),
+      settings:      new Map((settings || []).map((s) => [s.key, s.value])),
+      autoReplyTrie: buildAutoReplyTrie(autoReplies),
     };
 
     stats.cacheLoads++;
@@ -140,11 +120,20 @@ export async function loadCache() {
   }
 }
 
-// Auto-refresh every N ms (call once in index.js after loadCache)
+// ─── LISTEN/NOTIFY Architecture ───────────────────────────
+
+let safetyInterval  = null;
+let fallbackInterval = null;
+let pgClient        = null;
+
 export function startCacheAutoRefresh() {
-  // ── Postgres LISTEN/NOTIFY — instant push when DB rows change ────────────
+  // Clean up existing connections to prevent memory leaks on reconnect
+  if (safetyInterval)  clearInterval(safetyInterval);
+  if (fallbackInterval) clearInterval(fallbackInterval);
+  if (pgClient) pgClient.end().catch(() => {});
+
   if (DATABASE_URL) {
-    const client = new pg.Client({ connectionString: DATABASE_URL });
+    pgClient = new pg.Client({ connectionString: DATABASE_URL });
 
     const channelMap = {
       cache_admins:      refreshAdmins,
@@ -154,9 +143,9 @@ export function startCacheAutoRefresh() {
       cache_autoreplies: refreshAutoReplies,
     };
 
-    client.connect()
+    pgClient.connect()
       .then(async () => {
-        client.on("notification", (msg) => {
+        pgClient.on("notification", (msg) => {
           const fn = channelMap[msg.channel];
           if (fn) {
             fn();
@@ -165,28 +154,26 @@ export function startCacheAutoRefresh() {
         });
 
         for (const channel of Object.keys(channelMap)) {
-          await client.query(`LISTEN ${channel}`);
+          await pgClient.query(`LISTEN ${channel}`);
         }
 
         console.log("✅ LISTEN/NOTIFY cache active — instant DB updates enabled");
 
-        // Reconnect if connection drops
-        client.on("error", (err) => {
+        pgClient.on("error", (err) => {
           console.error("❌ PG notify connection error:", err.message);
           setTimeout(() => startCacheAutoRefresh(), 5000);
         });
       })
       .catch((err) => {
-        console.warn(`⚠️  LISTEN/NOTIFY unavailable (${err.message}) — falling back to 30s polling`);
-        setInterval(loadCache, 30_000);
+        console.warn(`⚠️ LISTEN/NOTIFY unavailable (${err.message}) — falling back to 30s polling`);
+        fallbackInterval = setInterval(loadCache, 30_000);
       });
 
-    // Safety net — full refresh every 10 minutes regardless
-    setInterval(loadCache, 10 * 60 * 1000);
+    // Safety net full refresh every 10 minutes
+    safetyInterval = setInterval(loadCache, 10 * 60 * 1000);
   } else {
-    // No DATABASE_URL set — use polling
-    console.log("ℹ️  No DATABASE_URL — using 30s polling for cache refresh");
-    setInterval(loadCache, 30_000);
+    console.log("ℹ️ No DATABASE_URL — using 30s polling for cache refresh");
+    fallbackInterval = setInterval(loadCache, 30_000);
   }
 }
 
@@ -194,7 +181,6 @@ export function startCacheAutoRefresh() {
 
 async function refreshKey(key, fetcher, transform) {
   try {
-    ensureLoaded();
     const data = await fetcher();
     cache[key] = transform(data || []);
   } catch (err) {
@@ -222,7 +208,6 @@ export const refreshSettings = () =>
 
 export async function refreshAutoReplies() {
   try {
-    ensureLoaded();
     const data = await getAllAutoReplies();
     cache.autoReplyTrie = buildAutoReplyTrie(data);
   } catch (err) {
@@ -233,87 +218,55 @@ export async function refreshAutoReplies() {
 // ─── Readers ──────────────────────────────────────────────
 
 export function cachedIsAdmin(number) {
-  ensureLoaded();
   return cache.admins.has(normalizeNumber(number));
 }
 
 export function cachedIsBanned(number) {
-  ensureLoaded();
   return cache.banned.has(normalizeNumber(number));
 }
 
 export function cachedIsGroupAllowed(groupId) {
-  ensureLoaded();
   return cache.allowedGroups.has(groupId);
 }
 
 export function cachedHasAllowedGroups() {
-  ensureLoaded();
   return cache.allowedGroups.size > 0;
 }
 
 export function cachedGetSetting(key, fallback = null) {
-  ensureLoaded();
   return cache.settings.get(key) ?? fallback;
 }
 
 export function cachedGetAutoReply(text) {
-  ensureLoaded();
   const response = cache.autoReplyTrie.search(text);
-  if (!response) {
-    stats.autoReplyMisses++;
-    return null;
-  }
+  if (!response) { stats.autoReplyMisses++; return null; }
   stats.autoReplyHits++;
   return response;
 }
 
-// ─── Message LRU ─────────────────────────────────────────
+// ─── LRU Message Trackers ─────────────────────────────────
 
 export function seenMessage(id) {
   return messageCache.has(id);
 }
 
 export function rememberMessage(id) {
-  messageCache.set(id);
+  messageCache.set(id, true);
   stats.messagesSeen++;
 }
 
-// ─── Bot Sent Message Tracker ─────────────────────────────────────────────────
-// Tracks IDs of messages the bot itself sent, so AI only replies to those
-
-const botSentIds = new Set();
-const BOT_SENT_MAX = 500;
+export function isBotSentMessage(id) {
+  return id ? botSentCache.has(id) : false;
+}
 
 export function rememberBotSent(id) {
-  if (!id) return;
-  botSentIds.add(id);
-  // Keep set from growing unbounded
-  if (botSentIds.size > BOT_SENT_MAX) {
-    const first = botSentIds.values().next().value;
-    botSentIds.delete(first);
-  }
-}
-
-export function isBotSentMessage(id) {
-  return id ? botSentIds.has(id) : false;
-}
-
-// ─── AI Response Tracker ──────────────────────────────────────────────────────
-// Only tracks IDs of actual AI responses — prevents !ping, !menu etc from triggering AI
-
-const aiSentIds = new Set();
-const AI_SENT_MAX = 200;
-
-export function rememberAiSent(id) {
-  if (!id) return;
-  aiSentIds.add(id);
-  if (aiSentIds.size > AI_SENT_MAX) {
-    const first = aiSentIds.values().next().value;
-    aiSentIds.delete(first);
-  }
+  if (id) botSentCache.set(id, true);
 }
 
 export function isAiSentMessage(id) {
-  return id ? aiSentIds.has(id) : false;
+  return id ? aiSentCache.has(id) : false;
+}
+
+export function rememberAiSent(id) {
+  if (id) aiSentCache.set(id, true);
 }

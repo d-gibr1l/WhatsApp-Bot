@@ -4,6 +4,7 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import pino from "pino";
+import { LRUCache } from "lru-cache";
 
 import { SESSION_DIR, MAX_RECONNECTS, BASE_DELAY_MS, botConfig } from "./src/config.js";
 import { loadSession, saveSession, clearSession, getAuthState } from "./src/session.js";
@@ -12,7 +13,7 @@ import { loadWordFilter } from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
 import { loadAliases } from "./src/commands/aliases.js";
 import { handleAntiDelete, storeMessage } from "./src/commands/antidelete.js";
-import { loadCache, startCacheAutoRefresh } from "./src/cache.js";
+import { loadCache, startCacheAutoRefresh, cachedGetSetting } from "./src/cache.js";
 import { startServer, setQR, setConnected, setDisconnected, setStarting, setConnecting } from "./src/server.js";
 
 const logger = pino({ level: "silent" });
@@ -279,14 +280,13 @@ async function runBot() {
         });
 
         // ─── Anti-delete ────────────────────────────────────────────────────
-        // Dedup set prevents double-triggering if both events fire for same message
-        const recentlyRevoked = new Set();
+        // LRUCache handles TTL and memory limits automatically — no setTimeout needed
+        const recentlyRevoked = new LRUCache({ max: 500, ttl: 5000 });
 
         async function safeHandleDelete(sock, key) {
           const id = key?.id;
           if (!id || recentlyRevoked.has(id)) return;
-          recentlyRevoked.add(id);
-          setTimeout(() => recentlyRevoked.delete(id), 5000); // expire after 5s
+          recentlyRevoked.set(id, true);
           await handleAntiDelete(sock, key);
         }
 
@@ -321,42 +321,32 @@ async function runBot() {
         // ─── Welcome / Goodbye ───────────────────────────────────────────────
         sock.ev.on("group-participants.update", async ({ id, participants, action }) => {
           try {
-            const { getSetting } = await import("./src/db.js");
-
             for (const participant of participants) {
               const number = participant.split("@")[0];
 
               if (action === "add") {
-                const enabled = await getSetting(`welcome_enabled_${id}`, "false");
+                const enabled = cachedGetSetting(`welcome_enabled_${id}`, "false");
                 if (enabled !== "true") continue;
 
                 const groupMeta = await sock.groupMetadata(id).catch(() => null);
                 const groupName = groupMeta?.subject || "the group";
-                const memberName = number;
 
-                let template = await getSetting(`welcome_${id}`, null);
-                if (!template) template = `👋 Welcome *{name}* to *{group}*!`;
-
+                const template = cachedGetSetting(`welcome_${id}`, `👋 Welcome *{name}* to *{group}*!`);
                 const text = template
-                  .replace(/{name}/g, memberName)
+                  .replace(/{name}/g, number)
                   .replace(/{group}/g, groupName)
                   .replace(/{number}/g, number);
 
-                await sock.sendMessage(id, {
-                  text,
-                  mentions: [participant],
-                });
+                await sock.sendMessage(id, { text, mentions: [participant] });
 
               } else if (action === "remove") {
-                const enabled = await getSetting(`goodbye_enabled_${id}`, "false");
+                const enabled = cachedGetSetting(`goodbye_enabled_${id}`, "false");
                 if (enabled !== "true") continue;
 
                 const groupMeta = await sock.groupMetadata(id).catch(() => null);
                 const groupName = groupMeta?.subject || "the group";
 
-                let template = await getSetting(`goodbye_${id}`, null);
-                if (!template) template = `👋 *{name}* has left *{group}*. Goodbye!`;
-
+                const template = cachedGetSetting(`goodbye_${id}`, `👋 *{name}* has left *{group}*. Goodbye!`);
                 const text = template
                   .replace(/{name}/g, number)
                   .replace(/{group}/g, groupName)
@@ -373,8 +363,7 @@ async function runBot() {
         // ─── Auto-reject calls ───────────────────────────────────────────────
         sock.ev.on("call", async (calls) => {
           try {
-            const { getSetting: getS } = await import("./src/db.js");
-            const rejectCalls = await getS("reject_calls", "false");
+            const rejectCalls = cachedGetSetting("reject_calls", "false");
             if (rejectCalls !== "true") return;
             for (const call of calls) {
               if (call.status === "offer") {

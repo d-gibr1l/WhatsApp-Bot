@@ -154,6 +154,13 @@ export async function handleMessage(sock, msg) {
 
   if (msg.key.fromMe && !text) return;
 
+  // ── Guardrails — fast RAM checks, no DB ─────────────────────────────────
+  if (cachedIsBanned(sender)) return;
+  if (isGrp && cachedHasAllowedGroups() && !cachedIsGroupAllowed(from)) return;
+
+  const botActive = cachedGetSetting("bot_active", "true");
+  if (botActive !== "true" && !userIsAdmin) return;
+
   // Fix #3: Only run word filter + anti-link on non-command messages
   if (!text.startsWith(prefix)) {
     if (!userIsAdmin && text) {
@@ -164,8 +171,8 @@ export async function handleMessage(sock, msg) {
     }
   }
 
-  // Activity logging (non-blocking)
-  logMessage(sender, from, isGrp).catch(() => {});
+  // Activity logging — buffered, non-blocking
+  logMessage(sender, from, isGrp);
 
   // ── Auto-replies and AI ──────────────────────────────────────────────────
   if (!text.startsWith(prefix)) {

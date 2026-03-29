@@ -11,7 +11,17 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // This keeps ping at <100ms while still persisting reliably to Supabase
 
 function buildCachedAuthState(state) {
+  // LRU-style cache with max size to prevent unbounded growth
+  // Simple Map with size cap — avoids adding lru-cache dependency
+  const MAX_CACHE = 3000;
   const keyCache = new Map();
+  function cacheSet(k, v) {
+    if (keyCache.size >= MAX_CACHE) {
+      // Evict oldest entry
+      keyCache.delete(keyCache.keys().next().value);
+    }
+    keyCache.set(k, v);
+  }
 
   const cachedKeys = {
     get: async (type, ids) => {
@@ -33,7 +43,7 @@ function buildCachedAuthState(state) {
         for (const id of misses) {
           const val = fromDb[id];
           const cacheKey = `${type}-${id}`;
-          keyCache.set(cacheKey, val ?? null);
+          cacheSet(cacheKey, val ?? null);
           result[id] = val;
         }
       }
@@ -47,7 +57,7 @@ function buildCachedAuthState(state) {
         for (const [id, value] of Object.entries(categoryData)) {
           const cacheKey = `${category}-${id}`;
           if (value) {
-            keyCache.set(cacheKey, value);
+            cacheSet(cacheKey, value);
           } else {
             keyCache.delete(cacheKey);
           }
