@@ -60,7 +60,7 @@ export async function getAllAutoReplies() {
   }
 }
 
-// ─── Single setting read (used by commands that need a value not in cache) ────
+// ─── Single setting/status read ──────────────────────────────────────────────
 
 export async function getSetting(key, fallback = null) {
   try {
@@ -73,6 +73,21 @@ export async function getSetting(key, fallback = null) {
     return data.value;
   } catch {
     return fallback;
+  }
+}
+
+export async function isBanned(number) {
+  try {
+    const { data, error } = await supabase
+      .from("banned_numbers")
+      .select("number")
+      .eq("number", number)
+      .maybeSingle();
+    if (error) throw error;
+    return !!data; // Returns true if data exists, false otherwise
+  } catch (err) {
+    console.error("❌ isBanned:", err.message);
+    return false;
   }
 }
 
@@ -197,8 +212,6 @@ export async function markReminderDone(id) {
 }
 
 // ─── Buffered Stats Logging ───────────────────────────────────────────────────
-// Instead of 1 insert per message, batches them into one insert every 5 seconds.
-// Prevents Supabase connection pool exhaustion under high message volume.
 
 let logBuffer = [];
 let isFlushingLogs = false;
