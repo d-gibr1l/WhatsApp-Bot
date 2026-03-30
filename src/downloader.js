@@ -1,223 +1,247 @@
-import { botConfig } from "./config.js";
-import { commands, replyMsg, isAdmin } from "./commands/registry.js";
-import { logMessage, getPendingReminders, markReminderDone } from "./db.js";
-import {
-  cachedIsBanned, cachedIsGroupAllowed, cachedHasAllowedGroups,
-  cachedGetSetting, cachedGetAutoReply, cachedIsAdmin,
-  seenMessage, rememberMessage,
-} from "./cache.js";
-import { handleAiReply } from "./commands/ai.js";
-import { handleWordFilter } from "./commands/wordfilter.js";
-import { handleAntiLink } from "./commands/antilink.js";
-import { resolveAlias } from "./commands/aliases.js";
-import { hasStickerSession, handleStickerSessionImage } from "./commands/sticker.js";
+import { spawn } from "child_process";
+import { promises as fsPromises, existsSync, readdirSync } from "fs";
+import { writeFileSync, unlinkSync, readFileSync } from "fs";
+import { tmpdir } from "os";
+import { join, dirname, basename } from "path";
+import { getSetting } from "./db.js";
 
-// ─── extractText (fix #5 — simplified, removed poll noise) ───────────────────
+// ─── Platform Detection ───────────────────────────────────────────────────────
 
-export function extractText(msg) {
-  const m = msg.message || {};
-  return (
-    m.conversation ||
-    m.extendedTextMessage?.text ||
-    m.imageMessage?.caption ||
-    m.videoMessage?.caption ||
-    m.buttonsResponseMessage?.selectedButtonId ||
-    m.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    m.templateButtonReplyMessage?.selectedId ||
-    ""
-  );
-}
-
-// ─── getMessageType helper (fix #10) ─────────────────────────────────────────
-
-export function getMessageType(msg) {
-  return Object.keys(msg.message || {})[0] ?? "unknown";
-}
-
-// ─── getSenderNumber ──────────────────────────────────────────────────────────
-
-export function getSenderNumber(msg) {
-  if (msg.key.fromMe) return botConfig.BOT_NUMBER;
-  const participant = msg.key.participant;
-  const remoteJid   = msg.key.remoteJid ?? "";
-  if (participant && participant.endsWith("@s.whatsapp.net")) {
-    return participant.split("@")[0];
+export function detectPlatform(url) {
+  if (!url) return null;
+  const patterns = {
+    youtube:     /youtube\.com|youtu\.be|youtube-nocookie\.com/,
+    tiktok:      /tiktok\.com/,
+    instagram:   /instagram\.com|ig\.me/,
+    twitter:     /twitter\.com|x\.com|fxtwitter\.com|vxtwitter\.com/,
+    facebook:    /facebook\.com|fb\.watch|fb\.com|messenger\.com/,
+    reddit:      /reddit\.com|redd\.it/,
+    twitch:      /twitch\.tv/,
+    vimeo:       /vimeo\.com/,
+    pinterest:   /pinterest\.com|pin\.it/,
+    soundcloud:  /soundcloud\.com/,
+    spotify:     /spotify\.com/,
+    snapchat:    /snapchat\.com/,
+    threads:     /threads\.net/,
+    tumblr:      /tumblr\.com/,
+    dailymotion: /dailymotion\.com|dai\.ly/,
+    rumble:      /rumble\.com/,
+    bilibili:    /bilibili\.com|b23\.tv/,
+    imgur:       /imgur\.com/,
+  };
+  for (const [platform, regex] of Object.entries(patterns)) {
+    if (regex.test(url.toLowerCase())) return platform;
   }
-  if (remoteJid.endsWith("@s.whatsapp.net")) {
-    return remoteJid.split("@")[0];
-  }
-  return (participant ?? remoteJid).split("@")[0];
+  return null;
 }
 
-// ─── Error Alert (fix #9 — more context) ─────────────────────────────────────
+export function extractUrl(text) {
+  if (!text) return null;
+  const match = text.match(/https?:\/\/[^\s()<>]*(?=[.,;:?!]?(?:\s|$))/);
+  return match ? match[0] : null;
+}
 
-export async function alertOwner(sock, context, err, extra = {}) {
+// ─── Cookies Helper ───────────────────────────────────────────────────────────
+
+async function getCookiesPath() {
   try {
-    const ownerJid = `${botConfig.BOT_NUMBER}@s.whatsapp.net`;
-    await sock.sendMessage(ownerJid, {
-      text:
-        `⚠️ *Bot Error Alert*\n\n` +
-        `📍 *Where:* ${context}\n` +
-        `❌ *Error:* ${err.message}\n` +
-        (extra.sender ? `👤 *Sender:* ${extra.sender}\n` : "") +
-        (extra.from    ? `💬 *Chat:* ${extra.from}\n`   : "") +
-        (extra.text    ? `📝 *Message:* ${String(extra.text).slice(0, 50)}\n` : "") +
-        `🕐 *Time:* ${new Date().toLocaleString()}\n` +
-        `🔢 *Stack:* ${err.stack?.split("\n")[1]?.trim() ?? "N/A"}`,
+    const cookies = await getSetting("yt_cookies", null);
+    if (!cookies?.trim()) return null;
+    const cookiePath = join(tmpdir(), `cookies_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`);
+    await fsPromises.writeFile(cookiePath, cookies);
+    return cookiePath;
+  } catch {
+    return null;
+  }
+}
+
+// ─── yt-dlp info fetch ────────────────────────────────────────────────────────
+
+export async function getMediaInfo(url) {
+  const platform = detectPlatform(url);
+  if (!platform) throw new Error("Unsupported platform.");
+
+  const cookiePath = await getCookiesPath();
+  const args = [url, "--dump-json", "--no-playlist"];
+  if (cookiePath) args.push("--cookies", cookiePath);
+
+  return new Promise((resolve, reject) => {
+    let output = "";
+    const proc = spawn("yt-dlp", args);
+    proc.stdout.on("data", d => { output += d.toString(); });
+    proc.on("close", async (code) => {
+      if (cookiePath) await fsPromises.unlink(cookiePath).catch(() => {});
+      if (code !== 0) return reject(new Error(`Could not fetch media info.`));
+      try {
+        const info = JSON.parse(output);
+        resolve({
+          platform: info.extractor_key || platform,
+          title:    info.title || `${platform} video`,
+          thumbnail: info.thumbnail || null,
+          duration:  info.duration || null,
+          useYtDlp: true,
+        });
+      } catch { reject(new Error("Failed to parse media info.")); }
     });
-  } catch (e) {
-    console.error("Critical: Could not alert owner.", e.message);
-  }
+    proc.on("error", reject);
+  });
 }
 
-// ─── Usage Builder ────────────────────────────────────────────────────────────
+// ─── Core stream-based downloader ────────────────────────────────────────────
 
-function buildUsageMessage(cmdName, command, prefix) {
-  const swap = (str) => str.replaceAll("!", prefix);
-  const lines = [
-    `📖 *How to use ${prefix}${cmdName}*`,
-    `📝 *Description:* ${command.description}\n`,
+export async function downloadWithYtDlp(url, audioOnly = false, quality = "720") {
+  const platform = detectPlatform(url);
+  if (!platform) throw new Error("Unsupported platform.");
+
+  const cookiePath = await getCookiesPath();
+  const tmpBase    = join(tmpdir(), `dl_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+  const userAgent  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
+
+  let args = [
+    url,
+    "--user-agent", userAgent,
+    "--no-playlist",
+    "--no-warnings",
+    "--print", "after_move:filepath",
   ];
-  if (command.usage)          lines.push(`🔧 *Syntax:* ${swap(command.usage)}`);
-  if (command.examples?.length) {
-    lines.push(`💡 *Examples:*\n${command.examples.map((e) => `• ${swap(e)}`).join("\n")}`);
+
+  if (cookiePath) args.push("--cookies", cookiePath);
+
+  if (audioOnly) {
+    args.push("-x", "--audio-format", "mp3", "--audio-quality", "0", "-o", `${tmpBase}.mp3`);
+  } else {
+    // Instagram/Pinterest: use "best" — image posts have no vcodec attributes
+    // Other platforms: prefer H.264 for iPhone compatibility
+    const isImagePlatform = platform === "instagram" || platform === "pinterest";
+    const format = isImagePlatform
+      ? "best"
+      : `bestvideo[height<=${quality}][vcodec^=avc]+bestaudio[acodec^=mp4a]/best[ext=mp4]/best`;
+
+    args.push("-f", format, "-o", `${tmpBase}.%(ext)s`);
+
+    // Only apply video post-processing for video platforms
+    if (!isImagePlatform) {
+      args.push(
+        "--merge-output-format", "mp4",
+        "--postprocessor-args", "ffmpeg:-c:v libx264 -pix_fmt yuv420p -profile:v main -level 3.1 -c:a aac -movflags +faststart"
+      );
+    }
   }
-  if (command.notes)          lines.push(`\n📌 *Notes:* ${swap(command.notes)}`);
-  return lines.join("\n");
-}
 
-// ─── Reminder Poller (fix #8 — overlap protection) ───────────────────────────
+  return new Promise((resolve, reject) => {
+    const proc = spawn("yt-dlp", args);
+    let errorLog  = "";
+    let finalPath = "";
 
-export function startReminderPoller(sock) {
-  let running = false;
+    proc.stdout.on("data", d => { finalPath = d.toString().trim(); });
+    proc.stderr.on("data", d => { errorLog += d.toString(); });
 
-  const intervalId = setInterval(async () => {
-    if (running) return; // prevent overlap if DB is slow
-    running = true;
-    try {
-      const due = await getPendingReminders();
-      if (!due || due.length === 0) return;
-      for (const reminder of due) {
-        try {
-          await sock.sendMessage(reminder.chat_id, {
-            text: `⏰ *Reminder*\n\n${reminder.message}`,
-          });
-          await markReminderDone(reminder.id);
-        } catch (err) {
-          console.error(`❌ Reminder ID ${reminder.id} failed:`, err.message);
-          await alertOwner(sock, `Reminder Poller (ID: ${reminder.id})`, err);
-        }
+    const timeout = setTimeout(() => {
+      proc.kill();
+      reject(new Error("Download timed out (3 mins)"));
+    }, 180000);
+
+    proc.on("close", async (code) => {
+      clearTimeout(timeout);
+      if (cookiePath) await fsPromises.unlink(cookiePath).catch(() => {});
+
+      if (code !== 0) {
+        const lastLine = errorLog.trim().split("\n").pop() || "Unknown error";
+        return reject(new Error(`yt-dlp failed: ${lastLine.slice(0, 200)}`));
       }
-    } catch (err) {
-      console.error("❌ Poller Database Error:", err.message);
-    } finally {
-      running = false;
-    }
-  }, 30_000);
 
-  // Return cleanup function so caller can stop this poller before starting a new one
-  return () => clearInterval(intervalId);
+      try {
+        // Fallback: scan directory if --print didn't give us a path
+        if (!finalPath || !existsSync(finalPath)) {
+          const dir    = dirname(tmpBase);
+          const prefix = basename(tmpBase);
+          const files  = (await fsPromises.readdir(dir)).filter(f => f.startsWith(prefix));
+          if (files.length === 0) throw new Error("yt-dlp produced no output file.");
+          finalPath = join(dir, files[0]);
+        }
+
+        const buffer = await fsPromises.readFile(finalPath);
+        await fsPromises.unlink(finalPath).catch(() => {});
+
+        const ext = finalPath.split(".").pop().toLowerCase();
+        const mimeTypes = {
+          mp3: "audio/mpeg",
+          mp4: "video/mp4",
+          jpg: "image/jpeg", jpeg: "image/jpeg",
+          png: "image/png",
+          webp: "image/webp",
+        };
+
+        resolve({
+          buffer,
+          contentType: mimeTypes[ext] || "video/mp4",
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    proc.on("error", reject);
+  });
 }
 
-// ─── Message Handler ──────────────────────────────────────────────────────────
+// ─── Legacy YouTube buffer export (used by mp3.js, sticker.js etc) ───────────
+export const downloadYouTubeToBuffer = (url, audioOnly) => downloadWithYtDlp(url, audioOnly);
 
-const BOT_START_TIME = Date.now();
+// ─── RapidAPI fallback ────────────────────────────────────────────────────────
 
-export async function handleMessage(sock, msg) {
+async function getApiKey() {
+  const key = await getSetting("rapidapi_key", null);
+  if (!key?.trim()) throw new Error("RapidAPI key not set. Use !setapikey <key> to set it.");
+  return key.trim();
+}
 
-  // ── Fix #1: Fast early exits — skip invalid/system messages ─────────────
-  if (!msg.message) return;
-  const from = msg.key.remoteJid;
-  if (!from)                          return;
-  if (from === "status@broadcast")    return;
+async function getTikTokMediaApi(url, apiKey) {
+  const res = await fetch(
+    `https://tiktok-video-no-watermark2.p.rapidapi.com/?url=${encodeURIComponent(url)}&hd=1`,
+    { headers: { "x-rapidapi-host": "tiktok-video-no-watermark2.p.rapidapi.com", "x-rapidapi-key": apiKey } }
+  );
+  if (!res.ok) throw new Error(`TikTok API error: ${res.status}`);
+  const data = await res.json();
+  if (data.code !== 0) throw new Error(data.msg || "TikTok API failed.");
+  const videoUrl = data.data?.play || data.data?.hdplay;
+  if (!videoUrl) throw new Error("No downloadable video found.");
+  return { title: data.data?.title || "TikTok Video", videoUrl, platform: "TikTok" };
+}
 
-  // Fix #7: Deduplication — skip if already processed
-  const msgId = msg.key.id;
-  if (msgId && seenMessage(msgId)) return;
-  if (msgId) rememberMessage(msgId);
+async function getGenericMediaApi(url, platform, apiKey) {
+  const res = await fetch(
+    `https://social-media-video-downloader.p.rapidapi.com/smvd/get/all?url=${encodeURIComponent(url)}`,
+    { headers: { "x-rapidapi-host": "social-media-video-downloader.p.rapidapi.com", "x-rapidapi-key": apiKey } }
+  );
+  if (!res.ok) throw new Error(`${platform} API error: ${res.status}`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.message || "API failed.");
+  const links = data.links || [];
+  const best  = links.find(l => l.quality === "720" || l.quality === "720p") || links[0];
+  return { title: data.title || `${platform} Video`, videoUrl: best?.link || null, platform };
+}
 
-  // Fix #2: Safe timestamp handling across all Baileys versions
-  const msgTs = (Number(msg.messageTimestamp) || 0) * 1000;
-  if (msgTs && msgTs < BOT_START_TIME) return;
+export async function downloadWithApi(url) {
+  const platform = detectPlatform(url);
+  if (!platform) throw new Error("Unsupported platform.");
+  const apiKey = await getApiKey();
 
-  // ── Bulk sticker session — must be before fromMe check so sent images are caught
-  if (hasStickerSession(msg.key.remoteJid) && msg.message?.imageMessage) {
-    const handled = await handleStickerSessionImage(sock, msg, msg.key.remoteJid);
-    if (handled) return;
-  }
+  const info = platform === "tiktok"
+    ? await getTikTokMediaApi(url, apiKey)
+    : await getGenericMediaApi(url, platform, apiKey);
 
-  const text     = extractText(msg).trim();
-  const sender   = getSenderNumber(msg);
-  const isGrp    = from.endsWith("@g.us");
-  const prefix   = cachedGetSetting("bot_prefix", "!");
-  const userIsAdmin = msg.key.fromMe ? true : cachedIsAdmin(sender);
+  if (!info.videoUrl) throw new Error("No downloadable link found.");
 
-  if (msg.key.fromMe && !text) return;
+  const res = await fetch(info.videoUrl, { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow" });
+  if (!res.ok) throw new Error(`Failed to download: ${res.status}`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return { buffer, contentType: "video/mp4", title: info.title, platform: info.platform };
+}
 
-  // ── Guardrails — fast RAM checks, no DB ─────────────────────────────────
-  if (cachedIsBanned(sender)) return;
-  if (isGrp && cachedHasAllowedGroups() && !cachedIsGroupAllowed(from)) return;
-
-  const botActive = cachedGetSetting("bot_active", "true");
-  if (botActive !== "true" && !userIsAdmin) return;
-
-  // Fix #3: Only run word filter + anti-link on non-command messages
-  if (!text.startsWith(prefix)) {
-    if (!userIsAdmin && text) {
-      const filtered = await handleWordFilter(sock, msg, text, sender, from);
-      if (filtered) return;
-      const blocked = await handleAntiLink(sock, msg, text, sender, from);
-      if (blocked) return;
-    }
-  }
-
-  // Activity logging — buffered, non-blocking
-  logMessage(sender, from, isGrp);
-
-  // ── Auto-replies and AI ──────────────────────────────────────────────────
-  if (!text.startsWith(prefix)) {
-    if (msg.message?.extendedTextMessage?.contextInfo) {
-      const handled = await handleAiReply(sock, msg, from);
-      if (handled) return;
-    }
-    if (text) {
-      // Check specific keyword match first, then wildcard fallback
-      const autoResponse = cachedGetAutoReply(text) ?? cachedGetAutoReply("*");
-      if (autoResponse) await replyMsg(sock, from, msg, autoResponse);
-    }
-    return;
-  }
-
-  // ── Command routing ──────────────────────────────────────────────────────
-
-  // Fix #6: Support quoted arguments e.g. !remind "buy milk tomorrow"
-  const args = text
-    .slice(prefix.length)
-    .trim()
-    .match(/"[^"]+"|\S+/g)
-    ?.map((a) => a.replace(/"/g, "")) || [];
-
-  const rawCmd = args.shift()?.toLowerCase();
-  if (!rawCmd) return;
-
-  const cmdName = resolveAlias(rawCmd);
-  const command = commands[cmdName];
-  console.log(`🔧 CMD: "${rawCmd}" → resolved: "${cmdName}" → found: ${!!command}`);
-  if (!command) return;
-
-  if (command.adminOnly && !userIsAdmin) {
-    return await replyMsg(sock, from, msg, "🚫 This command is reserved for Admins.");
-  }
-
-  if (command.requiresArgs && args.length === 0) {
-    return await replyMsg(sock, from, msg, buildUsageMessage(cmdName, command, prefix));
-  }
-
-  try {
-    await command.handler(sock, msg, args, from, prefix);
-  } catch (err) {
-    console.error(`💥 Error in ${prefix}${cmdName}:`, err);
-    await replyMsg(sock, from, msg, "⚠️ An internal error occurred while processing that command.");
-    await alertOwner(sock, `Command: ${prefix}${cmdName}`, err, { sender, from, text });
-  }
+// ─── Generic buffer download ──────────────────────────────────────────────────
+export async function downloadToBuffer(url) {
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow" });
+  if (!res.ok) throw new Error(`Failed to download: ${res.status}`);
+  return { buffer: Buffer.from(await res.arrayBuffer()), contentType: res.headers.get("content-type") || "" };
 }
