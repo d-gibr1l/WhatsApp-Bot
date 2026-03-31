@@ -7,35 +7,38 @@ import { useRedisAuthStateWithHSet } from "baileys-redis-auth";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── Valkey/Redis Connection Logic ───────────────────────────────────────────
-const REDIS_URL = process.env.REDIS_URL |
+// Use.trim() to prevent DNS failures from hidden spaces in environment variables
+const REDIS_URL = (process.env.REDIS_URL |
 
 | process.env.VALKEY_URL |
-| process.env.KV_URL;
+| process.env.KV_URL |
+| "").trim();
 
 function getRedisOptions() {
-  if (REDIS_URL) return REDIS_URL; // ioredis handles URL strings directly
+  if (REDIS_URL) {
+    return {
+      // Critical for Aiven/Koyeb DNS resolution
+      family: 0, 
+      // Required for Aiven's secure connection
+      tls: REDIS_URL.startsWith("rediss://")? {} : undefined,
+      lazyConnect: true,
+      maxRetriesPerRequest: 3,
+    };
+  }
   return {
-    host: process.env.VALKEY_HOST |
-
-| "127.0.0.1",
-    port: parseInt(process.env.VALKEY_PORT |
-
-| "6379"),
-    password: process.env.VALKEY_PASSWORD |
-
-| undefined,
-    tls: process.env.VALKEY_TLS === "true"? {} : undefined,
+    host: "127.0.0.1",
+    port: 6379,
     lazyConnect: true,
     maxRetriesPerRequest: 3,
   };
 }
 
-// Standalone client for manual operations like clearSession
-const redisClient = new Redis(getRedisOptions());
+// Standalone client for manual operations
+// Pass REDIS_URL as first argument, options as second
+const redisClient = REDIS_URL 
+ ? new Redis(REDIS_URL, getRedisOptions()) 
+  : new Redis(getRedisOptions());
 
-redisClient.on("error", (err) => {
-  console.error("❌ Valkey connection error:", err.message);
-});
 
 // ─── WhatsApp Session Management (Valkey) ────────────────────────────────────
 
@@ -45,9 +48,11 @@ export async function getAuthState() {
 | process.env.BOT_NUMBER |
 | "default";
 
-  // CRITICAL: We must pass an object { redisOptions, sessionId } [6]
   const { state, saveCreds } = await useRedisAuthStateWithHSet({
-    redisOptions: getRedisOptions(),
+    // We pass the URL string or the config object
+    redisOptions: REDIS_URL |
+
+| getRedisOptions(), 
     sessionId: sessionId,
     logger: (msg) => console.log(`[Valkey] ${msg}`)
   });
