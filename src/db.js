@@ -7,7 +7,7 @@ import { useRedisAuthStateWithHSet } from "baileys-redis-auth";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── Valkey/Redis Connection Logic ───────────────────────────────────────────
-// Use.trim() to prevent DNS failures from hidden spaces in environment variables
+// Trim prevents DNS failures caused by hidden trailing spaces in env vars
 const REDIS_URL = (process.env.REDIS_URL |
 
 | process.env.VALKEY_URL |
@@ -17,28 +17,39 @@ const REDIS_URL = (process.env.REDIS_URL |
 function getRedisOptions() {
   if (REDIS_URL) {
     return {
-      // Critical for Aiven/Koyeb DNS resolution
+      // family: 0 enables dual-stack DNS lookup, critical for resolving 
+      // cloud hostnames from platforms like Koyeb.
       family: 0, 
-      // Required for Aiven's secure connection
+      // Explicit TLS object is required for Aiven secure connections.
       tls: REDIS_URL.startsWith("rediss://")? {} : undefined,
       lazyConnect: true,
       maxRetriesPerRequest: 3,
     };
   }
   return {
-    host: "127.0.0.1",
-    port: 6379,
+    host: process.env.VALKEY_HOST |
+
+| "127.0.0.1",
+    port: parseInt(process.env.VALKEY_PORT |
+
+| "6379"),
+    password: process.env.VALKEY_PASSWORD |
+
+| undefined,
+    tls: process.env.VALKEY_TLS === "true"? {} : undefined,
     lazyConnect: true,
     maxRetriesPerRequest: 3,
   };
 }
 
-// Standalone client for manual operations
-// Pass REDIS_URL as first argument, options as second
+// Standalone client for manual operations like clearSession
 const redisClient = REDIS_URL 
  ? new Redis(REDIS_URL, getRedisOptions()) 
   : new Redis(getRedisOptions());
 
+redisClient.on("error", (err) => {
+  console.error("❌ Valkey connection error:", err.message);
+});
 
 // ─── WhatsApp Session Management (Valkey) ────────────────────────────────────
 
@@ -48,11 +59,11 @@ export async function getAuthState() {
 | process.env.BOT_NUMBER |
 | "default";
 
+  // CRITICAL: useRedisAuthStateWithHSet must take a single object.
   const { state, saveCreds } = await useRedisAuthStateWithHSet({
-    // We pass the URL string or the config object
     redisOptions: REDIS_URL |
 
-| getRedisOptions(), 
+| getRedisOptions(),
     sessionId: sessionId,
     logger: (msg) => console.log(`[Valkey] ${msg}`)
   });
@@ -66,7 +77,7 @@ export async function clearSession() {
 
 | process.env.BOT_NUMBER |
 | "default";
-    // baileys-redis-auth stores the hash under {sessionId}:auth [7]
+    // The adapter stores the session HSET key as {sessionId}:auth.
     await redisClient.del(`${sessionId}:auth`);
     console.log(`🗑️ Session '${sessionId}' cleared from Valkey`);
   } catch (err) {
@@ -84,7 +95,7 @@ export async function loadSession() {
 }
 
 export async function saveSession() {
-  // Persistence is handled automatically by the redis-auth adapter [8]
+  // Persistence is handled automatically by the redis-auth adapter.[2, 1]
 }
 
 // ─── Supabase Bulk Loaders (used by cache.js) ────────────────────────────────
