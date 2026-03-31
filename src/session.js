@@ -1,130 +1,77 @@
 import { createClient } from "@supabase/supabase-js";
-import { useSupabaseAuthState } from "supabase-baileys";
-import { proto, BufferJSON, initAuthCreds } from "@whiskeysockets/baileys";
+import { useRedisAuthStateWithHSet } from "baileys-redis-auth";
 import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "./config.js";
+import Redis from "ioredis";
 
+// Supabase kept for all non-session bot data (settings, admins, etc.)
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ─── In-memory key cache ──────────────────────────────────────────────────────
-// keys.get → RAM first, Supabase only on miss
-// keys.set → RAM immediately + Supabase async (non-blocking)
-// This keeps ping at <100ms while still persisting reliably to Supabase
+// ─── Valkey/Redis connection ───────────────────────────────────────────────────
+// Koyeb injects REDIS_URL or VALKEY_URL automatically when addon is attached
+const REDIS_URL = process.env.REDIS_URL || process.env.VALKEY_URL || process.env.KV_URL;
 
-function buildCachedAuthState(state) {
-  // LRU-style cache with max size to prevent unbounded growth
-  // Simple Map with size cap — avoids adding lru-cache dependency
-  const MAX_CACHE = 3000;
-  const keyCache = new Map();
-  function cacheSet(k, v) {
-    if (keyCache.size >= MAX_CACHE) {
-      // Evict oldest entry
-      keyCache.delete(keyCache.keys().next().value);
-    }
-    keyCache.set(k, v);
+function getRedisOptions() {
+  if (REDIS_URL) {
+    return { lazyConnect: true, maxRetriesPerRequest: 3 };
   }
-
-  const cachedKeys = {
-    get: async (type, ids) => {
-      const result = {};
-      const misses = [];
-
-      for (const id of ids) {
-        const cacheKey = `${type}-${id}`;
-        if (keyCache.has(cacheKey)) {
-          result[id] = keyCache.get(cacheKey);
-        } else {
-          misses.push(id);
-        }
-      }
-
-      // Only hit Supabase for cache misses
-      if (misses.length > 0) {
-        const fromDb = await state.keys.get(type, misses);
-        for (const id of misses) {
-          const val = fromDb[id];
-          const cacheKey = `${type}-${id}`;
-          cacheSet(cacheKey, val ?? null);
-          result[id] = val;
-        }
-      }
-
-      return result;
-    },
-
-    set: async (data) => {
-      // Update RAM immediately so bot never blocks on DB latency
-      for (const [category, categoryData] of Object.entries(data)) {
-        for (const [id, value] of Object.entries(categoryData)) {
-          const cacheKey = `${category}-${id}`;
-          if (value) {
-            cacheSet(cacheKey, value);
-          } else {
-            keyCache.delete(cacheKey);
-          }
-        }
-      }
-
-      // Persist to Supabase with retry — up to 3 attempts
-      let attempts = 0;
-      const persist = async () => {
-        try {
-          await state.keys.set(data);
-        } catch (err) {
-          attempts++;
-          if (attempts < 3) {
-            setTimeout(persist, 500 * attempts); // 500ms, 1000ms backoff
-          } else {
-            console.error("❌ Key sync failed after 3 attempts:", err.message);
-          }
-        }
-      };
-      persist();
-    },
-  };
-
+  // Fallback to individual env vars
   return {
-    creds: state.creds,
-    keys:  cachedKeys,
+    host:     process.env.VALKEY_HOST || "127.0.0.1",
+    port:     parseInt(process.env.VALKEY_PORT || "6379"),
+    password: process.env.VALKEY_PASSWORD || undefined,
+    tls:      process.env.VALKEY_TLS === "true" ? {} : undefined,
+    lazyConnect: true,
+    maxRetriesPerRequest: 3,
   };
 }
 
-// ─── Get auth state — supabase-baileys + RAM cache ────────────────────────────
+// Standalone client for manual operations (clearSession)
+const redisClient = REDIS_URL
+  ? new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 3 })
+  : new Redis(getRedisOptions());
+
+redisClient.on("error", (err) => {
+  console.error("❌ Valkey connection error:", err.message);
+});
+
+// ─── Get auth state — Valkey ──────────────────────────────────────────────────
+// All Signal encryption keys stored in Redis HSET — sub-millisecond reads/writes
+// Completely eliminates the Bad MAC race condition from disk/network latency
+
 export async function getAuthState() {
   const sessionId = botConfig.BOT_NUMBER || process.env.BOT_NUMBER || "default";
 
-  const { state, saveCreds, clear, removeCreds } = await useSupabaseAuthState({
-    supabaseUrl: SUPABASE_URL,
-    supabaseKey: SUPABASE_KEY,
-    session:     sessionId,
-    tableName:   "auth",
-  });
+  const redisOptions = REDIS_URL ? REDIS_URL : getRedisOptions();
 
-  // Wrap with in-memory cache for fast reads
-  const cachedState = buildCachedAuthState(state);
+  const { state, saveCreds } = await useRedisAuthStateWithHSet(
+    redisOptions,
+    sessionId,
+    (msg) => console.log(`[Valkey] ${msg}`)
+  );
 
-  return { state: cachedState, saveCreds };
+  return { state, saveCreds };
 }
 
 // ─── Clear session ────────────────────────────────────────────────────────────
 export async function clearSession() {
   try {
-    const sessionId = botConfig.BOT_NUMBER || "default";
-    await supabase.from("auth").delete().eq("session", sessionId);
-    console.log("🗑️  Session cleared");
+    const sessionId = botConfig.BOT_NUMBER || process.env.BOT_NUMBER || "default";
+    await redisClient.del(`${sessionId}:auth`);
+    console.log(`🗑️ Session '${sessionId}' cleared from Valkey`);
   } catch (err) {
-    console.error("❌ Failed to clear session:", err.message);
+    console.error("❌ Failed to clear Valkey session:", err.message);
   }
 }
 
-// ─── Legacy stubs — kept so index.js imports don't break ─────────────────────
+// ─── Legacy stubs ─────────────────────────────────────────────────────────────
 export async function loadSession() {
   if (process.env.FORCE_FRESH_SESSION === "true") {
-    console.log("🆕 FORCE_FRESH_SESSION — clearing all sessions");
-    await supabase.from("auth").delete().neq("session", "____never____");
+    console.log("🆕 FORCE_FRESH_SESSION — clearing session");
+    await clearSession();
   }
   return true;
 }
 
 export async function saveSession() {
-  // No-op — supabase-baileys handles persistence automatically
+  // No-op — baileys-redis-auth handles persistence automatically
 }
