@@ -1,9 +1,88 @@
 import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
+import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "./config.js";
+import Redis from "ioredis";
+import { useRedisAuthStateWithHSet } from "baileys-redis-auth";
 
+// Supabase client for persistent bot data (settings, admins, stats)
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ─── Bulk Loaders (used strictly by cache.js to populate RAM) ─────────────────
+// ─── Valkey/Redis Connection Logic ───────────────────────────────────────────
+const REDIS_URL = process.env.REDIS_URL |
+
+| process.env.VALKEY_URL |
+| process.env.KV_URL;
+
+function getRedisOptions() {
+  if (REDIS_URL) return REDIS_URL; // ioredis handles URL strings directly
+  return {
+    host: process.env.VALKEY_HOST |
+
+| "127.0.0.1",
+    port: parseInt(process.env.VALKEY_PORT |
+
+| "6379"),
+    password: process.env.VALKEY_PASSWORD |
+
+| undefined,
+    tls: process.env.VALKEY_TLS === "true"? {} : undefined,
+    lazyConnect: true,
+    maxRetriesPerRequest: 3,
+  };
+}
+
+// Standalone client for manual operations like clearSession
+const redisClient = new Redis(getRedisOptions());
+
+redisClient.on("error", (err) => {
+  console.error("❌ Valkey connection error:", err.message);
+});
+
+// ─── WhatsApp Session Management (Valkey) ────────────────────────────────────
+
+export async function getAuthState() {
+  const sessionId = botConfig.BOT_NUMBER |
+
+| process.env.BOT_NUMBER |
+| "default";
+
+  // CRITICAL: We must pass an object { redisOptions, sessionId } [6]
+  const { state, saveCreds } = await useRedisAuthStateWithHSet({
+    redisOptions: getRedisOptions(),
+    sessionId: sessionId,
+    logger: (msg) => console.log(`[Valkey] ${msg}`)
+  });
+
+  return { state, saveCreds };
+}
+
+export async function clearSession() {
+  try {
+    const sessionId = botConfig.BOT_NUMBER |
+
+| process.env.BOT_NUMBER |
+| "default";
+    // baileys-redis-auth stores the hash under {sessionId}:auth [7]
+    await redisClient.del(`${sessionId}:auth`);
+    console.log(`🗑️ Session '${sessionId}' cleared from Valkey`);
+  } catch (err) {
+    console.error("❌ Failed to clear Valkey session:", err.message);
+  }
+}
+
+// ─── Legacy stubs for compatibility ──────────────────────────────────────────
+export async function loadSession() {
+  if (process.env.FORCE_FRESH_SESSION === "true") {
+    console.log("🆕 FORCE_FRESH_SESSION — clearing session");
+    await clearSession();
+  }
+  return true;
+}
+
+export async function saveSession() {
+  // Persistence is handled automatically by the redis-auth adapter [8]
+}
+
+// ─── Supabase Bulk Loaders (used by cache.js) ────────────────────────────────
 
 export async function getAdmins() {
   try {
@@ -12,7 +91,7 @@ export async function getAdmins() {
     return data.map((r) => r.number);
   } catch (err) {
     console.error("❌ getAdmins:", err.message);
-    return [];
+    return;
   }
 }
 
@@ -23,7 +102,7 @@ export async function getAllSettings() {
     return data;
   } catch (err) {
     console.error("❌ getAllSettings:", err.message);
-    return [];
+    return;
   }
 }
 
@@ -34,7 +113,7 @@ export async function getBannedList() {
     return data;
   } catch (err) {
     console.error("❌ getBannedList:", err.message);
-    return [];
+    return;
   }
 }
 
@@ -45,7 +124,7 @@ export async function getAllowedGroups() {
     return data;
   } catch (err) {
     console.error("❌ getAllowedGroups:", err.message);
-    return [];
+    return;
   }
 }
 
@@ -56,20 +135,20 @@ export async function getAllAutoReplies() {
     return data;
   } catch (err) {
     console.error("❌ getAllAutoReplies:", err.message);
-    return [];
+    return;
   }
 }
 
-// ─── Single setting/status read ──────────────────────────────────────────────
+// ─── Supabase Single Reads & Mutations ──────────────────────────────────────
 
 export async function getSetting(key, fallback = null) {
   try {
     const { data, error } = await supabase
-      .from("settings")
-      .select("value")
-      .eq("key", key)
-      .single();
-    if (error || !data) return fallback;
+     .from("settings")
+     .select("value")
+     .eq("key", key)
+     .single();
+    if (error ||!data) return fallback;
     return data.value;
   } catch {
     return fallback;
@@ -79,19 +158,17 @@ export async function getSetting(key, fallback = null) {
 export async function isBanned(number) {
   try {
     const { data, error } = await supabase
-      .from("banned_numbers")
-      .select("number")
-      .eq("number", number)
-      .maybeSingle();
+     .from("banned_numbers")
+     .select("number")
+     .eq("number", number)
+     .maybeSingle();
     if (error) throw error;
-    return !!data; // Returns true if data exists, false otherwise
+    return!!data;
   } catch (err) {
     console.error("❌ isBanned:", err.message);
     return false;
   }
 }
-
-// ─── Mutations (Writes) ───────────────────────────────────────────────────────
 
 export async function addAdmin(number) {
   const { error } = await supabase.from("admins").upsert({ number }, { onConflict: "number" });
@@ -105,15 +182,15 @@ export async function removeAdmin(number) {
 
 export async function setSetting(key, value) {
   const { error } = await supabase
-    .from("settings")
-    .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: "key" });
+   .from("settings")
+   .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: "key" });
   if (error) throw error;
 }
 
 export async function banNumber(number, reason = "No reason given") {
   const { error } = await supabase
-    .from("banned_numbers")
-    .upsert({ number, reason }, { onConflict: "number" });
+   .from("banned_numbers")
+   .upsert({ number, reason }, { onConflict: "number" });
   if (error) throw error;
 }
 
@@ -124,8 +201,8 @@ export async function unbanNumber(number) {
 
 export async function allowGroup(groupId, name = "") {
   const { error } = await supabase
-    .from("allowed_groups")
-    .upsert({ group_id: groupId, name }, { onConflict: "group_id" });
+   .from("allowed_groups")
+   .upsert({ group_id: groupId, name }, { onConflict: "group_id" });
   if (error) throw error;
 }
 
@@ -136,30 +213,30 @@ export async function removeGroup(groupId) {
 
 export async function addAutoReply(keyword, response) {
   const { error } = await supabase
-    .from("auto_replies")
-    .upsert({ keyword: keyword.toLowerCase(), response }, { onConflict: "keyword" });
+   .from("auto_replies")
+   .upsert({ keyword: keyword.toLowerCase(), response }, { onConflict: "keyword" });
   if (error) throw error;
 }
 
 export async function removeAutoReply(keyword) {
   const { error } = await supabase
-    .from("auto_replies")
-    .delete()
-    .eq("keyword", keyword.toLowerCase());
+   .from("auto_replies")
+   .delete()
+   .eq("keyword", keyword.toLowerCase());
   if (error) throw error;
 }
 
 export async function warnUser(number, reason = "No reason given") {
   const { data } = await supabase
-    .from("warnings")
-    .select("count, reasons")
-    .eq("number", number)
-    .single();
-  const count   = (data?.count ?? 0) + 1;
-  const reasons = [...(data?.reasons ?? []), reason];
+   .from("warnings")
+   .select("count, reasons")
+   .eq("number", number)
+   .single();
+  const count   = (data?.count?? 0) + 1;
+  const reasons = [...(data?.reasons??), reason];
   const { error } = await supabase
-    .from("warnings")
-    .upsert({ number, count, reasons }, { onConflict: "number" });
+   .from("warnings")
+   .upsert({ number, count, reasons }, { onConflict: "number" });
   if (error) throw error;
   return count;
 }
@@ -167,14 +244,14 @@ export async function warnUser(number, reason = "No reason given") {
 export async function getWarnings(number) {
   try {
     const { data, error } = await supabase
-      .from("warnings")
-      .select("count, reasons")
-      .eq("number", number)
-      .single();
-    if (error || !data) return { count: 0, reasons: [] };
+     .from("warnings")
+     .select("count, reasons")
+     .eq("number", number)
+     .single();
+    if (error ||!data) return { count: 0, reasons: };
     return data;
   } catch {
-    return { count: 0, reasons: [] };
+    return { count: 0, reasons: };
   }
 }
 
@@ -183,27 +260,27 @@ export async function clearWarnings(number) {
   if (error) throw error;
 }
 
-// ─── Reminders ────────────────────────────────────────────────────────────────
+// ─── Supabase Reminders ──────────────────────────────────────────────────────
 
 export async function addReminder(number, chatId, message, fireAt) {
   const { error } = await supabase
-    .from("reminders")
-    .insert({ number, chat_id: chatId, message, fire_at: fireAt, done: false });
+   .from("reminders")
+   .insert({ number, chat_id: chatId, message, fire_at: fireAt, done: false });
   if (error) throw error;
 }
 
 export async function getPendingReminders() {
   try {
     const { data, error } = await supabase
-      .from("reminders")
-      .select("*")
-      .eq("done", false)
-      .lte("fire_at", new Date().toISOString());
+     .from("reminders")
+     .select("*")
+     .eq("done", false)
+     .lte("fire_at", new Date().toISOString());
     if (error) throw error;
-    return data ?? [];
+    return data??;
   } catch (err) {
     console.error("❌ getPendingReminders:", err.message);
-    return [];
+    return;
   }
 }
 
@@ -211,9 +288,9 @@ export async function markReminderDone(id) {
   await supabase.from("reminders").update({ done: true }).eq("id", id);
 }
 
-// ─── Buffered Stats Logging ───────────────────────────────────────────────────
+// ─── Buffered Stats Logging (Supabase) ───────────────────────────────────────
 
-let logBuffer = [];
+let logBuffer =;
 let isFlushingLogs = false;
 
 export function logMessage(number, chatId, isGroup) {
@@ -226,10 +303,12 @@ export function logMessage(number, chatId, isGroup) {
 }
 
 setInterval(async () => {
-  if (logBuffer.length === 0 || isFlushingLogs) return;
+  if (logBuffer.length === 0 |
+
+| isFlushingLogs) return;
   isFlushingLogs = true;
-  const batch = [...logBuffer];
-  logBuffer = [];
+  const batch =;
+  logBuffer =;
   try {
     const { error } = await supabase.from("message_logs").insert(batch);
     if (error) throw error;
@@ -243,12 +322,12 @@ setInterval(async () => {
 export async function getStats() {
   try {
     const { data, error } = await supabase
-      .from("message_logs")
-      .select("number, chat_id, is_group, sent_at");
+     .from("message_logs")
+     .select("number, chat_id, is_group, sent_at");
     if (error) throw error;
-    return data ?? [];
+    return data??;
   } catch (err) {
     console.error("❌ getStats:", err.message);
-    return [];
+    return;
   }
 }
