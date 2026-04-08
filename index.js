@@ -6,15 +6,29 @@ import { Boom } from "@hapi/boom";
 import pino from "pino";
 import { LRUCache } from "lru-cache";
 
-import { SESSION_DIR, MAX_RECONNECTS, BASE_DELAY_MS, botConfig } from "./src/config.js";
-import { loadSession, saveSession, clearSession, getAuthState } from "./src/session.js";
+import { MAX_RECONNECTS, BASE_DELAY_MS, botConfig } from "./src/config.js";
+import {
+  loadSession,
+  clearSession,
+  getAuthState,
+  acquireSessionLock,
+  releaseSessionLock,
+  redisClient,
+} from "./src/session.js";
 import { handleMessage, startReminderPoller, extractText } from "./src/handler.js";
 import { loadWordFilter } from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
 import { loadAliases } from "./src/commands/aliases.js";
 import { handleAntiDelete, storeMessage } from "./src/commands/antidelete.js";
 import { loadCache, startCacheAutoRefresh, cachedGetSetting } from "./src/cache.js";
-import { startServer, setQR, setConnected, setDisconnected, setStarting, setConnecting } from "./src/server.js";
+import {
+  startServer,
+  setQR,
+  setConnected,
+  setDisconnected,
+  setStarting,
+  setConnecting,
+} from "./src/server.js";
 
 const logger = pino({ level: "silent" });
 
@@ -22,13 +36,16 @@ startServer();
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-let botReady       = false;
-let stopPoller     = null; // cleanup fn for reminder poller
+let botReady   = false;
+let stopPoller = null;
 let currentSock = null;
-let startTime = Date.now(); // resets on each reconnect — avoids replaying old messages
 
-// ─── Concurrency limiter (fix #5) ────────────────────────────────────────────
-// Simple p-limit implementation — no external dependency needed
+// Tracks when the current connection became healthy.
+// Used to distinguish "transient blip" from "never connected" on 428.
+let lastConnectedAt = 0;
+
+// ─── Concurrency limiter ──────────────────────────────────────────────────────
+
 function makeLimit(concurrency) {
   let active = 0;
   const queue = [];
@@ -43,45 +60,59 @@ function makeLimit(concurrency) {
     next();
   });
 }
-const limit = makeLimit(5); // max 5 chats processed simultaneously
+const limit = makeLimit(5);
+
+// ─── Graceful shutdown ────────────────────────────────────────────────────────
+// Handles both Ctrl+C (SIGINT) and Koyeb deploy teardown (SIGTERM).
+// SIGTERM is sent by Koyeb on every deploy — without this handler, any
+// in-flight saveCreds write is killed mid-operation, corrupting the session.
+
+async function shutdown(signal) {
+  console.log(`🛑 ${signal} received — shutting down cleanly`);
+
+  if (stopPoller) {
+    try { stopPoller(); } catch {}
+    stopPoller = null;
+  }
+
+  if (currentSock) {
+    try { currentSock.ev.removeAllListeners(); } catch {}
+    try { currentSock.ws?.close(); } catch {}
+    currentSock = null;
+  }
+
+  // Release session lock so the next instance can start immediately
+  // instead of waiting for the 60s TTL to expire
+  try { await releaseSessionLock(); } catch {}
+
+  // Give any in-flight saveCreds writes up to 2s to complete
+  await new Promise(r => setTimeout(r, 2000));
+
+  try { await redisClient.quit(); } catch {}
+
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT",  () => shutdown("SIGINT"));
 
 // ─── Global crash recovery ────────────────────────────────────────────────────
 
 process.on("uncaughtException", (err) => {
-  console.error("💥 Uncaught Exception:", err.message);
-  console.error(err.stack);
+  console.error("💥 Uncaught Exception:", err.message, err.stack);
 });
 
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("💥 Unhandled Rejection at:", promise);
-  console.error("Reason:", reason);
+process.on("unhandledRejection", (reason) => {
+  console.error("💥 Unhandled Rejection:", reason);
 });
 
-process.on("SIGINT", async () => {
-  console.log("🛑 Shutting down gracefully...");
-  if (currentSock) {
-    try { currentSock.ev.removeAllListeners(); } catch {}
-    try { currentSock.ws?.close(); } catch {}
-  }
-  process.exit(0);
-});
-
-process.on("SIGTERM", async () => {
-  console.log("🛑 SIGTERM received. Shutting down...");
-  if (currentSock) {
-    try { currentSock.ev.removeAllListeners(); } catch {}
-    try { currentSock.ws?.close(); } catch {}
-  }
-  process.exit(0);
-});
-
-// ─── Create Socket ────────────────────────────────────────────────────────────
+// ─── Socket factory ───────────────────────────────────────────────────────────
 
 async function createSocket() {
   const { version, isLatest } = await fetchLatestBaileysVersion();
-  console.log(`📦 Baileys ${version.join(".")} ${isLatest ? "(latest)" : "(outdated)"}`);
+  console.log(`📦 Baileys ${version.join(".")} ${isLatest ? "(latest)" : "(outdated — update recommended)"}`);
 
-  const { state, saveCreds } = await getAuthState(); // supabase-baileys + RAM cache
+  const { state, saveCreds } = await getAuthState();
 
   const sock = makeWASocket({
     version,
@@ -91,9 +122,15 @@ async function createSocket() {
     generateHighQualityLinkPreview: false,
     syncFullHistory: false,
     maxMsgRetryCount: 3,
+    connectTimeoutMs: 60_000,
+    keepAliveIntervalMs: 30_000,
+    retryRequestDelayMs: 5_000,
+    // getMessage is required by Baileys for message retry and poll decryption.
+    // Without it, failed message deliveries silently look like session errors.
+    getMessage: async () => ({ conversation: "" }),
   });
 
-  // saveCreds → Supabase (supabase-baileys handles it)
+  // saveCreds is already debounced + error-handled inside getAuthState()
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("messaging-history.set", ({ messages }) => {
@@ -103,26 +140,37 @@ async function createSocket() {
   return sock;
 }
 
-// ─── Main Loop ────────────────────────────────────────────────────────────────
+// ─── Main loop ────────────────────────────────────────────────────────────────
 
 async function runBot() {
   let attempt = 1;
 
-  // ── Startup jitter — prevents multiple Render instances racing to connect ──
-  // Each instance waits a random 0–3s before starting so they don't all
-  // connect simultaneously and trigger connectionReplaced loops
+  // ── Startup jitter ────────────────────────────────────────────────────────
+  // Prevents multiple Koyeb instances from racing to connect simultaneously.
+  // Combined with the Redis session lock below, this eliminates 440 loops.
   const jitter = Math.floor(Math.random() * 3000);
-  if (jitter > 0) await new Promise(r => setTimeout(r, jitter));
+  if (jitter > 0) {
+    console.log(`⏳ Startup jitter: ${jitter}ms`);
+    await new Promise(r => setTimeout(r, jitter));
+  }
 
-  // Load session from Supabase into RAM once at startup
+  // ── Session lock ──────────────────────────────────────────────────────────
+  // Prevents two instances writing to the same Signal session simultaneously.
+  // Must happen before makeWASocket — not after.
+  const lockAcquired = await acquireSessionLock();
+  if (!lockAcquired) {
+    console.error("❌ Another instance holds the session lock. Exiting — Koyeb will restart later.");
+    process.exit(0);
+  }
+
   await loadSession();
 
   while (attempt <= MAX_RECONNECTS) {
-    console.log(`🔄 Starting bot (attempt ${attempt})...`);
+    console.log(`🔄 Connecting (attempt ${attempt}/${MAX_RECONNECTS})...`);
     setStarting();
 
     try {
-      // Fix #1 — cleanly destroy old socket before creating new one
+      // Destroy previous socket cleanly before creating a new one
       if (currentSock) {
         try { currentSock.ev.removeAllListeners(); } catch {}
         try { currentSock.ws?.close(); } catch {}
@@ -134,16 +182,15 @@ async function runBot() {
 
       const shouldReconnect = await new Promise((resolve) => {
 
-        // ─── Connection state ──────────────────────────────────────────────
+        // ── Connection state ───────────────────────────────────────────────
 
         sock.ev.on("connection.update", async (update) => {
           const { connection, lastDisconnect, qr } = update;
 
           if (connection === "connecting") {
-            setConnecting(); // fix #5 — handle connecting state
+            setConnecting();
           }
 
-          // Fix #6 — always update QR, don't debounce (reset edge case fixed)
           if (qr) {
             setQR(qr);
             console.log("📷 QR ready — visit your service URL to scan");
@@ -151,27 +198,27 @@ async function runBot() {
 
           if (connection === "open") {
             setConnected();
+            lastConnectedAt = Date.now();
+
+            // Reset attempt counter — this was a successful connection
             attempt = 1;
 
-            // Auto-detect BOT_NUMBER from session
-            // sock.user.id format: "233XXXXXXXX:123@s.whatsapp.net"
+            // Detect bot number from WhatsApp session
             if (sock.user?.id) {
               const detectedNumber = sock.user.id.split(":")[0].split("@")[0];
               botConfig.BOT_NUMBER = detectedNumber;
-              console.log(`📱 Bot number detected: ${detectedNumber}`);
+              console.log(`📱 Connected as: ${detectedNumber}`);
             }
 
             if (!botReady) {
-              // Fix #2 — botReady properly gates first-time setup
               botReady = true;
 
-              // Auto-set super admin: if no admins exist, add bot owner automatically
               try {
                 const { getAdmins, addAdmin } = await import("./src/db.js");
                 const admins = await getAdmins();
                 if (admins.length === 0 && botConfig.BOT_NUMBER) {
                   await addAdmin(botConfig.BOT_NUMBER);
-                  console.log(`👑 No admins found — auto-added ${botConfig.BOT_NUMBER} as super admin`);
+                  console.log(`👑 Auto-added ${botConfig.BOT_NUMBER} as super admin`);
                 }
               } catch (err) {
                 console.error("❌ Auto-admin setup failed:", err.message);
@@ -184,8 +231,8 @@ async function runBot() {
               await loadAliases();
               if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
-              startTime  = Date.now();
-              console.log("✅ Bot connected and ready!");
+              console.log("✅ Bot ready!");
+
             } else {
               await loadCache();
               await loadWordFilter();
@@ -193,8 +240,7 @@ async function runBot() {
               await loadAliases();
               if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
-              startTime  = Date.now();
-              console.log("🔄 Bot reconnected — data refreshed.");
+              console.log("🔄 Reconnected — data refreshed.");
             }
           }
 
@@ -207,39 +253,93 @@ async function runBot() {
                 : lastDisconnect?.error?.output?.statusCode;
 
             const reason =
-              Object.entries(DisconnectReason).find(([, v]) => v === statusCode)?.[0] ?? "Unknown";
+              Object.entries(DisconnectReason).find(([, v]) => v === statusCode)?.[0]
+              ?? "Unknown";
 
-            console.warn(`⚠️  Disconnected — ${reason} (${statusCode})`);
+            console.warn(`⚠️  Disconnected: ${reason} (${statusCode})`);
 
+            // ── Disconnect handling ──────────────────────────────────────
+            // Each code has a distinct cause and correct response.
+            // Getting these wrong is the #1 source of session corruption loops.
+
+            // 440 — another instance took over this session
+            // Our 60s lock TTL + jitter should prevent this, but handle it anyway.
             if (statusCode === DisconnectReason.connectionReplaced) {
-              console.error("🔄 Connection replaced by newer instance. Waiting 10s before exit...");
-              await new Promise(r => setTimeout(r, 10000));
+              console.error("🔁 Session taken by another instance. Releasing lock and exiting.");
+              await releaseSessionLock();
+              // Wait longer than jitter window so the new instance fully establishes
+              await new Promise(r => setTimeout(r, 15_000));
               process.exit(0);
             }
 
+            // 401 — WhatsApp explicitly revoked this session (user logged out via phone)
+            // Do NOT reconnect — WhatsApp rate-limits repeated reconnect attempts after 401.
             if (statusCode === DisconnectReason.loggedOut) {
-              console.error("🚪 Logged out. Clearing session...");
-              await clearSession();
-              botReady = false;  // allow full re-init on next QR scan
-              if (stopPoller) { stopPoller(); stopPoller = null; }
-              process.exit(0);
+              console.error("🚪 Logged out by WhatsApp. Clearing session.");
+              try {
+                await clearSession();
+              } catch (err) {
+                console.error("❌ clearSession failed on logout:", err.message);
+              } finally {
+                await releaseSessionLock();
+                botReady = false;
+                if (stopPoller) { stopPoller(); stopPoller = null; }
+                process.exit(0);
+              }
             }
 
-            // 411 = Bad Session / corrupted keys — auto-heal by clearing and restarting
+            // 500 — actual bad/corrupted session data
+            // This is the correct code to clear Redis on, NOT 411.
+            if (statusCode === DisconnectReason.badSession) {
+              console.error("💀 Bad session (500). Clearing session for fresh QR.");
+              try {
+                await clearSession();
+              } catch (err) {
+                console.error("❌ clearSession failed on badSession:", err.message);
+              } finally {
+                await releaseSessionLock();
+                process.exit(1);
+              }
+            }
+
+            // 411 — multideviceMismatch: protocol/library version mismatch.
+            // Clearing the session here DESTROYS a valid session unnecessarily.
+            // The correct response is to restart the process (Baileys re-negotiates)
+            // and update the library if this repeats.
             if (statusCode === 411) {
-              console.error("💀 Bad session (411). Clearing session and restarting...");
-              await clearSession();
-              process.exit(1);
+              console.error("⚠️  Multidevice mismatch (411). Restarting process (do NOT clear session).");
+              await releaseSessionLock();
+              process.exit(1); // Koyeb restarts → fresh negotiation attempt
             }
 
+            // 428 — WebSocket closed cleanly (network blip, WA server rotation)
+            // Session is intact. If we were connected long enough, reset attempt counter.
+            if (statusCode === DisconnectReason.connectionClosed) {
+              if (Date.now() - lastConnectedAt > 30_000) {
+                console.log("📶 Connection closed after stable session — resetting attempt counter.");
+                attempt = 1;
+              }
+              return resolve(true);
+            }
+
+            // 515 — WhatsApp asks us to restart (normal, non-destructive)
+            if (statusCode === DisconnectReason.restartRequired) {
+              console.log("♻️  Restart required (515) — reconnecting immediately.");
+              attempt = Math.max(attempt - 1, 1); // don't penalise attempt count for WA-initiated restarts
+              return resolve(true);
+            }
+
+            // All other codes (408 timedOut, 503, unknown) — standard reconnect
             resolve(true);
           }
         });
 
-        // ─── Messages (fixes #3, #4, #5) ──────────────────────────────────
+        // ── Messages ───────────────────────────────────────────────────────
+
+        const startTime = Date.now();
 
         sock.ev.on("messages.upsert", async ({ messages, type }) => {
-          // Always store messages for anti-delete, regardless of type
+          // Store all messages for anti-delete regardless of type
           for (const msg of messages) {
             if (msg.message && msg.key?.remoteJid) {
               storeMessage(msg, extractText(msg) ?? "");
@@ -250,25 +350,19 @@ async function runBot() {
 
           const byChat = new Map();
           for (const msg of messages) {
-            // Fix #3 — skip messages older than bot start time
             const ts = (Number(msg.messageTimestamp) || 0) * 1000;
             if (ts < startTime) continue;
-
-            // Fix #3 — skip messages with no content
             if (!msg.message) continue;
-
             const jid = msg.key.remoteJid;
             if (!byChat.has(jid)) byChat.set(jid, []);
             byChat.get(jid).push(msg);
           }
 
-          // Fix #5 — limit concurrency to 5 chats at once
           await Promise.all(
             [...byChat.values()].map((chatMsgs) =>
               limit(async () => {
                 for (const msg of chatMsgs) {
                   try {
-                    // storeMessage already called above for all messages
                     await handleMessage(sock, msg);
                   } catch (err) {
                     console.error("❌ Error processing message:", err.message);
@@ -279,8 +373,8 @@ async function runBot() {
           );
         });
 
-        // ─── Anti-delete ────────────────────────────────────────────────────
-        // LRUCache handles TTL and memory limits automatically — no setTimeout needed
+        // ── Anti-delete ────────────────────────────────────────────────────
+
         const recentlyRevoked = new LRUCache({ max: 500, ttl: 5000 });
 
         async function safeHandleDelete(sock, key) {
@@ -290,20 +384,18 @@ async function runBot() {
           await handleAntiDelete(sock, key);
         }
 
-        // messages.delete event (older Baileys versions)
         sock.ev.on("messages.delete", async (item) => {
           try {
             let keys = [];
             if (item.keys)          keys = item.keys;
             else if (item.key)      keys = [item.key];
-            else if (item.messages) keys = item.messages.map((m) => m.key).filter(Boolean);
+            else if (item.messages) keys = item.messages.map(m => m.key).filter(Boolean);
             for (const key of keys) await safeHandleDelete(sock, key);
           } catch (err) {
             console.error("❌ Anti-delete error:", err.message);
           }
         });
 
-        // protocolMessage REVOKE (newer Baileys/WA versions)
         sock.ev.on("messages.upsert", async ({ messages: revokeMsgs, type }) => {
           if (type !== "notify") return;
           for (const msg of revokeMsgs) {
@@ -318,7 +410,8 @@ async function runBot() {
           }
         });
 
-        // ─── Welcome / Goodbye ───────────────────────────────────────────────
+        // ── Welcome / Goodbye ──────────────────────────────────────────────
+
         sock.ev.on("group-participants.update", async ({ id, participants, action }) => {
           try {
             for (const participant of participants) {
@@ -327,31 +420,25 @@ async function runBot() {
               if (action === "add") {
                 const enabled = cachedGetSetting(`welcome_enabled_${id}`, "false");
                 if (enabled !== "true") continue;
-
                 const groupMeta = await sock.groupMetadata(id).catch(() => null);
                 const groupName = groupMeta?.subject || "the group";
-
                 const template = cachedGetSetting(`welcome_${id}`, `👋 Welcome *{name}* to *{group}*!`);
                 const text = template
                   .replace(/{name}/g, number)
                   .replace(/{group}/g, groupName)
                   .replace(/{number}/g, number);
-
                 await sock.sendMessage(id, { text, mentions: [participant] });
 
               } else if (action === "remove") {
                 const enabled = cachedGetSetting(`goodbye_enabled_${id}`, "false");
                 if (enabled !== "true") continue;
-
                 const groupMeta = await sock.groupMetadata(id).catch(() => null);
                 const groupName = groupMeta?.subject || "the group";
-
                 const template = cachedGetSetting(`goodbye_${id}`, `👋 *{name}* has left *{group}*. Goodbye!`);
                 const text = template
                   .replace(/{name}/g, number)
                   .replace(/{group}/g, groupName)
                   .replace(/{number}/g, number);
-
                 await sock.sendMessage(id, { text });
               }
             }
@@ -360,7 +447,8 @@ async function runBot() {
           }
         });
 
-        // ─── Auto-reject calls ───────────────────────────────────────────────
+        // ── Auto-reject calls ──────────────────────────────────────────────
+
         sock.ev.on("call", async (calls) => {
           try {
             const rejectCalls = cachedGetSetting("reject_calls", "false");
@@ -368,7 +456,7 @@ async function runBot() {
             for (const call of calls) {
               if (call.status === "offer") {
                 await sock.rejectCall(call.id, call.from);
-                console.log(`📵 Auto-rejected call from ${call.from}`);
+                console.log(`📵 Rejected call from ${call.from}`);
               }
             }
           } catch (err) {
@@ -378,30 +466,38 @@ async function runBot() {
 
       }); // end Promise
 
+      // ── Reconnect backoff ────────────────────────────────────────────────
+
       if (shouldReconnect) {
         attempt++;
         if (attempt > MAX_RECONNECTS) {
-          console.error("❌ Max reconnects reached. Exiting.");
+          console.error("❌ Max reconnects reached. Releasing lock and exiting.");
+          await releaseSessionLock();
           process.exit(1);
         }
+        // Fixed: exponent starts at 0 so attempt=1 gives BASE_DELAY_MS * 1, not 0.5x
         const delay = Math.min(
-          BASE_DELAY_MS * 2 ** (attempt - 2) + Math.random() * 1000,
+          BASE_DELAY_MS * 2 ** (attempt - 1) + Math.random() * 1000,
           60_000
         );
         console.log(`🔁 Reconnecting in ${(delay / 1000).toFixed(1)}s...`);
-        await new Promise((r) => setTimeout(r, delay));
+        await new Promise(r => setTimeout(r, delay));
       }
 
     } catch (err) {
-      console.error("💥 Error in runBot:", err.message);
+      console.error("💥 Fatal error in runBot:", err.message);
       attempt++;
       if (attempt > MAX_RECONNECTS) {
-        console.error("❌ Too many failures. Exiting.");
+        console.error("❌ Too many failures. Releasing lock and exiting.");
+        await releaseSessionLock();
         process.exit(1);
       }
-      const delay = Math.min(BASE_DELAY_MS * 2 ** (attempt - 2), 60_000);
+      const delay = Math.min(
+        BASE_DELAY_MS * 2 ** (attempt - 1) + Math.random() * 1000,
+        60_000
+      );
       console.log(`🔁 Retrying in ${(delay / 1000).toFixed(1)}s...`);
-      await new Promise((r) => setTimeout(r, delay));
+      await new Promise(r => setTimeout(r, delay));
     }
   }
 }
