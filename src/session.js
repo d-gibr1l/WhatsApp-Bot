@@ -55,41 +55,89 @@ export function SESSION_ID() {
 // ─── Session lock ─────────────────────────────────────────────────────────────
 // Prevents multiple Koyeb instances from writing to the same Signal session
 // simultaneously, which causes connectionReplaced (440) loops and key corruption.
-const LOCK_TTL_SECONDS = 60;
+//
+// WHY NOT PID: On Koyeb (and most container platforms), every container runs
+// as PID 1. Storing process.pid in the lock is useless — the new instance
+// sees "1" in the lock and cannot tell if that's the dead previous container
+// or itself. We use a per-boot unique instance ID instead.
+//
+// WHY SHORT TTL: With a 60s TTL, a deploy that kills the old container without
+// cleanly releasing the lock causes the new instance to spin-exit for up to
+// 60s until the lock expires — enough for Koyeb to mark the deploy as failed.
+// 15s TTL + 5s renewal interval means a dead instance's lock expires in at
+// most 15s. A healthy instance renews every 5s, so it never expires in use.
+
+const LOCK_TTL_SECONDS = 15;
+const LOCK_RENEW_INTERVAL_MS = 5_000;
+const LOCK_ACQUIRE_RETRIES = 4;      // try up to 4 times before giving up
+const LOCK_RETRY_DELAY_MS  = 4_000; // wait 4s between retries (4*4 = 16s > TTL)
+
+// Unique ID for this specific boot — survives reconnects within the same process
+// but differs from every other container even if they share PID 1.
+const INSTANCE_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
 let lockRenewalInterval = null;
 
 export async function acquireSessionLock() {
   const lockKey = `${SESSION_ID()}:lock`;
 
-  // NX = only set if not exists — atomic, no race window
-  const acquired = await redisClient.set(
-    lockKey,
-    process.pid.toString(),
-    "NX",
-    "EX",
-    LOCK_TTL_SECONDS
-  );
-
-  if (!acquired) {
-    const owner = await redisClient.get(lockKey);
-    console.warn(
-      `⚠️  Session lock held by PID ${owner}. Another instance is active.`
+  for (let attempt = 1; attempt <= LOCK_ACQUIRE_RETRIES; attempt++) {
+    // NX = only set if not exists — atomic, no race window
+    const acquired = await redisClient.set(
+      lockKey,
+      INSTANCE_ID,
+      "NX",
+      "EX",
+      LOCK_TTL_SECONDS
     );
-    return false;
+
+    if (acquired) {
+      console.log(`🔒 Session lock acquired (instance ${INSTANCE_ID})`);
+
+      // Renew every 5s — well within the 15s TTL.
+      // If this process dies without releasing, the lock expires in ≤15s.
+      lockRenewalInterval = setInterval(async () => {
+        try {
+          // Only renew if we still own the lock — another instance could have
+          // taken it if renewal somehow lagged behind expiry.
+          const current = await redisClient.get(lockKey);
+          if (current === INSTANCE_ID) {
+            await redisClient.expire(lockKey, LOCK_TTL_SECONDS);
+          } else {
+            console.error("❌ Lock ownership lost during renewal — another instance took over.");
+            clearInterval(lockRenewalInterval);
+            lockRenewalInterval = null;
+          }
+        } catch (err) {
+          console.error("❌ Failed to renew session lock:", err.message);
+        }
+      }, LOCK_RENEW_INTERVAL_MS);
+
+      return true;
+    }
+
+    // Lock is held — check if it looks stale (same INSTANCE_ID means we
+    // somehow called acquireSessionLock twice in the same process, which
+    // should never happen but is worth detecting).
+    const owner = await redisClient.get(lockKey);
+    if (owner === INSTANCE_ID) {
+      console.warn("⚠️  acquireSessionLock called twice in same instance — reusing lock.");
+      return true;
+    }
+
+    const ttl = await redisClient.ttl(lockKey);
+    console.warn(
+      `⚠️  Lock held by instance ${owner} (TTL: ${ttl}s). ` +
+      `Retry ${attempt}/${LOCK_ACQUIRE_RETRIES} in ${LOCK_RETRY_DELAY_MS / 1000}s...`
+    );
+
+    if (attempt < LOCK_ACQUIRE_RETRIES) {
+      await new Promise(r => setTimeout(r, LOCK_RETRY_DELAY_MS));
+    }
   }
 
-  console.log(`🔒 Session lock acquired (PID ${process.pid})`);
-
-  // Renew lock every 30s so it never expires while the process is healthy
-  lockRenewalInterval = setInterval(async () => {
-    try {
-      await redisClient.expire(lockKey, LOCK_TTL_SECONDS);
-    } catch (err) {
-      console.error("❌ Failed to renew session lock:", err.message);
-    }
-  }, 30_000);
-
-  return true;
+  console.error("❌ Could not acquire session lock after all retries. Exiting.");
+  return false;
 }
 
 export async function releaseSessionLock() {
@@ -98,8 +146,16 @@ export async function releaseSessionLock() {
     lockRenewalInterval = null;
   }
   try {
-    await redisClient.del(`${SESSION_ID()}:lock`);
-    console.log("🔓 Session lock released");
+    // Only delete if we still own it — avoids accidentally releasing a lock
+    // that another instance acquired after ours expired.
+    const lockKey = `${SESSION_ID()}:lock`;
+    const current = await redisClient.get(lockKey);
+    if (current === INSTANCE_ID) {
+      await redisClient.del(lockKey);
+      console.log("🔓 Session lock released");
+    } else {
+      console.log("🔓 Lock already taken by another instance — skipping delete");
+    }
   } catch (err) {
     console.error("❌ Failed to release session lock:", err.message);
   }
