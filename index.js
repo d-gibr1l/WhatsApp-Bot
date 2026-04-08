@@ -193,20 +193,21 @@ async function runBot() {
       const sock = await createSocket();
       currentSock = sock;
 
-      // FIX (#1): safeResolve guard.
-      // connection.update is an event listener that fires multiple times over
-      // the socket's lifetime. The outer Promise resolves only once — JS silently
-      // ignores subsequent resolve() calls, making the control flow ambiguous.
-      // safeResolve makes the one-shot contract explicit and enforced in code.
-      let resolved = false;
-      const safeResolve = (value) => {
-        if (!resolved) {
-          resolved = true;
-          resolve(value);
-        }
-      };
-
       const shouldReconnect = await new Promise((resolve) => {
+
+        // FIX (#1): safeResolve guard.
+        // connection.update fires multiple times over the socket's lifetime.
+        // The Promise resolves only once — JS silently ignores subsequent
+        // resolve() calls, making the control flow ambiguous.
+        // safeResolve makes the one-shot contract explicit and enforced in code.
+        // MUST be declared inside the Promise so `resolve` is in scope.
+        let resolved = false;
+        const safeResolve = (value) => {
+          if (!resolved) {
+            resolved = true;
+            resolve(value);
+          }
+        };
 
         // ── Connection state ───────────────────────────────────────────────
 
