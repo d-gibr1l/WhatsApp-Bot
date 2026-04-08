@@ -115,7 +115,9 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     const isImagePlatform = platform === "instagram" || platform === "pinterest";
     const format = isImagePlatform
       ? "best"
-      : `bestvideo[height<=${quality}][vcodec^=avc]+bestaudio[acodec^=mp4a]/best[ext=mp4]/best`;
+      // Prefer pre-muxed mp4 first (no re-encoding needed = fast)
+      // Fall back to separate streams only if needed
+      : `best[ext=mp4][height<=${quality}]/bestvideo[height<=${quality}][vcodec^=avc]+bestaudio[acodec^=mp4a]/best[height<=${quality}]/best`;
 
     args.push("-f", format, "-o", `${tmpBase}.%(ext)s`);
 
@@ -123,7 +125,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     if (!isImagePlatform) {
       args.push(
         "--merge-output-format", "mp4",
-        "--postprocessor-args", "ffmpeg:-c:v libx264 -pix_fmt yuv420p -profile:v main -level 3.1 -c:a aac -movflags +faststart"
+        "--postprocessor-args", "ffmpeg:-movflags +faststart"
       );
     }
   }

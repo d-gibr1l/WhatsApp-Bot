@@ -10,24 +10,35 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 // Structure: Map<chatId, Map<messageId, {text, sender, timestamp, media}>>
 
 const messageStore = new Map();
-const MAX_PER_CHAT = 200;
+const MAX_PER_CHAT = 500;
 
 export function storeMessage(msg, text) {
   const from = msg.key.remoteJid;
   const id   = msg.key.id;
   if (!from || !id) return;
 
+  // Skip protocol/system messages that can't be meaningfully revealed
+  const m = msg.message || {};
+  const isSystem = !!(
+    m.protocolMessage ||
+    m.senderKeyDistributionMessage ||
+    m.messageContextInfo
+  );
+  if (isSystem && !text && !m.imageMessage && !m.videoMessage &&
+      !m.audioMessage && !m.documentMessage && !m.stickerMessage &&
+      !m.viewOnceMessage && !m.viewOnceMessageV2) return;
+
   if (!messageStore.has(from)) messageStore.set(from, new Map());
   const chatMap = messageStore.get(from);
 
   chatMap.set(id, {
     text,
-    sender: msg.key.participant ?? msg.key.remoteJid,
+    sender:    msg.key.participant ?? msg.key.remoteJid,
+    pushName:  msg.pushName || null,
     timestamp: Date.now(),
-    msg, // keep original msg for media re-download
+    msg,
   });
 
-  // Keep only last MAX_PER_CHAT messages
   if (chatMap.size > MAX_PER_CHAT) {
     const oldest = chatMap.keys().next().value;
     chatMap.delete(oldest);
@@ -51,7 +62,21 @@ export async function handleAntiDelete(sock, deletedKey) {
   if (!stored) return;
 
   const senderNumber = (stored.sender ?? "").split("@")[0];
-  const timeStr = new Date(stored.timestamp).toLocaleTimeString();
+  const timeStr      = new Date(stored.timestamp).toLocaleTimeString();
+
+  // Resolve display name: pushName → fetch from group → number fallback
+  let senderName = stored.pushName || null;
+  if (!senderName) {
+    try {
+      const isGroup = chatId.endsWith("@g.us");
+      if (isGroup) {
+        const meta = await sock.groupMetadata(chatId).catch(() => null);
+        const participant = meta?.participants?.find(p => p.id === stored.sender);
+        senderName = participant?.notify || participant?.name || null;
+      }
+    } catch {}
+  }
+  const displayName = senderName ? `${senderName} (+${senderNumber})` : `+${senderNumber}`;
 
   try {
     const antideleteDest = cachedGetSetting("antidelete_dest", "chat");
@@ -63,7 +88,7 @@ export async function handleAntiDelete(sock, deletedKey) {
       await sock.sendMessage(dest, {
         text:
           `🗑️ *Deleted Message Detected*\n\n` +
-          `👤 *From:* +${senderNumber}\n` +
+          `👤 *From:* ${displayName}\n` +
           `🕐 *Time:* ${timeStr}\n` +
           `💬 *Message:* ${stored.text}`,
       });
@@ -73,14 +98,28 @@ export async function handleAntiDelete(sock, deletedKey) {
         const { downloadMediaMessage } = await import("@whiskeysockets/baileys");
         const buffer = await downloadMediaMessage(stored.msg, "buffer", {});
         const mediaMsg = stored.msg.message;
-        const isImage = !!mediaMsg?.imageMessage;
-        const isVideo = !!mediaMsg?.videoMessage;
-        const isAudio = !!mediaMsg?.audioMessage;
-        const isDoc   = !!mediaMsg?.documentMessage;
+        const isImage   = !!mediaMsg?.imageMessage;
+        const isVideo   = !!mediaMsg?.videoMessage;
+        const isAudio   = !!mediaMsg?.audioMessage;
+        const isDoc     = !!mediaMsg?.documentMessage;
+        const isSticker = !!mediaMsg?.stickerMessage;
+        const isViewOnce = !!(mediaMsg?.viewOnceMessage || mediaMsg?.viewOnceMessageV2);
 
-        const caption = `🗑️ *Deleted media from +${senderNumber} at ${timeStr}*`;
+        const caption = `🗑️ *Deleted media from ${displayName} at ${timeStr}*`;
 
-        if (isImage) {
+        if (isSticker) {
+          await sock.sendMessage(dest, { sticker: buffer });
+          await sock.sendMessage(dest, { text: caption });
+        } else if (isViewOnce) {
+          // Re-send view-once as regular image/video
+          const voMsg = mediaMsg?.viewOnceMessage?.message || mediaMsg?.viewOnceMessageV2?.message;
+          const voIsImage = !!voMsg?.imageMessage;
+          if (voIsImage) {
+            await sock.sendMessage(dest, { image: buffer, caption: caption + " *(view-once)*" });
+          } else {
+            await sock.sendMessage(dest, { video: buffer, caption: caption + " *(view-once)*" });
+          }
+        } else if (isImage) {
           await sock.sendMessage(dest, { image: buffer, caption });
         } else if (isVideo) {
           await sock.sendMessage(dest, { video: buffer, caption });
@@ -94,11 +133,11 @@ export async function handleAntiDelete(sock, deletedKey) {
             caption,
           });
         } else {
-          await sock.sendMessage(dest, { text: `🗑️ *Deleted media from +${senderNumber} at ${timeStr}* (unsupported type)` });
+          await sock.sendMessage(dest, { text: `🗑️ *Deleted media from ${displayName} at ${timeStr}* (unsupported type)` });
         }
       } catch {
         await sock.sendMessage(dest, {
-          text: `🗑️ *Deleted media from +${senderNumber} at ${timeStr}* (could not retrieve)`,
+          text: `🗑️ *Deleted media from ${displayName} at ${timeStr}* (could not retrieve)`,
         });
       }
     }
