@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { useRedisAuthStateWithHSet } from "baileys-redis-auth";
+import { useRedisAuthStateWithHSet, deleteHSetKeys } from "baileys-redis-auth";
 import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "./config.js";
 import Redis from "ioredis";
 
@@ -198,7 +198,13 @@ export async function getAuthState() {
 export async function clearSession() {
   try {
     const sessionId = SESSION_ID();
-    await redisClient.del(`${sessionId}:auth`);
+
+    // deleteHSetKeys is the library's own cleanup utility.
+    // redisClient.del(`${sessionId}:auth`) only removes the top-level hash key.
+    // If baileys-redis-auth manages additional keys per session in future versions,
+    // del would silently miss them. deleteHSetKeys handles all associated keys correctly.
+    await deleteHSetKeys({ redis: redisClient, key: sessionId });
+
     console.log(`🗑️  Session '${sessionId}' cleared from Valkey`);
   } catch (err) {
     console.error("❌ Failed to clear Valkey session:", err.message);
