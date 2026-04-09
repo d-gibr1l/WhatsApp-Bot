@@ -114,9 +114,10 @@ async function createSocket() {
     generateHighQualityLinkPreview: false,
     syncFullHistory: false,
     maxMsgRetryCount: 3,
-    connectTimeoutMs: 60_000,
-    keepAliveIntervalMs: 30_000,
-    retryRequestDelayMs: 5_000,
+    connectTimeoutMs: 120_000,
+    keepAliveIntervalMs: 25_000,
+    defaultQueryTimeoutMs: 60_000,
+    retryRequestDelayMs: 2_000,
     getMessage: async () => ({ conversation: "" }),
   });
 
@@ -294,6 +295,13 @@ async function runBot() {
 
             // 515 — WhatsApp requests restart (non-destructive)
             if (statusCode === DisconnectReason.restartRequired) {
+              attempt = Math.max(attempt - 1, 1);
+              return safeResolve(true);
+            }
+
+            // 408 — timeout waiting for QR scan or keepalive.
+            // If we've never connected, don't burn reconnect attempts.
+            if (statusCode === 408 && lastConnectedAt === 0) {
               attempt = Math.max(attempt - 1, 1);
               return safeResolve(true);
             }
