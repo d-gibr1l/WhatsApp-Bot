@@ -1,4 +1,4 @@
-import { useRedisAuthStateWithHSet } from "baileys-redis-auth";
+import { useRedisAuthStateWithHSet, deleteHSetKeys } from "baileys-redis-auth";
 import { botConfig } from "./config.js";
 import Redis from "ioredis";
 
@@ -23,32 +23,29 @@ export const redisClient = REDIS_URL
   ? new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 3 })
   : new Redis(getRedisOptions());
 
-redisClient.on("error", (err) => console.error("❌ Valkey error:", err.message));
-redisClient.on("connect", () => console.log("✅ Valkey connected"));
+redisClient.on("error", (err) => console.error("Valkey error:", err.message));
+redisClient.on("connect", () => console.log("Valkey connected"));
 
 // ─── Session ID ───────────────────────────────────────────────────────────────
-// Throws if BOT_NUMBER not set — prevents silent use of "default" key in prod
 
 export function SESSION_ID() {
   const id = botConfig.BOT_NUMBER || process.env.BOT_NUMBER;
-  if (!id) {
-    throw new Error(
-      "BOT_NUMBER is not set. Add it as a Koyeb environment variable. " +
-      "Without it, session keys will be stored under the wrong Redis hash."
-    );
-  }
+  if (!id) throw new Error(
+    "BOT_NUMBER is not set. Add it as a Koyeb environment variable."
+  );
   return id;
 }
 
 // ─── Session lock ─────────────────────────────────────────────────────────────
-// Prevents multiple Koyeb instances writing to the same Signal session.
 // Uses unique INSTANCE_ID (not PID — every container is PID 1 on Koyeb).
+// Retries for up to 90s to outlast Koyeb rolling deploy overlap window,
+// then force-takes if the old instance never released.
 
-const LOCK_TTL_SECONDS      = 20;
-const LOCK_RENEW_INTERVAL   = 5_000;
-const LOCK_ACQUIRE_RETRIES  = 15;
-const LOCK_RETRY_DELAY      = 6_000;   // 6s × 15 = 90s total wait
-const LOCK_FORCE_AFTER      = 12;      // force-take after ~72s
+const LOCK_TTL_SECONDS     = 20;
+const LOCK_RENEW_INTERVAL  = 5_000;
+const LOCK_ACQUIRE_RETRIES = 15;
+const LOCK_RETRY_DELAY     = 6_000;
+const LOCK_FORCE_AFTER     = 12;
 
 const INSTANCE_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 let lockRenewalInterval = null;
@@ -60,24 +57,21 @@ export async function acquireSessionLock() {
     const acquired = await redisClient.set(lockKey, INSTANCE_ID, "NX", "EX", LOCK_TTL_SECONDS);
 
     if (acquired) {
-      console.log(`🔒 Session lock acquired (${INSTANCE_ID})`);
+      console.log(`Session lock acquired (${INSTANCE_ID})`);
       startLockRenewal(lockKey);
       return true;
     }
 
     const owner = await redisClient.get(lockKey);
-    if (owner === INSTANCE_ID) {
-      console.warn("⚠️  acquireSessionLock called twice — reusing lock.");
-      return true;
-    }
+    if (owner === INSTANCE_ID) return true; // called twice, reuse
 
     const ttl = await redisClient.ttl(lockKey);
-    console.warn(`⚠️  Lock held by ${owner} (TTL: ${ttl}s). Retry ${i}/${LOCK_ACQUIRE_RETRIES}...`);
+    console.warn(`Lock held by ${owner} (TTL: ${ttl}s). Retry ${i}/${LOCK_ACQUIRE_RETRIES}...`);
 
     if (i >= LOCK_FORCE_AFTER) {
-      console.warn(`⚠️  Force-taking lock after ${i} retries.`);
+      console.warn(`Force-taking lock after ${i} retries (old instance did not release).`);
       await redisClient.set(lockKey, INSTANCE_ID, "EX", LOCK_TTL_SECONDS);
-      console.log(`🔒 Lock force-acquired (${INSTANCE_ID})`);
+      console.log(`Lock force-acquired (${INSTANCE_ID})`);
       startLockRenewal(lockKey);
       return true;
     }
@@ -85,7 +79,7 @@ export async function acquireSessionLock() {
     await new Promise(r => setTimeout(r, LOCK_RETRY_DELAY));
   }
 
-  console.error("❌ Could not acquire session lock. Exiting.");
+  console.error("Could not acquire session lock after all retries.");
   return false;
 }
 
@@ -97,12 +91,12 @@ function startLockRenewal(lockKey) {
       if (current === INSTANCE_ID) {
         await redisClient.expire(lockKey, LOCK_TTL_SECONDS);
       } else {
-        console.error("❌ Lock ownership lost — another instance took over.");
+        console.error("Lock ownership lost — another instance took over.");
         clearInterval(lockRenewalInterval);
         lockRenewalInterval = null;
       }
     } catch (err) {
-      console.error("❌ Failed to renew lock:", err.message);
+      console.error("Failed to renew lock:", err.message);
     }
   }, LOCK_RENEW_INTERVAL);
 }
@@ -114,16 +108,24 @@ export async function releaseSessionLock() {
     const current = await redisClient.get(lockKey);
     if (current === INSTANCE_ID) {
       await redisClient.del(lockKey);
-      console.log("🔓 Session lock released");
+      console.log("Session lock released");
     } else {
-      console.log("🔓 Lock already taken by another instance — skipping delete");
+      console.log("Lock already taken by another instance — skipping delete");
     }
   } catch (err) {
-    console.error("❌ Failed to release lock:", err.message);
+    console.error("Failed to release lock:", err.message);
   }
 }
 
 // ─── Auth state ───────────────────────────────────────────────────────────────
+// Cached per session ID to prevent a new internal Redis connection and full
+// auth hash read on every reconnect. Without this, every createSocket() call
+// logs "[Valkey] Redis client name set" and leaks a connection.
+//
+// Cache is invalidated in clearSession() so a post-QR re-login always reads
+// fresh state rather than the just-deleted session data.
+
+let authStateCache = null; // { sessionId, state, saveCreds }
 
 export async function getAuthState() {
   try { await redisClient.ping(); } catch (err) {
@@ -131,6 +133,12 @@ export async function getAuthState() {
   }
 
   const sessionId = SESSION_ID();
+
+  // Return cached state if session ID matches — skips redundant Redis reads
+  if (authStateCache?.sessionId === sessionId) {
+    return { state: authStateCache.state, saveCreds: authStateCache.saveCreds };
+  }
+
   const redisOptions = REDIS_URL ? REDIS_URL : getRedisOptions();
 
   const { state, saveCreds: rawSaveCreds } = await useRedisAuthStateWithHSet(
@@ -139,25 +147,27 @@ export async function getAuthState() {
     (msg) => console.log(`[Valkey] ${msg}`)
   );
 
-  // Integrity check — partial Redis reads produce incomplete state
+  // Integrity check — partial Redis reads produce state that looks valid but
+  // fails on the first crypto operation
   if (!state?.creds?.noiseKey || !state?.creds?.signedIdentityKey) {
     if (state?.creds) {
       throw new Error(
         `Auth state incomplete for '${sessionId}'. noiseKey or signedIdentityKey missing. ` +
-        "Run clearSession() or set FORCE_FRESH_SESSION=true to re-login."
+        "Set FORCE_FRESH_SESSION=true to re-login."
       );
     }
-    console.log(`ℹ️  No session found for '${sessionId}'. QR login required.`);
+    console.log(`No session found for '${sessionId}'. QR login required.`);
   }
 
-  // Debounced saveCreds — leading + trailing to balance write pressure vs integrity
+  // Debounced saveCreds — leading edge saves immediately, trailing edge
+  // guarantees the final ratchet state is always flushed within 1.5s
   let saveTimer = null;
   let pendingSave = false;
 
   const saveCreds = async () => {
     if (!saveTimer) {
       try { await rawSaveCreds(); } catch (err) {
-        console.error("🚨 saveCreds failed (leading):", err.message);
+        console.error("saveCreds failed (leading):", err.message);
         throw err;
       }
     }
@@ -168,29 +178,33 @@ export async function getAuthState() {
       if (pendingSave) {
         pendingSave = false;
         try { await rawSaveCreds(); } catch (err) {
-          console.error("🚨 saveCreds failed (trailing):", err.message);
+          console.error("saveCreds failed (trailing):", err.message);
         }
       }
     }, 1500);
   };
 
+  authStateCache = { sessionId, state, saveCreds };
   return { state, saveCreds };
 }
 
 // ─── Clear session ────────────────────────────────────────────────────────────
 
 export async function clearSession() {
+  // Bust cache first so next getAuthState() does a full Redis read
+  authStateCache = null;
+
   const sessionId = SESSION_ID();
-  await redisClient.del(`${sessionId}:auth`);
-  await redisClient.del(`${sessionId}:lock`).catch(() => {});
-  console.log(`🗑️  Session '${sessionId}' cleared from Valkey`);
+  await deleteHSetKeys({ redis: redisClient, key: sessionId });
+  console.log(`Session '${sessionId}' cleared from Valkey`);
+  // No try/catch — callers use finally{} and need the error to propagate
 }
 
 // ─── Legacy stubs ─────────────────────────────────────────────────────────────
 
 export async function loadSession() {
   if (process.env.FORCE_FRESH_SESSION === "true") {
-    console.log("🆕 FORCE_FRESH_SESSION — clearing session");
+    console.log("FORCE_FRESH_SESSION — clearing session");
     await clearSession();
   }
   return true;
