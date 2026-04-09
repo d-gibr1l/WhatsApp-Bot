@@ -89,8 +89,8 @@ export const schedulerCommands = {
       if (!interval)           return replyMsg(sock, from, msg, `❌ Invalid interval. Use: *10s*, *5m*, *2h*`);
       if (isNaN(times) || times <= 0) return replyMsg(sock, from, msg, `❌ Invalid times. Use: *3t*, *10t*`);
       if (!text)               return replyMsg(sock, from, msg, `❌ Message cannot be empty.`);
-      if (times > 10000)         return replyMsg(sock, from, msg, `❌ Maximum 10000 times.`);
-      if (interval < 200)     return replyMsg(sock, from, msg, `❌ Minimum interval is 1 seconds.`);
+      if (times > 100)         return replyMsg(sock, from, msg, `❌ Maximum 100 times.`);
+      if (interval < 5000)     return replyMsg(sock, from, msg, `❌ Minimum interval is 5 seconds.`);
 
       const jid     = resolveJid(target);
       const jobKey  = jid; // use JID as key so stopsend works cleanly
@@ -109,13 +109,26 @@ export const schedulerCommands = {
           return;
         }
         try {
+          // Check if socket is still connected before attempting send
+          const sockState = sock.ws?.readyState;
+          if (sockState !== 1) { // 1 = WebSocket.OPEN
+            // Skip this tick silently — bot is reconnecting
+            console.log(`⏸️  Scheduled send paused (socket not ready)`);
+            return;
+          }
           await sock.sendMessage(jid, { text });
+          count++;
         } catch (err) {
-          console.error(`❌ Scheduled send error:`, err.message);
-          clearInterval(job);
-          activeJobs.delete(jobKey);
+          const isTimeout = err.message?.includes("Timed Out") || err.output?.statusCode === 408;
+          if (isTimeout) {
+            // Transient — bot likely reconnecting, skip this tick and retry next interval
+            console.log(`⏸️  Scheduled send skipped (timeout — will retry)`);
+          } else {
+            console.error(`❌ Scheduled send error:`, err.message);
+            clearInterval(job);
+            activeJobs.delete(jobKey);
+          }
         }
-        count++;
       }, interval);
 
       activeJobs.set(jobKey, { job, text, intervalStr, times, jid });
