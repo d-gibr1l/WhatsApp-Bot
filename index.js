@@ -32,6 +32,16 @@ import {
 
 const logger = pino({ level: "silent" });
 
+// Baileys leaks "Closing session: SessionEntry {...}" via its internal Signal
+// store logger even when pino is set to silent. Suppress it completely by
+// overriding the child logger it uses for session store operations.
+const noopLogger = {
+  level: "silent",
+  trace: () => {}, debug: () => {}, info: () => {},
+  warn:  () => {}, error: () => {}, fatal: () => {},
+  child: () => noopLogger,
+};
+
 startServer();
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -108,7 +118,7 @@ async function createSocket() {
 
   const sock = makeWASocket({
     version,
-    logger,
+    logger: noopLogger,
     auth: state,
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
@@ -269,14 +279,14 @@ async function runBot() {
               }
             }
 
-            // 500 — corrupted session data
+            // 500 — WhatsApp says bad session.
+            // This is almost always a transient Signal ratchet drift caused by
+            // a write that didn't flush in time, NOT a permanently corrupt session.
+            // Reconnecting lets Baileys re-negotiate the session automatically.
+            // Only clear if it keeps failing (handled by the attempt counter above).
             if (statusCode === DisconnectReason.badSession) {
-              console.error("Bad session (500). Clearing for fresh QR.");
-              try { await clearSession(); } catch (err) {
-                console.error("clearSession failed:", err.message);
-              } finally {
-                await shutdown("BAD_SESSION", 1);
-              }
+              console.warn("Bad session (500) — reconnecting to re-negotiate (NOT clearing session).");
+              return safeResolve(true);
             }
 
             // 411 — protocol mismatch, restart without clearing session

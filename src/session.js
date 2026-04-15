@@ -264,35 +264,50 @@ export async function getAuthState() {
     console.log(`No session found for '${sessionId}'. QR login required.`);
   }
 
-  // ── Debounced saveCreds ────────────────────────────────────────────────────
-  // Leading edge  : write immediately (captures QR-scan creds quickly)
-  // Trailing edge : guarantees the final Signal ratchet is always flushed
-
-  let saveTimer   = null;
-  let pendingSave = false;
+  // ── Write flush (shared by both saveCreds and keys.set) ───────────────────
+  // Always reads `creds` and `keys` by reference at flush time — so even if
+  // 10 keys.set() calls fire before the timer fires, the single flush captures
+  // ALL of them, not just the state at the moment the timer was scheduled.
 
   const flushSave = () =>
     withWriteLock(sessionId, () => saveSessionData(sessionId, { creds, keys }));
 
+  // ── saveCreds — called by Baileys on creds.update ─────────────────────────
+  // Uses its own independent timer so keys.set() debounce can never cancel a
+  // pending creds flush (which was the root cause of the badSession 500 errors).
+  // Leading edge fires immediately to capture QR-scan creds without delay.
+
+  let credsTimer   = null;
+  let credsPending = false;
+
   const saveCreds = async () => {
-    if (!saveTimer) {
+    // Leading edge: if no creds timer is running, flush now
+    if (!credsTimer) {
       try { await flushSave(); } catch (err) {
         console.error("saveCreds failed (leading):", err.message);
         throw err;
       }
     }
-    pendingSave = true;
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      saveTimer = null;
-      if (pendingSave) {
-        pendingSave = false;
+    credsPending = true;
+    if (credsTimer) clearTimeout(credsTimer);
+    credsTimer = setTimeout(async () => {
+      credsTimer = null;
+      if (credsPending) {
+        credsPending = false;
         try { await flushSave(); } catch (err) {
           console.error("saveCreds failed (trailing):", err.message);
         }
       }
     }, 1500);
   };
+
+  // ── keys.set — called by Baileys during Signal key rotation ───────────────
+  // Uses its OWN separate timer, completely independent of credsTimer.
+  // key rotation fires 5–15x per message — 200ms debounce collapses the burst
+  // into a single write while still capturing the final cumulative state.
+
+  let keysTimer   = null;
+  let keysPending = false;
 
   const state = {
     creds,
@@ -309,8 +324,10 @@ export async function getAuthState() {
         return result;
       },
 
-      // Merges Baileys key updates into memory + debounces the DB write
-      // (key rotation fires 5-10x per message — 150ms debounce collapses them)
+      // Merges ALL incoming key updates into the shared `keys` object first,
+      // then schedules a single debounced flush. Because `flushSave` reads
+      // `keys` by reference at flush time, it always captures the complete
+      // final state — no intermediate ratchet states are ever written.
       set(data) {
         for (const category of Object.keys(data)) {
           for (const id of Object.keys(data[category])) {
@@ -323,17 +340,17 @@ export async function getAuthState() {
             }
           }
         }
-        if (saveTimer) clearTimeout(saveTimer);
-        pendingSave = true;
-        saveTimer = setTimeout(async () => {
-          saveTimer = null;
-          if (pendingSave) {
-            pendingSave = false;
+        keysPending = true;
+        if (keysTimer) clearTimeout(keysTimer);
+        keysTimer = setTimeout(async () => {
+          keysTimer = null;
+          if (keysPending) {
+            keysPending = false;
             try { await flushSave(); } catch (err) {
               console.error("keys.set save failed:", err.message);
             }
           }
-        }, 150);
+        }, 200);
       }
     }
   };
