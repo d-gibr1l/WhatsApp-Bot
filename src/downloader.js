@@ -247,3 +247,88 @@ export async function downloadToBuffer(url) {
   if (!res.ok) throw new Error(`Failed to download: ${res.status}`);
   return { buffer: Buffer.from(await res.arrayBuffer()), contentType: res.headers.get("content-type") || "" };
 }
+
+// ─── Image Search ─────────────────────────────────────────────────────────────
+
+const IMAGE_SEARCH_TIMEOUT = 15_000;
+const IMAGE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// Gets DuckDuckGo vqd token required for image API calls
+async function getDDGToken(query) {
+  const res = await fetch(
+    `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`,
+    {
+      headers: { "User-Agent": IMAGE_USER_AGENT },
+      signal: AbortSignal.timeout(IMAGE_SEARCH_TIMEOUT),
+    }
+  );
+  const html = await res.text();
+  const match = html.match(/vqd=([\d-]+)/);
+  if (!match) throw new Error("Could not get DDG search token — DuckDuckGo may have changed their API");
+  return match[1];
+}
+
+// Search DuckDuckGo images and return direct image URLs
+export async function searchImages(query, count = 3) {
+  const vqd = await getDDGToken(query);
+
+  const params = new URLSearchParams({
+    q:   query,
+    o:   "json",
+    p:   "1",
+    vqd: vqd,
+    f:   ",,,,,",
+    l:   "us-en",
+  });
+
+  const res = await fetch(`https://duckduckgo.com/i.js?${params}`, {
+    headers: {
+      "User-Agent": IMAGE_USER_AGENT,
+      "Referer":    "https://duckduckgo.com/",
+      "Accept":     "application/json",
+    },
+    signal: AbortSignal.timeout(IMAGE_SEARCH_TIMEOUT),
+  });
+
+  if (!res.ok) throw new Error(`DDG image search failed: ${res.status}`);
+
+  const data = await res.json();
+  const results = data?.results || [];
+
+  // Return direct image URLs — filter out SVGs, tiny icons, and non-http
+  return results
+    .map(r => r.image)
+    .filter(url =>
+      url &&
+      url.startsWith("http") &&
+      !url.endsWith(".svg") &&
+      !url.endsWith(".gif") &&
+      !url.includes("logo") &&
+      !url.includes("icon")
+    )
+    .slice(0, count);
+}
+
+// Download a single image URL to a buffer
+export async function downloadImageUrl(url) {
+  const res = await fetch(url, {
+    headers: { "User-Agent": IMAGE_USER_AGENT },
+    signal: AbortSignal.timeout(20_000),
+    redirect: "follow",
+  });
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const contentType = res.headers.get("content-type") || "image/jpeg";
+  if (!contentType.startsWith("image/")) {
+    throw new Error(`Not an image: ${contentType}`);
+  }
+
+  const arrayBuffer = await res.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  // Reject tracking pixels and placeholder images
+  if (buffer.length < 5000) throw new Error("Image too small (likely a placeholder)");
+
+  return { buffer, contentType };
+}

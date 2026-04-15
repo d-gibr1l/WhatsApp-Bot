@@ -28,6 +28,7 @@ import { aliasCommands }       from "./aliases.js";
 import { searchCommands }      from "./search.js";
 import { factsCommands }       from "./facts.js";
 import { jokeCommands }        from "./joke.js";
+import { imageCommands }       from "./imagedownload.js";
 import { ytToolsCommands }     from "./yttools.js";
 import { qrCommands }          from "./qr.js";
 import { videoToolsCommands }  from "./videotools.js";
@@ -67,6 +68,7 @@ export const commands = {
   ...searchCommands,
   ...factsCommands,
   ...jokeCommands,
+  ...imageCommands,
   ...ytToolsCommands,
   ...qrCommands,
   ...videoToolsCommands,
