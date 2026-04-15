@@ -13,6 +13,7 @@ import {
   getAuthState,
   acquireSessionLock,
   releaseSessionLock,
+  drainPendingDbWrites,
   redisClient,
 } from "./src/session.js";
 import { handleMessage, startReminderPoller, extractText } from "./src/handler.js";
@@ -87,7 +88,12 @@ async function shutdown(signal, exitCode = 0) {
 
   try { await releaseSessionLock(); } catch {}
 
-  // Wait up to 2s for any in-flight saveCreds writes to complete
+  // Flush any session keys that Redis has but Supabase hasn't confirmed yet.
+  // The write-behind queue holds at most one blob per session (deduplicated),
+  // so this completes almost instantly under normal conditions.
+  try { await drainPendingDbWrites(); } catch {}
+
+  // Wait up to 2s for any remaining in-flight saveCreds writes to complete
   await new Promise(r => setTimeout(r, 2000));
 
   try { await redisClient.quit(); } catch {}

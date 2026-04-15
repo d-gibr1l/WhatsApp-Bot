@@ -202,10 +202,74 @@ async function loadSessionData(sessionId) {
   }
 }
 
+// ─── Write-behind queue ──────────────────────────────────────────────────────
+// Redis is the hot store Baileys reads/writes at runtime.
+// Supabase is the cold store used only on restart (when Redis is empty).
+//
+// Strategy:
+//   1. Write blob to Redis immediately (awaited) — Baileys continues in <1ms
+//   2. Fire Supabase write in the background (not awaited) — never blocks
+//   3. If the Supabase write fails, add it to a retry queue
+//   4. The retry queue drains automatically every RETRY_INTERVAL ms
+//   5. On graceful shutdown, drainPendingDbWrites() flushes before exit
+//
+// Worst case: Koyeb kills the container before the queue drains.
+// Recovery: on next boot, Redis still has the latest blob (TTL 24h).
+// Supabase will be behind by at most one write cycle — harmless because the
+// bot always reads Redis first and only falls back to Supabase on Redis miss.
+
+const dbRetryQueue = new Map(); // sessionId → blob (latest pending, deduped)
+const RETRY_INTERVAL = 10_000;  // retry every 10s
+
+let retryTimer = null;
+
+function scheduleRetry() {
+  if (retryTimer || dbRetryQueue.size === 0) return;
+  retryTimer = setTimeout(async () => {
+    retryTimer = null;
+    await drainRetryQueue();
+  }, RETRY_INTERVAL);
+}
+
+async function drainRetryQueue() {
+  if (dbRetryQueue.size === 0) return;
+  const entries = [...dbRetryQueue.entries()];
+  for (const [sessionId, blob] of entries) {
+    try {
+      await dbSave(sessionId, blob);
+      dbRetryQueue.delete(sessionId);
+      console.log(`Session DB sync recovered for '${sessionId}'`);
+    } catch (err) {
+      console.warn(`Session DB retry failed for '${sessionId}': ${err.message}`);
+    }
+  }
+  if (dbRetryQueue.size > 0) scheduleRetry(); // still entries — schedule another pass
+}
+
+// Called by the graceful shutdown handler in index.js before process.exit().
+// The existing 2s drain window in index.js is enough for this to complete.
+export async function drainPendingDbWrites() {
+  if (dbRetryQueue.size === 0) return;
+  console.log(`Flushing ${dbRetryQueue.size} pending session DB write(s) before shutdown...`);
+  await drainRetryQueue();
+}
+
 async function saveSessionData(sessionId, data) {
   const blob = encryptBlob(JSON.stringify(data, BufferJSON.replacer));
-  await dbSave(sessionId, blob);   // DB first — source of truth
-  await cacheSet(sessionId, blob); // Redis second — cache
+
+  // ── Step 1: Redis (awaited) ────────────────────────────────────────────────
+  // The only thing Baileys needs right now. Sub-millisecond, handles any volume
+  // of key rotations. If Redis fails here, we throw — Baileys must have the cache.
+  await cacheSet(sessionId, blob);
+
+  // ── Step 2: Supabase background sync (fire-and-forget) ────────────────────
+  // Deliberately NOT awaited. Supabase slow/down = bot keeps running.
+  // Failures go into the retry queue; latest blob is always deduplicated.
+  dbSave(sessionId, blob).catch((err) => {
+    console.warn(`Session DB write queued for retry (${err.message})`);
+    dbRetryQueue.set(sessionId, blob);
+    scheduleRetry();
+  });
 }
 
 // ─── In-memory write mutex ────────────────────────────────────────────────────
