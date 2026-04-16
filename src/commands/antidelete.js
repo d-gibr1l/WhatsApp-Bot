@@ -1,3 +1,4 @@
+import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "../config.js";
 import { setSetting } from "../db.js";
@@ -6,8 +7,7 @@ import { replyMsg } from "./helpers.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ─── In-memory message store (last 200 messages per chat) ────────────────────
-// Structure: Map<chatId, Map<messageId, {text, sender, timestamp, media}>>
+// ─── In-memory message store (last 500 messages per chat) ────────────────────
 
 const messageStore = new Map();
 const MAX_PER_CHAT = 500;
@@ -17,7 +17,6 @@ export function storeMessage(msg, text) {
   const id   = msg.key.id;
   if (!from || !id) return;
 
-  // Skip protocol/system messages that can't be meaningfully revealed
   const m = msg.message || {};
   const isSystem = !!(
     m.protocolMessage ||
@@ -45,7 +44,24 @@ export function storeMessage(msg, text) {
   }
 }
 
-// ─── Handle delete event (called from index.js) ───────────────────────────────
+// ─── Group metadata cache ─────────────────────────────────────────────────────
+// groupMetadata() makes a live network request to WhatsApp — doing this on
+// every delete event adds 500–3000ms of latency per alert. Cache it for 5 min.
+
+const groupMetaCache = new Map(); // chatId → { meta, fetchedAt }
+const GROUP_META_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getCachedGroupMeta(sock, chatId) {
+  const cached = groupMetaCache.get(chatId);
+  if (cached && Date.now() - cached.fetchedAt < GROUP_META_TTL) {
+    return cached.meta;
+  }
+  const meta = await sock.groupMetadata(chatId).catch(() => null);
+  if (meta) groupMetaCache.set(chatId, { meta, fetchedAt: Date.now() });
+  return meta;
+}
+
+// ─── Handle delete event ──────────────────────────────────────────────────────
 
 export async function handleAntiDelete(sock, deletedKey) {
   const active = cachedGetSetting("antidelete_active", "false");
@@ -61,30 +77,33 @@ export async function handleAntiDelete(sock, deletedKey) {
   const stored = chatMap.get(messageId);
   if (!stored) return;
 
+  // Remove immediately — prevents duplicate reveals if the event fires twice
+  chatMap.delete(messageId);
+
   const senderNumber = (stored.sender ?? "").split("@")[0];
   const timeStr      = new Date(stored.timestamp).toLocaleTimeString();
 
-  // Resolve display name: pushName → fetch from group → number fallback
+  // ── Display name resolution ───────────────────────────────────────────────
+  // Priority: pushName (stored at message-receive time, free) →
+  //           cached group metadata (5-min TTL, one network call) →
+  //           phone number fallback
   let senderName = stored.pushName || null;
-  if (!senderName) {
-    try {
-      const isGroup = chatId.endsWith("@g.us");
-      if (isGroup) {
-        const meta = await sock.groupMetadata(chatId).catch(() => null);
-        const participant = meta?.participants?.find(p => p.id === stored.sender);
-        senderName = participant?.notify || participant?.name || null;
-      }
-    } catch {}
+  if (!senderName && chatId.endsWith("@g.us")) {
+    // Uses the 5-min cache — no live network call if metadata was fetched recently
+    const meta = await getCachedGroupMeta(sock, chatId);
+    const participant = meta?.participants?.find(p => p.id === stored.sender);
+    senderName = participant?.notify || participant?.name || null;
   }
   const displayName = senderName ? `${senderName} (+${senderNumber})` : `+${senderNumber}`;
 
-  try {
-    const antideleteDest = cachedGetSetting("antidelete_dest", "chat");
-    const dest = antideleteDest === "dm"
-      ? `${botConfig.BOT_NUMBER}@s.whatsapp.net`
-      : chatId;
+  const antideleteDest = cachedGetSetting("antidelete_dest", "chat");
+  const dest = antideleteDest === "dm"
+    ? `${botConfig.BOT_NUMBER}@s.whatsapp.net`
+    : chatId;
 
+  try {
     if (stored.text) {
+      // Text message — send immediately, no download needed
       await sock.sendMessage(dest, {
         text:
           `🗑️ *Deleted Message Detected*\n\n` +
@@ -92,29 +111,37 @@ export async function handleAntiDelete(sock, deletedKey) {
           `🕐 *Time:* ${timeStr}\n` +
           `💬 *Message:* ${stored.text}`,
       });
-    } else {
-      // Media message — try to re-send
-      try {
-        const { downloadMediaMessage } = await import("@whiskeysockets/baileys");
-        const buffer = await downloadMediaMessage(stored.msg, "buffer", {});
-        const mediaMsg = stored.msg.message;
-        const isImage   = !!mediaMsg?.imageMessage;
-        const isVideo   = !!mediaMsg?.videoMessage;
-        const isAudio   = !!mediaMsg?.audioMessage;
-        const isDoc     = !!mediaMsg?.documentMessage;
-        const isSticker = !!mediaMsg?.stickerMessage;
-        const isViewOnce = !!(mediaMsg?.viewOnceMessage || mediaMsg?.viewOnceMessageV2);
+      return;
+    }
 
-        const caption = `🗑️ *Deleted media from ${displayName} at ${timeStr}*`;
+    // ── Media message ─────────────────────────────────────────────────────
+    // Send a "message deleted" placeholder immediately so the user sees
+    // something right away, then download and re-send the media in the background.
+    // This is what makes reveals feel instant even for large videos.
+    const caption = `🗑️ *Deleted media from ${displayName} at ${timeStr}*`;
+    const mediaMsg = stored.msg.message;
+    const isImage    = !!mediaMsg?.imageMessage;
+    const isVideo    = !!mediaMsg?.videoMessage;
+    const isAudio    = !!mediaMsg?.audioMessage;
+    const isDoc      = !!mediaMsg?.documentMessage;
+    const isSticker  = !!mediaMsg?.stickerMessage;
+    const isViewOnce = !!(mediaMsg?.viewOnceMessage || mediaMsg?.viewOnceMessageV2);
+
+    // Placeholder lands in chat immediately (<100ms)
+    await sock.sendMessage(dest, {
+      text: `${caption}\n_Downloading media..._`,
+    });
+
+    // Download and re-send asynchronously — does not block the event loop
+    (async () => {
+      try {
+        const buffer = await downloadMediaMessage(stored.msg, "buffer", {});
 
         if (isSticker) {
           await sock.sendMessage(dest, { sticker: buffer });
-          await sock.sendMessage(dest, { text: caption });
         } else if (isViewOnce) {
-          // Re-send view-once as regular image/video
-          const voMsg = mediaMsg?.viewOnceMessage?.message || mediaMsg?.viewOnceMessageV2?.message;
-          const voIsImage = !!voMsg?.imageMessage;
-          if (voIsImage) {
+          const voMsg = mediaMsg?.viewOnceMessage?.message ?? mediaMsg?.viewOnceMessageV2?.message;
+          if (voMsg?.imageMessage) {
             await sock.sendMessage(dest, { image: buffer, caption: caption + " *(view-once)*" });
           } else {
             await sock.sendMessage(dest, { video: buffer, caption: caption + " *(view-once)*" });
@@ -132,18 +159,13 @@ export async function handleAntiDelete(sock, deletedKey) {
             fileName: mediaMsg.documentMessage.fileName ?? "file",
             caption,
           });
-        } else {
-          await sock.sendMessage(dest, { text: `🗑️ *Deleted media from ${displayName} at ${timeStr}* (unsupported type)` });
         }
       } catch {
         await sock.sendMessage(dest, {
-          text: `🗑️ *Deleted media from ${displayName} at ${timeStr}* (could not retrieve)`,
-        });
+          text: `${caption} *(media could not be retrieved)*`,
+        }).catch(() => {});
       }
-    }
-
-    // Remove from store after revealing
-    chatMap.delete(messageId);
+    })();
 
   } catch (err) {
     console.error("❌ Anti-delete error:", err.message);
