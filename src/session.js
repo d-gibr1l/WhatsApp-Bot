@@ -9,7 +9,7 @@
 // Write path:
 //   keys.set()  → L1 RAM (sync, instant) → dirty buffer
 //                 → pointer-swap flush every 200 ms or 50 keys
-//                 → worker pool (3 concurrent) → L2 Redis (awaited)
+//                 → single serialized worker → L2 Redis (awaited)
 //                 → L3 Supabase (jittered retry, fire-and-forget)
 //
 //   saveCreds() → immediate leading-edge flush to L2+L3 (creds are critical)
@@ -19,27 +19,37 @@
 //                 → L2 Redis hit? populate L1, return
 //                 → L3 Supabase hit? populate L2+L1, return
 //
-// What was kept from the original:
-//   - Single-blob storage (creds + keys serialized together) — one DB read on cold start
-//   - Synchronous keys.get() from L1 RAM — Baileys expects sync in some paths
-//   - Leading-edge saveCreds — captures QR-scan creds immediately
-//   - LOCK_FORCE_AFTER fallback — safer than dying on transient Redis unavailability
+// ── FIXES APPLIED ────────────────────────────────────────────────────────────
 //
-// What was adopted from the proposed rewrite:
-//   - LRUTTLCache — O(1) eviction, prevents memory leaks
-//   - Pointer-swap dirty buffer — eliminates race between accumulation and flush
-//   - Bounded worker pool — prevents network saturation during high-velocity writes
-//   - Exponential backpressure — throttles Baileys before the queue overflows
-//   - Circuit breaker on Redis — stops hammering dead infrastructure
-//   - Jittered exponential retry for Supabase — thundering-herd protection
-//   - drainQueue() on shutdown — flushes RAM buffer before process exits
+// FIX 1 — Read-modify-write race in flush workers (CRITICAL):
+//   The original executeWriteKeys / executeDeleteKeys re-read the full session
+//   blob from Redis or Supabase, merged the snapshot, and wrote it back.
+//   With MAX_CONCURRENCY=2, two workers could both read the same stale blob at
+//   T=0, merge different key subsets, and the second writer would silently
+//   overwrite the first's keys — causing Bad MAC / decryption failures on the
+//   next message.
+//   Fix: workers now build the blob directly from L1 RAM (always the most
+//   current authoritative state, updated synchronously by keys.set()).
+//   executeWriteKeys and executeDeleteKeys are removed; a single unified task
+//   is enqueued instead. MAX_CONCURRENCY reduced to 1 to fully serialize writes.
 //
-// What was NOT adopted (bugs found in the proposal):
-//   - Per-key HSet storage model (would cause N×Supabase reads per message on cold start)
-//   - Async keys.get() (Baileys calls this synchronously in some decrypt paths)
-//   - Metrics HTTP server (port conflict with existing Express server on port 3000)
-//   - dieGracefully() from lock renewal (async-unsafe, causes split-brain window)
-//   - dieGracefully() from acquireSessionLock (kills bot on transient Koyeb cold-boot lag)
+// FIX 2 — Redis health check was fatal (CRITICAL):
+//   getAuthState() threw if redisClient.ping() failed, aborting the reconnect
+//   loop even though Supabase is a valid complete fallback for the session.
+//   cacheGet/cacheSet already swallow Redis errors; there was no reason for
+//   the health check to be stricter. Fix: downgrade to a console.warn.
+//
+// FIX 3 — Stale worker writes after clearSession() (MEDIUM):
+//   A flush task queued just before clearSession() could execute after the
+//   session was cleared and write an empty or stale blob back to storage,
+//   effectively "un-deleting" the cleared session.
+//   Fix: every flush task checks authStateCache before writing and skips if
+//   the session has been cleared.
+//
+// FIX 4 — getCurrentKeysSnapshot() moved to module level (STRUCTURAL):
+//   Was a closure inside getAuthState() but only referenced module-level
+//   variables (localKeys, BufferJSON). Moving it to module level allows
+//   buildSessionBlob() to use it everywhere without duplication.
 
 import { initAuthCreds, BufferJSON } from "@whiskeysockets/baileys";
 import { createClient }              from "@supabase/supabase-js";
@@ -244,11 +254,26 @@ class LRUTTLCache {
 // 5 000 key cap · 10 min TTL — keeps memory well under 20 MB for a single session
 const localKeys = new LRUTTLCache(5000);
 
+// ─── Module-level key snapshot (FIX 4) ───────────────────────────────────────
+// Moved from inside getAuthState() — only closes over module-level variables so
+// it belongs at module scope. Used by buildSessionBlob() (declared below, after
+// authStateCache) to produce a full consistent snapshot of all Signal keys.
+
+function getCurrentKeysSnapshot() {
+  const out = {};
+  for (const [k, entry] of localKeys.cache.entries()) {
+    if (Date.now() <= entry.expiry) {
+      out[k] = JSON.parse(JSON.stringify(entry.val, BufferJSON.replacer));
+    }
+  }
+  return out;
+}
+
 // ─── Dirty-write buffer + pointer-swap flush ──────────────────────────────────
 // keys.set() writes to this buffer synchronously (instant, no I/O).
 // A timer or threshold triggers flushRAMToQueue(), which swaps the pointer
 // atomically so new writes land on a fresh empty Map while the snapshot
-// is being serialized and dispatched to the worker pool.
+// is being dispatched to the worker pool.
 
 let dirtyWrites  = new Map(); // keyId → serialized value
 let dirtyDeletes = new Set(); // keyId
@@ -257,21 +282,32 @@ let syncTimer    = null;
 const FLUSH_THRESHOLD = 50;  // flush early if ≥ 50 keys accumulated
 const FLUSH_INTERVAL  = 200; // ms — maximum time a key stays unflushed
 
+// FIX 1 (part A): flushRAMToQueue enqueues a single task that builds the full
+// blob from L1 RAM. The pointer-swap still happens (so concurrent keys.set()
+// calls land on fresh maps), but the snapshot contents are no longer passed to
+// the worker — L1 is always more current than any snapshot by the time the
+// worker executes.
+
 function flushRAMToQueue(sessionId) {
   if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
   if (dirtyWrites.size === 0 && dirtyDeletes.size === 0) return;
 
-  // Pointer swap: instantly detach the current buffer.
-  // Any keys.set() calls that arrive during serialization go into the NEW maps.
-  const snapshotWrites  = dirtyWrites;
-  const snapshotDeletes = dirtyDeletes;
+  // Pointer swap: detach the current buffer instantly.
+  // New writes arriving during the async flush go into fresh maps.
   dirtyWrites  = new Map();
   dirtyDeletes = new Set();
 
   enqueueWrite(async () => {
+    // FIX 3: Guard against post-clearSession() writes. If authStateCache was
+    // nulled between enqueue and execution, skip — writing now would persist
+    // an empty or stale blob and effectively un-delete the cleared session.
+    if (!authStateCache) return;
     try {
-      if (snapshotWrites.size  > 0) await executeWriteKeys(sessionId, snapshotWrites);
-      if (snapshotDeletes.size > 0) await executeDeleteKeys(sessionId, snapshotDeletes);
+      const blob = buildSessionBlob();
+      await cacheSet(sessionId, blob);
+      safeDbWrite(sessionId, blob).catch(err =>
+        console.warn(`Supabase background flush failed: ${err.message}`)
+      );
     } catch (err) {
       console.error("Batch flush failed in worker:", err.message);
     }
@@ -279,16 +315,16 @@ function flushRAMToQueue(sessionId) {
 }
 
 // ─── Bounded worker pool ──────────────────────────────────────────────────────
-// Runs at most MAX_CONCURRENCY tasks simultaneously.
-// More than this would saturate the Redis/Supabase connection and spike memory.
-// Workers are self-dispatching: each one calls dispatchWorkers() in its finally
-// block so the pool count never drifts even if a task throws.
+// FIX 1 (part B): MAX_CONCURRENCY reduced from 2 → 1.
+// All writes are now serialized. Since every write builds from L1 RAM (the
+// most current state), serialization guarantees that the last write always
+// contains every key set before it — no key can be silently overwritten.
 
 const writeQueue      = [];
 let   activeWorkers   = 0;
-const MAX_CONCURRENCY = 2;  // single-session bot doesn't need more than 2
-const SOFT_LIMIT      = 100; // queue depth that triggers backpressure
-const MAX_QUEUE_SIZE  = 500; // hard cap — beyond this something is badly wrong
+const MAX_CONCURRENCY = 1;    // serialize all writes — eliminates blob-overwrite races
+const SOFT_LIMIT      = 100;  // queue depth that triggers backpressure
+const MAX_QUEUE_SIZE  = 500;  // hard cap — beyond this something is badly wrong
 
 async function processWorker() {
   try {
@@ -312,14 +348,13 @@ function dispatchWorkers() {
 async function enqueueWrite(task) {
   if (writeQueue.length >= MAX_QUEUE_SIZE) {
     // Something is severely wrong (Redis dead for minutes). Log and drop
-    // rather than crash — the dirty buffer is already swapped so the data
-    // is still in the snapshot; worst case it misses Supabase this cycle.
+    // rather than crash — data is still in L1 RAM; worst case it misses
+    // Supabase this cycle.
     console.error(`Write queue full (${MAX_QUEUE_SIZE}). Dropping oldest task to prevent OOM.`);
     writeQueue.shift(); // drop oldest to make room
   }
 
-  // Exponential backpressure: tiny spike = tiny delay, big spike = throttle hard.
-  // This slows down the Baileys event loop before the queue overflows.
+  // Exponential backpressure: slows the Baileys event loop before queue overflows.
   if (writeQueue.length > SOFT_LIMIT) {
     const overload = writeQueue.length - SOFT_LIMIT;
     const delay    = Math.min(1000, Math.pow(overload, 1.2));
@@ -424,49 +459,6 @@ async function loadSessionData(sessionId) {
   }
 }
 
-// ─── executeWriteKeys / executeDeleteKeys ─────────────────────────────────────
-// These run inside the worker pool. They take a snapshot Map (from the swap),
-// serialize the entire session blob, and push to L2 → L3.
-
-async function executeWriteKeys(sessionId, snapshotWrites) {
-  // Merge the snapshot into the current full session state so we always write
-  // the complete blob (not just the delta). Read from L2 or use what's in L1.
-  const current = await loadSessionData(sessionId) ?? { creds: null, keys: {} };
-
-  for (const [keyId, val] of snapshotWrites) {
-    if (keyId === "creds") {
-      current.creds = val;
-    } else {
-      current.keys[keyId] = val;
-    }
-  }
-
-  const blob = encryptBlob(JSON.stringify(current, BufferJSON.replacer));
-
-  // L2: Redis (awaited — Baileys needs this before next message)
-  await cacheSet(sessionId, blob);
-
-  // L3: Supabase (jittered retry, fire-and-forget from caller's perspective)
-  safeDbWrite(sessionId, blob).catch(err =>
-    console.warn(`Supabase background write failed: ${err.message}`)
-  );
-}
-
-async function executeDeleteKeys(sessionId, snapshotDeletes) {
-  const current = await loadSessionData(sessionId);
-  if (!current) return;
-
-  for (const keyId of snapshotDeletes) {
-    delete current.keys[keyId];
-  }
-
-  const blob = encryptBlob(JSON.stringify(current, BufferJSON.replacer));
-  await cacheSet(sessionId, blob);
-  safeDbWrite(sessionId, blob).catch(err =>
-    console.warn(`Supabase background delete-sync failed: ${err.message}`)
-  );
-}
-
 // ─── Creds validation ─────────────────────────────────────────────────────────
 
 function validateCreds(creds) {
@@ -474,17 +466,53 @@ function validateCreds(creds) {
   if (!creds?.signedIdentityKey) throw new Error("missing creds.signedIdentityKey");
 }
 
-// ─── getAuthState ─────────────────────────────────────────────────────────────
+// ─── authStateCache + buildSessionBlob ───────────────────────────────────────
+// authStateCache must be declared before buildSessionBlob so the function can
+// read authStateCache.state.creds at call time (not definition time).
+//
+// buildSessionBlob() is the single source-of-truth serializer used by every
+// write path (flushCreds, flush worker). It reads creds from the live
+// authStateCache reference (Baileys mutates it in place) and all Signal keys
+// from L1 RAM via getCurrentKeysSnapshot(). This replaces the old pattern of
+// re-reading the blob from Redis/Supabase before every write.
 
 let authStateCache = null;
 
+function buildSessionBlob() {
+  return encryptBlob(
+    JSON.stringify(
+      {
+        creds: authStateCache?.state?.creds ?? null,
+        keys:  getCurrentKeysSnapshot(),
+      },
+      BufferJSON.replacer
+    )
+  );
+}
+
+// ─── getAuthState ─────────────────────────────────────────────────────────────
+
 export async function getAuthState() {
-  try { await redisClient.ping(); } catch (err) {
-    throw new Error(`Redis health check failed: ${err.message}`);
+  // FIX 2: Changed from fatal throw → warning + continue.
+  // Redis being temporarily unreachable (cold boot, network blip, rolling
+  // deploy) must not abort the connection attempt. loadSessionData() already
+  // falls through to Supabase when cacheGet() fails, so the session is still
+  // recoverable. cacheSet() also swallows Redis errors silently. Making the
+  // health check here fatal was stricter than the rest of the code warranted.
+  try {
+    await redisClient.ping();
+  } catch (err) {
+    console.warn(
+      `Redis health check failed: ${err.message}. ` +
+      "Proceeding — Supabase will be used as the sole store until Redis recovers."
+    );
+    // Do NOT throw — allow the connection attempt to continue.
   }
 
   const sessionId = SESSION_ID();
 
+  // Return cached auth state on reconnect (creds object is mutated in-place
+  // by Baileys, so the reference is always current).
   if (authStateCache?.sessionId === sessionId) {
     return { state: authStateCache.state, saveCreds: authStateCache.saveCreds };
   }
@@ -521,14 +549,17 @@ export async function getAuthState() {
   // ── saveCreds ────────────────────────────────────────────────────────────
   // Leading-edge: fires immediately on first call (captures QR-scan creds).
   // Trailing-edge: re-fires 1.5s after the last call (captures final ratchet).
-  // Uses the worker pool so it doesn't race with keys.set() flushes.
-
-  let credsTimer   = null;
-  let credsPending = false;
+  //
+  // FIX 1 + FIX 3 applied: flushCreds uses buildSessionBlob() (L1 RAM
+  // snapshot) instead of the old { creds, keys: getCurrentKeys() } inline.
+  // The result is identical — authStateCache.state.creds IS the same object
+  // reference as the local `creds` variable; Baileys mutates it in place.
+  // The authStateCache null guard prevents writes after clearSession().
 
   const flushCreds = () => enqueueWrite(async () => {
+    if (!authStateCache) return; // FIX 3: skip if session was cleared
     try {
-      const blob = encryptBlob(JSON.stringify({ creds, keys: getCurrentKeys() }, BufferJSON.replacer));
+      const blob = buildSessionBlob();
       await cacheSet(sessionId, blob);
       safeDbWrite(sessionId, blob).catch(err =>
         console.warn(`saveCreds Supabase write failed: ${err.message}`)
@@ -538,6 +569,9 @@ export async function getAuthState() {
       throw err;
     }
   });
+
+  let credsTimer   = null;
+  let credsPending = false;
 
   const saveCreds = async () => {
     // Leading edge: write immediately if no timer is already pending
@@ -561,17 +595,6 @@ export async function getAuthState() {
   };
 
   // ── keys API ─────────────────────────────────────────────────────────────
-
-  // Helper to snapshot current L1 keys for blob serialization
-  function getCurrentKeys() {
-    const out = {};
-    for (const [k, entry] of localKeys.cache.entries()) {
-      if (Date.now() <= entry.expiry) {
-        out[k] = JSON.parse(JSON.stringify(entry.val, BufferJSON.replacer));
-      }
-    }
-    return out;
-  }
 
   const state = {
     creds,
