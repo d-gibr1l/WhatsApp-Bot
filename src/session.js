@@ -191,3 +191,6 @@ export async function loadSession() {
 }
 
 export async function saveSession() { /* no-op: triAuthState handles persistence */ }
+
+// Alias for index.js compatibility
+export { flushPendingWrites as drainPendingDbWrites };
