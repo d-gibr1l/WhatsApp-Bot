@@ -1,47 +1,55 @@
-import { execSync, spawnSync } from "child_process";
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
+import { exec } from "child_process";
+import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { promisify } from "util";
 import sharp from "sharp";
 import { setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 
+const execAsync = promisify(exec);
+
 // ─── Sticker metadata ─────────────────────────────────────────────────────────
 
-function addStickerMetadata(webpBuffer, packName, authorName) {
-  const tmpIn  = join(tmpdir(), `smeta_in_${Date.now()}.webp`);
-  const tmpOut = join(tmpdir(), `smeta_out_${Date.now()}.webp`);
+async function addStickerMetadata(webpBuffer, packName, authorName) {
+  const tmpIn = join(tmpdir(), `smeta_in_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
+  const tmpOut = join(tmpdir(), `smeta_out_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
+  
   try {
     const metadata = JSON.stringify({
       "sticker-pack-id": `bot-${Date.now()}`,
       "sticker-pack-name": packName,
       "sticker-pack-publisher": authorName,
     });
-    writeFileSync(tmpIn, webpBuffer);
-    execSync(`exiftool -UserComment='${metadata}' -o "${tmpOut}" "${tmpIn}" 2>/dev/null`, { timeout: 10000 });
-    const result = readFileSync(tmpOut);
-    try { unlinkSync(tmpIn); } catch {}
-    try { unlinkSync(tmpOut); } catch {}
-    return result;
-  } catch {
-    try { unlinkSync(tmpIn); } catch {}
-    try { unlinkSync(tmpOut); } catch {}
+    
+    // Safely escape single quotes for the bash command
+    const safeMetadata = metadata.replace(/'/g, "'\\''");
+
+    await fs.writeFile(tmpIn, webpBuffer);
+    await execAsync(`exiftool -UserComment='${safeMetadata}' -o "${tmpOut}" "${tmpIn}" 2>/dev/null`, { timeout: 10000 });
+    
+    return await fs.readFile(tmpOut);
+  } catch (err) {
+    console.warn("Exiftool metadata injection failed, returning original buffer:", err.message);
     return webpBuffer;
+  } finally {
+    // Non-blocking cleanup
+    await fs.unlink(tmpIn).catch(() => {});
+    await fs.unlink(tmpOut).catch(() => {});
   }
 }
 
 // ─── Core converters ──────────────────────────────────────────────────────────
 
 async function imageToSticker(inputBuffer, cropZoom = null) {
-  const packName   = cachedGetSetting("sticker_pack_name", "Bot Stickers");
+  const packName = cachedGetSetting("sticker_pack_name", "Bot Stickers");
   const authorName = cachedGetSetting("sticker_pack_author", "WhatsApp Bot");
 
   let img = sharp(inputBuffer);
 
   if (cropZoom) {
-    // cropZoom: "center" | "top" | "bottom" | "left" | "right" | number (zoom factor)
     const meta = await img.metadata();
     const size = Math.min(meta.width, meta.height);
     const zoom = typeof cropZoom === "number" ? cropZoom : 1;
@@ -66,77 +74,71 @@ async function imageToSticker(inputBuffer, cropZoom = null) {
 }
 
 async function videoToSticker(inputBuffer, startSec = 0, durationSec = 6) {
-  const packName   = cachedGetSetting("sticker_pack_name", "Bot Stickers");
+  const packName = cachedGetSetting("sticker_pack_name", "Bot Stickers");
   const authorName = cachedGetSetting("sticker_pack_author", "WhatsApp Bot");
 
-  const tmpIn  = join(tmpdir(), `sv_in_${Date.now()}.mp4`);
-  const tmpOut = join(tmpdir(), `sv_out_${Date.now()}.webp`);
-  writeFileSync(tmpIn, inputBuffer);
+  const tmpIn = join(tmpdir(), `sv_in_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`);
+  const tmpOut = join(tmpdir(), `sv_out_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
+  
+  await fs.writeFile(tmpIn, inputBuffer);
 
   try {
-    execSync(
+    await execAsync(
       `ffmpeg -ss ${startSec} -i "${tmpIn}" -t ${durationSec} -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15" -vcodec libwebp -lossless 0 -compression_level 6 -q:v 50 -loop 0 -preset picture -an -vsync 0 "${tmpOut}" -y`,
       { timeout: 60000 }
     );
-    const webpBuffer = readFileSync(tmpOut);
-    return addStickerMetadata(webpBuffer, packName, authorName);
+    const webpBuffer = await fs.readFile(tmpOut);
+    return await addStickerMetadata(webpBuffer, packName, authorName);
   } finally {
-    try { unlinkSync(tmpIn); } catch {}
-    try { unlinkSync(tmpOut); } catch {}
+    await fs.unlink(tmpIn).catch(() => {});
+    await fs.unlink(tmpOut).catch(() => {});
   }
 }
 
 async function urlToSticker(url, startSec = 0, durationSec = 6) {
-  const tmpVid = join(tmpdir(), `su_vid_${Date.now()}.mp4`);
-  const tmpOut = join(tmpdir(), `su_out_${Date.now()}.webp`);
+  const tmpVid = join(tmpdir(), `su_vid_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`);
 
   try {
-    // Download clip with yt-dlp
-    execSync(
+    await execAsync(
       `yt-dlp -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 -o "${tmpVid}" "${url}"`,
       { timeout: 120000 }
     );
 
-    if (!existsSync(tmpVid)) throw new Error("yt-dlp produced no file.");
-
-    const buffer = readFileSync(tmpVid);
-    return videoToSticker(buffer, startSec, durationSec);
+    const buffer = await fs.readFile(tmpVid);
+    return await videoToSticker(buffer, startSec, durationSec);
   } finally {
-    try { unlinkSync(tmpVid); } catch {}
-    try { unlinkSync(tmpOut); } catch {}
+    await fs.unlink(tmpVid).catch(() => {});
   }
 }
 
-function addTextToWebp(webpBuffer, text, position = "bottom") {
-  const tmpIn  = join(tmpdir(), `st_in_${Date.now()}.webp`);
-  const tmpOut = join(tmpdir(), `st_out_${Date.now()}.webp`);
-  writeFileSync(tmpIn, webpBuffer);
+async function addTextToWebp(webpBuffer, text, position = "bottom") {
+  const tmpIn = join(tmpdir(), `st_in_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
+  const tmpOut = join(tmpdir(), `st_out_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
+  
+  await fs.writeFile(tmpIn, webpBuffer);
 
   const yPos = position === "top" ? "h*0.05" : "h*0.80";
   try {
-    execSync(
+    await execAsync(
       `ffmpeg -i "${tmpIn}" -vf "drawtext=text='${text.replace(/'/g, "\\'")}':fontsize=40:fontcolor=white:bordercolor=black:borderw=3:x=(w-text_w)/2:y=${yPos}" "${tmpOut}" -y`,
       { timeout: 15000 }
     );
-    const result = readFileSync(tmpOut);
-    return result;
+    return await fs.readFile(tmpOut);
   } finally {
-    try { unlinkSync(tmpIn); } catch {}
-    try { unlinkSync(tmpOut); } catch {}
+    await fs.unlink(tmpIn).catch(() => {});
+    await fs.unlink(tmpOut).catch(() => {});
   }
 }
 
 // ─── Parse timestamp helpers ──────────────────────────────────────────────────
 
 function parseTimestamp(str) {
-  // Accepts: 30, 1:30, 0:30
   const parts = str.split(":").map(Number);
   if (parts.length === 2) return parts[0] * 60 + parts[1];
   return parts[0];
 }
 
 function parseTimeRange(str) {
-  // "0:10-0:20" or "10-20"
   const [start, end] = str.split("-").map(parseTimestamp);
   return { start, duration: end - start };
 }
@@ -183,18 +185,15 @@ export const stickerCommands = {
       "!sticker https://youtu.be/xxx",
       "!sticker https://youtu.be/xxx 0:30",
       "!sticker https://youtu.be/xxx 0:10-0:20",
-      "!sticker https://tiktok.com/...",
     ],
     notes: "Videos use first 6s by default. Specify a time range for URL stickers.",
     handler: async (sock, msg, args, from, prefix) => {
       const url = args[0]?.startsWith("http") ? args[0] : null;
 
-      // ── URL mode ────────────────────────────────────────────────────────────
       if (url) {
         let startSec = 0;
         let durationSec = 6;
 
-        // Parse range like "0:10-0:20" or single timestamp "0:30"
         const timeArg = args[1];
         if (timeArg) {
           if (timeArg.includes("-")) {
@@ -219,7 +218,6 @@ export const stickerCommands = {
         return;
       }
 
-      // ── Media mode ──────────────────────────────────────────────────────────
       const media = await getMediaFromMsg(msg);
 
       if (!media) {
@@ -250,7 +248,6 @@ export const stickerCommands = {
     },
   },
 
-  // ─── !toimage ───────────────────────────────────────────────────────────────
   toimage: {
     adminOnly: false,
     requiresArgs: false,
@@ -261,9 +258,7 @@ export const stickerCommands = {
       const media = await getMediaFromMsg(msg);
 
       if (!media || media.type !== "sticker") {
-        return replyMsg(sock, from, msg,
-          `📖 *${prefix}toimage*\n\nReply to a sticker with *${prefix}toimage* to convert it to an image.`
-        );
+        return replyMsg(sock, from, msg, `📖 *${prefix}toimage*\n\nReply to a sticker with *${prefix}toimage* to convert it to an image.`);
       }
 
       await reactMsg(sock, from, msg, "⏳");
@@ -277,7 +272,6 @@ export const stickerCommands = {
     },
   },
 
-  // ─── !stickertext ───────────────────────────────────────────────────────────
   stickertext: {
     adminOnly: false,
     requiresArgs: true,
@@ -287,16 +281,11 @@ export const stickerCommands = {
       "Reply to sticker/image → !stickertext When you're late",
       "Reply to sticker/image → !stickertext Good morning top",
     ],
-    notes: "Default position is bottom. Use 'top' for top text.",
     handler: async (sock, msg, args, from, prefix) => {
-      const position = ["top", "bottom"].includes(args[args.length - 1]?.toLowerCase())
-        ? args.pop().toLowerCase()
-        : "bottom";
+      const position = ["top", "bottom"].includes(args[args.length - 1]?.toLowerCase()) ? args.pop().toLowerCase() : "bottom";
       const text = args.join(" ").trim();
 
-      if (!text) return replyMsg(sock, from, msg,
-        `📖 *${prefix}stickertext*\n\nReply to a sticker or image and add text:\n• *${prefix}stickertext When you're late*\n• *${prefix}stickertext Good morning top*`
-      );
+      if (!text) return replyMsg(sock, from, msg, `📖 *${prefix}stickertext*\n\nReply to a sticker or image and add text.`);
 
       const media = await getMediaFromMsg(msg);
       if (!media || !["sticker", "image"].includes(media.type)) {
@@ -305,51 +294,39 @@ export const stickerCommands = {
 
       await reactMsg(sock, from, msg, "⏳");
       try {
-        // Convert to webp sticker with text overlay
-        let inputBuffer = media.buffer;
-
-        // If it's a sticker (webp), convert to png first for ffmpeg
-        const tmpPng = join(tmpdir(), `stext_${Date.now()}.png`);
-        const tmpOut = join(tmpdir(), `stext_out_${Date.now()}.webp`);
-        const pngBuf = await sharp(inputBuffer).png().toBuffer();
-        writeFileSync(tmpPng, pngBuf);
+        const tmpPng = join(tmpdir(), `stext_${Date.now()}_${Math.random().toString(36).substring(7)}.png`);
+        const tmpOut = join(tmpdir(), `stext_out_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
+        const pngBuf = await sharp(media.buffer).png().toBuffer();
+        
+        await fs.writeFile(tmpPng, pngBuf);
 
         const yPos = position === "top" ? "h*0.05" : "h*0.80";
-        execSync(
+        await execAsync(
           `ffmpeg -i "${tmpPng}" -vf "scale=512:512:force_original_aspect_ratio=decrease,drawtext=text='${text.replace(/'/g, "\\'")}':fontsize=40:fontcolor=white:bordercolor=black:borderw=3:x=(w-text_w)/2:y=${yPos}" -vcodec libwebp -q:v 80 "${tmpOut}" -y`,
           { timeout: 15000 }
         );
 
-        const webpBuffer = readFileSync(tmpOut);
-        const packName   = cachedGetSetting("sticker_pack_name", "Bot Stickers");
+        const webpBuffer = await fs.readFile(tmpOut);
+        const packName = cachedGetSetting("sticker_pack_name", "Bot Stickers");
         const authorName = cachedGetSetting("sticker_pack_author", "WhatsApp Bot");
-        const final = addStickerMetadata(webpBuffer, packName, authorName);
+        const final = await addStickerMetadata(webpBuffer, packName, authorName);
 
-        try { unlinkSync(tmpPng); } catch {}
-        try { unlinkSync(tmpOut); } catch {}
+        await fs.unlink(tmpPng).catch(() => {});
+        await fs.unlink(tmpOut).catch(() => {});
 
         await reactMsg(sock, from, msg, "✅");
         await sock.sendMessage(from, { sticker: final }, { quoted: msg });
       } catch (err) {
-        console.error("❌ stickertext error:", err.message);
         await failMsg(sock, from, msg, err, "stickertext");
       }
     },
   },
 
-  // ─── !stickercrop ───────────────────────────────────────────────────────────
   stickercrop: {
     adminOnly: false,
     requiresArgs: false,
     description: "Crop and zoom an image before making it a sticker",
     usage: "!stickercrop [position] [zoom]",
-    examples: [
-      "Reply to image → !stickercrop",
-      "Reply to image → !stickercrop center",
-      "Reply to image → !stickercrop top",
-      "Reply to image → !stickercrop center 2",
-    ],
-    notes: "Positions: center, top, bottom, left, right. Zoom: 1.5, 2, 3 etc.",
     handler: async (sock, msg, args, from, prefix) => {
       const positions = ["center", "top", "bottom", "left", "right"];
       const position  = positions.find(p => args.includes(p)) || "center";
@@ -358,11 +335,7 @@ export const stickerCommands = {
 
       const media = await getMediaFromMsg(msg);
       if (!media || media.type !== "image") {
-        return replyMsg(sock, from, msg,
-          `📖 *${prefix}stickercrop*\n\nReply to an image with *${prefix}stickercrop*\n\n` +
-          `*Options:*\n• Position: center, top, bottom, left, right\n• Zoom: 1.5, 2, 3\n\n` +
-          `*Examples:*\n• ${prefix}stickercrop top\n• ${prefix}stickercrop center 2`
-        );
+        return replyMsg(sock, from, msg, `📖 Reply to an image with *${prefix}stickercrop*`);
       }
 
       await reactMsg(sock, from, msg, "⏳");
@@ -382,12 +355,9 @@ export const stickerCommands = {
     requiresArgs: true,
     description: "Set the sticker pack name shown in WhatsApp",
     usage: "!setpackname <name>",
-    examples: ["!setpackname My Cool Stickers"],
     handler: async (sock, msg, args, from, prefix) => {
       const name = args.join(" ").trim();
-      if (!name) return replyMsg(sock, from, msg,
-        `📖 *${prefix}setpackname*\n\n🔧 Syntax: ${prefix}setpackname <name>`
-      );
+      if (!name) return replyMsg(sock, from, msg, `🔧 Syntax: ${prefix}setpackname <name>`);
       try {
         await setSetting("sticker_pack_name", name);
         await refreshSettings();
@@ -403,12 +373,9 @@ export const stickerCommands = {
     requiresArgs: true,
     description: "Set the sticker pack author name shown in WhatsApp",
     usage: "!setpackauthor <name>",
-    examples: ["!setpackauthor Made by Gibril"],
     handler: async (sock, msg, args, from, prefix) => {
       const name = args.join(" ").trim();
-      if (!name) return replyMsg(sock, from, msg,
-        `📖 *${prefix}setpackauthor*\n\n🔧 Syntax: ${prefix}setpackauthor <name>`
-      );
+      if (!name) return replyMsg(sock, from, msg, `🔧 Syntax: ${prefix}setpackauthor <name>`);
       try {
         await setSetting("sticker_pack_author", name);
         await refreshSettings();
@@ -418,14 +385,12 @@ export const stickerCommands = {
       }
     },
   },
-
 };
 
 // ─── Bulk Sticker Session Store ───────────────────────────────────────────────
-// Map<chatJid, { sender, images: Buffer[], timer: TimeoutId }>
 
 const stickerSessions = new Map();
-const SESSION_TIMEOUT = 5 * 60 * 1000; // 5 min auto-expire
+const SESSION_TIMEOUT = 5 * 60 * 1000;
 
 export function hasStickerSession(chatJid) {
   return stickerSessions.has(chatJid);
@@ -435,17 +400,12 @@ export async function handleStickerSessionImage(sock, msg, from) {
   const session = stickerSessions.get(from);
   if (!session) return false;
 
-  const sender = msg.key.fromMe
-    ? session.sender
-    : (msg.key.participant ?? msg.key.remoteJid);
-
+  const sender = msg.key.fromMe ? session.sender : (msg.key.participant ?? msg.key.remoteJid);
   if (sender !== session.sender) return false;
 
   const imgMsg = msg.message?.imageMessage;
   if (!imgMsg) return false;
 
-  // Store the full message object — download happens at !done time
-  // This avoids race conditions when 30 images arrive simultaneously
   session.messages.push(msg);
   await reactMsg(sock, from, msg, "📸");
   return true;
@@ -458,20 +418,13 @@ export const bulkStickerCommands = {
     requiresArgs: false,
     description: "Start a bulk sticker session — send multiple images then type !done",
     usage: "!stickers",
-    examples: [
-      "!stickers → then send images → then !done",
-    ],
-    notes: "Session expires after 5 minutes of inactivity.",
     handler: async (sock, msg, _args, from, prefix) => {
       const sender = msg.key.participant ?? msg.key.remoteJid;
 
       if (stickerSessions.has(from)) {
-        return replyMsg(sock, from, msg,
-          `📸 Session already active!\n\nSend your images then type *${prefix}done* when finished.\nType *${prefix}cancel* to cancel.`
-        );
+        return replyMsg(sock, from, msg, `📸 Session already active!\n\nSend your images then type *${prefix}done*`);
       }
 
-      // Start session
       const timer = setTimeout(() => {
         if (stickerSessions.has(from)) {
           stickerSessions.delete(from);
@@ -500,42 +453,33 @@ export const bulkStickerCommands = {
       const session = stickerSessions.get(from);
       const sender  = msg.key.participant ?? msg.key.remoteJid;
 
-      if (!session) {
-        return replyMsg(sock, from, msg,
-          `ℹ️ No active sticker session.\n\nStart one with *${prefix}stickers*`
-        );
-      }
-
-      if (session.sender !== sender) {
-        return replyMsg(sock, from, msg, "❌ Only the person who started the session can finish it.");
-      }
-
+      if (!session) return replyMsg(sock, from, msg, `ℹ️ No active sticker session.\n\nStart one with *${prefix}stickers*`);
+      if (session.sender !== sender) return replyMsg(sock, from, msg, "❌ Only the person who started the session can finish it.");
+      
       if (session.messages.length === 0) {
         clearTimeout(session.timer);
         stickerSessions.delete(from);
-        return replyMsg(sock, from, msg,
-          `❌ No images were collected.\n\nStart again with *${prefix}stickers* and send images before typing *${prefix}done*`
-        );
+        return replyMsg(sock, from, msg, `❌ No images were collected.`);
       }
 
       clearTimeout(session.timer);
       stickerSessions.delete(from);
-
-      const total = session.messages.length;
       await reactMsg(sock, from, msg, "⏳");
 
-      let success = 0;
-      let failed  = 0;
-
-      for (const imgMsg of session.messages) {
-        try {
-          const buffer = await downloadMediaMessage(imgMsg, "buffer", {});
-          const webp   = await imageToSticker(buffer);
-          await sock.sendMessage(from, { sticker: webp }, { quoted: msg });
-          success++;
-        } catch {
-          failed++;
-        }
+      // Process in chunks of 3 to prevent memory overload on Koyeb
+      const concurrencyLimit = 3;
+      for (let i = 0; i < session.messages.length; i += concurrencyLimit) {
+        const chunk = session.messages.slice(i, i + concurrencyLimit);
+        
+        await Promise.all(chunk.map(async (imgMsg) => {
+          try {
+            const buffer = await downloadMediaMessage(imgMsg, "buffer", {});
+            const webp = await imageToSticker(buffer);
+            await sock.sendMessage(from, { sticker: webp }, { quoted: msg });
+          } catch (err) {
+            console.error("Bulk conversion failed for a message", err.message);
+          }
+        }));
       }
 
       await reactMsg(sock, from, msg, "✅");
@@ -551,18 +495,12 @@ export const bulkStickerCommands = {
       const session = stickerSessions.get(from);
       const sender  = msg.key.participant ?? msg.key.remoteJid;
 
-      if (!session) {
-        return replyMsg(sock, from, msg, `ℹ️ No active sticker session to cancel.`);
-      }
-
-      if (session.sender !== sender) {
-        return replyMsg(sock, from, msg, "❌ Only the person who started the session can cancel it.");
-      }
+      if (!session) return replyMsg(sock, from, msg, `ℹ️ No active sticker session to cancel.`);
+      if (session.sender !== sender) return replyMsg(sock, from, msg, "❌ Only the person who started the session can cancel it.");
 
       clearTimeout(session.timer);
       stickerSessions.delete(from);
-      await replyMsg(sock, from, msg, `🗑️ Sticker session cancelled. ${session.messages.length} image${session.messages.length !== 1 ? "s" : ""} discarded.`);
+      await replyMsg(sock, from, msg, `🗑️ Sticker session cancelled. ${session.messages.length} image(s) discarded.`);
     },
   },
-
 };
