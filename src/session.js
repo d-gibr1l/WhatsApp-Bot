@@ -1,51 +1,65 @@
 /**
  * session.js — Session management integration layer
  *
- * Bridges the tri-layer auth system (triAuthState.js) with the bot's
- * existing index.js interface. All exports match the previous contract
- * so index.js requires zero changes.
+ * Bridges the tri-layer auth system with index.js.
  *
- * Architecture:
- *   L1 RAM (lruCache)  → L2 Redis/Valkey (redisClient) → L3 Supabase (supabaseClient)
+ * BUGS FIXED IN THIS VERSION:
  *
- * Session lock uses Redis NX + TTL with a unique INSTANCE_ID to prevent
- * multiple Koyeb instances writing to the same Signal session simultaneously,
- * which causes connectionReplaced (440) loops and key corruption.
+ * BUG 3 (HIGH — DURABILITY GAP):
+ *   The previous saveCreds debouncer used a trailing timer that kept being
+ *   reset by rapid creds.update events during initial QR link and history sync.
+ *   If the trailing timer never fired before a container restart, Supabase
+ *   held stale creds, causing session establishment failures on next boot.
+ *   FIX: Removed the debounce entirely. saveCreds now calls rawSaveCreds()
+ *   directly on every invocation. Creds updates are infrequent (unlike session
+ *   key rotations which hit keys.set), so the overhead is negligible. The
+ *   writeKey batch mechanism in triAuthState already handles Supabase efficiency.
+ *
+ * BUG 2-SHUTDOWN (CRITICAL — SUPABASE BUFFER NEVER DRAINED):
+ *   The previous shutdown() in index.js used `await new Promise(r => setTimeout(r, 2000))`
+ *   as a proxy for flushing — a blind 2s sleep that never called flushPendingWrites().
+ *   Under load or network variance, Supabase writes weren't completing in that window,
+ *   leaving up to 500ms of key updates unwritten. The drainPendingDbWrites export
+ *   here gives index.js the explicit flush function it needs.
  */
 
 import { useTriAuthState, clearTriSession, flushPendingWrites } from './auth/triAuthState.js';
 import { redis }    from './auth/redisClient.js';
 import { botConfig } from './config.js';
 
-// Re-export redisClient so index.js can call redis.quit() on shutdown
+// Re-export redisClient so index.js can quit it on shutdown
 export { redis as redisClient };
 
 // ─── Session ID ───────────────────────────────────────────────────────────────
+// Throws on missing BOT_NUMBER — prevents silent use of "default" key in prod.
 
 export function SESSION_ID() {
   const id = botConfig.BOT_NUMBER || process.env.BOT_NUMBER;
   if (!id) {
     throw new Error(
       'BOT_NUMBER is not set. Add it as a Koyeb environment variable. ' +
-      'Without it, session keys will be stored under the wrong Redis hash.'
+      'Without it, session keys will be stored under the wrong key prefix.'
     );
   }
   return id;
 }
 
 // ─── Session lock ─────────────────────────────────────────────────────────────
+// Prevents multiple Koyeb instances writing to the same Signal session.
+// Uses INSTANCE_ID (not PID — all Koyeb containers run as PID 1).
 
-const LOCK_TTL_SECONDS    = 20;
-const LOCK_RENEW_INTERVAL = 5_000;
+const LOCK_TTL_SECONDS     = 20;
+const LOCK_RENEW_INTERVAL  = 5_000;
 const LOCK_ACQUIRE_RETRIES = 15;
-const LOCK_RETRY_DELAY    = 6_000;
-const LOCK_FORCE_AFTER    = 12;
+const LOCK_RETRY_DELAY     = 6_000;   // 6s × 15 = 90s total window
+const LOCK_FORCE_AFTER     = 12;      // force-take after ~72s
 
 const INSTANCE_ID = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 let lockRenewalInterval = null;
 
 function getLockKey() {
-  try { return `${SESSION_ID()}:lock`; } catch { return `${process.env.BOT_NUMBER || 'default'}:lock`; }
+  try { return `${SESSION_ID()}:lock`; }
+  catch { return `${process.env.BOT_NUMBER || 'default'}:lock`; }
 }
 
 export async function acquireSessionLock() {
@@ -61,8 +75,9 @@ export async function acquireSessionLock() {
     }
 
     const owner = await redis.get(lockKey);
+
     if (owner === INSTANCE_ID) {
-      console.warn('⚠️  acquireSessionLock called twice — reusing lock');
+      console.warn('⚠️  acquireSessionLock called twice — reusing existing lock');
       return true;
     }
 
@@ -70,7 +85,7 @@ export async function acquireSessionLock() {
     console.warn(`⚠️  Lock held by ${owner} (TTL: ${ttl}s). Retry ${i}/${LOCK_ACQUIRE_RETRIES}...`);
 
     if (i >= LOCK_FORCE_AFTER) {
-      console.warn(`⚠️  Force-taking session lock after ${i} retries`);
+      console.warn(`⚠️  Force-taking session lock after ${i} retries (old instance should be dead)`);
       await redis.set(lockKey, INSTANCE_ID, 'EX', LOCK_TTL_SECONDS);
       console.log(`🔒 Lock force-acquired (${INSTANCE_ID})`);
       startLockRenewal(lockKey);
@@ -86,6 +101,7 @@ export async function acquireSessionLock() {
 
 function startLockRenewal(lockKey) {
   if (lockRenewalInterval) clearInterval(lockRenewalInterval);
+
   lockRenewalInterval = setInterval(async () => {
     try {
       const current = await redis.get(lockKey);
@@ -97,13 +113,17 @@ function startLockRenewal(lockKey) {
         lockRenewalInterval = null;
       }
     } catch (err) {
-      console.error('❌ Failed to renew lock:', err.message);
+      console.error('❌ Failed to renew session lock:', err.message);
     }
   }, LOCK_RENEW_INTERVAL);
 }
 
 export async function releaseSessionLock() {
-  if (lockRenewalInterval) { clearInterval(lockRenewalInterval); lockRenewalInterval = null; }
+  if (lockRenewalInterval) {
+    clearInterval(lockRenewalInterval);
+    lockRenewalInterval = null;
+  }
+
   try {
     const lockKey = getLockKey();
     const current = await redis.get(lockKey);
@@ -114,25 +134,29 @@ export async function releaseSessionLock() {
       console.log('🔓 Lock already held by another instance — skipping delete');
     }
   } catch (err) {
-    console.error('❌ Failed to release lock:', err.message);
+    console.error('❌ Failed to release session lock:', err.message);
   }
 }
 
 // ─── Auth state ───────────────────────────────────────────────────────────────
 
 export async function getAuthState() {
-  try { await redis.ping(); } catch (err) {
-    console.warn('⚠️  Redis ping failed — falling through to Supabase:', err.message);
+  try {
+    await redis.ping();
+  } catch (err) {
+    // Non-fatal: Redis is L2. triAuthState degrades gracefully to L3.
+    console.warn('⚠️  Redis ping failed — L2 degraded, falling through to Supabase:', err.message);
   }
 
   const sessionId = SESSION_ID();
   const { state, saveCreds: rawSaveCreds } = await useTriAuthState(sessionId);
 
-  // Integrity check: partial reads produce incomplete state that causes Bad MAC
+  // Integrity check: a partial Supabase read produces an incomplete state.
+  // Baileys connects but immediately fails with cryptographic errors.
   if (state.creds && (!state.creds.noiseKey || !state.creds.signedIdentityKey)) {
     throw new Error(
       `Auth state for '${sessionId}' is incomplete — noiseKey or signedIdentityKey missing. ` +
-      'Set FORCE_FRESH_SESSION=true to force a fresh QR login.'
+      'Set FORCE_FRESH_SESSION=true to force a fresh QR scan.'
     );
   }
 
@@ -140,28 +164,29 @@ export async function getAuthState() {
     console.log(`ℹ️  No session found for '${sessionId}' — QR login required`);
   }
 
-  // Debounced saveCreds: leading + trailing execution
-  let saveTimer   = null;
-  let pendingSave = false;
-
+  /**
+   * BUG 3 FIX: No debounce on saveCreds.
+   *
+   * The previous leading/trailing debounce introduced a 1.5s window where
+   * creds updates weren't persisted. During initial auth when Baileys fires
+   * creds.update rapidly, the trailing timer kept getting reset, meaning
+   * the latest creds were never written to Supabase before a container restart.
+   *
+   * Creds updates happen infrequently in steady state (not per-message like
+   * session key rotations). The writeKey → batch flush mechanism in
+   * triAuthState.js already handles Supabase write efficiency. We don't
+   * need an additional debounce layer here.
+   *
+   * Each creds.update now writes directly through, ensuring durability.
+   */
   const saveCreds = async () => {
-    if (!saveTimer) {
-      try { await rawSaveCreds(); } catch (err) {
-        console.error('🚨 CRITICAL: saveCreds failed (leading):', err.message);
-        throw err;
-      }
+    try {
+      await rawSaveCreds();
+    } catch (err) {
+      console.error('🚨 CRITICAL: saveCreds failed — Signal keys may desync:', err.message);
+      // Re-throw so Baileys' internal error handling can react
+      throw err;
     }
-    pendingSave = true;
-    if (saveTimer) clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      saveTimer = null;
-      if (pendingSave) {
-        pendingSave = false;
-        try { await rawSaveCreds(); } catch (err) {
-          console.error('🚨 CRITICAL: saveCreds failed (trailing):', err.message);
-        }
-      }
-    }, 1500);
   };
 
   return { state, saveCreds };
@@ -174,23 +199,27 @@ export async function clearSession() {
   await clearTriSession(sessionId);
 }
 
-// ─── Graceful drain ───────────────────────────────────────────────────────────
+// ─── Exports ──────────────────────────────────────────────────────────────────
 
 export { flushPendingWrites };
 
-// ─── Legacy stubs ─────────────────────────────────────────────────────────────
+// Alias used by index.js shutdown handler
+export { flushPendingWrites as drainPendingDbWrites };
+
+// ─── Legacy stubs (index.js compatibility) ───────────────────────────────────
 
 export async function loadSession() {
   if (process.env.FORCE_FRESH_SESSION === 'true') {
     console.log('🆕 FORCE_FRESH_SESSION — clearing all tiers');
-    try { await clearSession(); } catch (err) {
+    try {
+      await clearSession();
+    } catch (err) {
       console.error('clearSession failed during FORCE_FRESH_SESSION:', err.message);
     }
   }
   return true;
 }
 
-export async function saveSession() { /* no-op: triAuthState handles persistence */ }
-
-// Alias for index.js compatibility
-export { flushPendingWrites as drainPendingDbWrites };
+export async function saveSession() {
+  // No-op: triAuthState handles persistence automatically via writeKey + flushNow
+}

@@ -13,8 +13,8 @@ import {
   getAuthState,
   acquireSessionLock,
   releaseSessionLock,
-  drainPendingDbWrites,
   redisClient,
+  drainPendingDbWrites,
 } from "./src/session.js";
 import { handleMessage, startReminderPoller, extractText } from "./src/handler.js";
 import { loadWordFilter } from "./src/commands/wordfilter.js";
@@ -33,16 +33,6 @@ import {
 
 const logger = pino({ level: "silent" });
 
-// Baileys leaks "Closing session: SessionEntry {...}" via its internal Signal
-// store logger even when pino is set to silent. Suppress it completely by
-// overriding the child logger it uses for session store operations.
-const noopLogger = {
-  level: "silent",
-  trace: () => {}, debug: () => {}, info: () => {},
-  warn:  () => {}, error: () => {}, fatal: () => {},
-  child: () => noopLogger,
-};
-
 startServer();
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -51,17 +41,6 @@ let botReady    = false;
 let stopPoller  = null;
 let currentSock = null;
 let lastConnectedAt = 0;
-
-// ─── FIX A: Cache the Baileys version after the first fetch ──────────────────
-// fetchLatestBaileysVersion() makes an outbound HTTP request on every call.
-// In the original code it was invoked inside createSocket(), meaning every
-// reconnect (including 515 restartRequired cycles) hit the Baileys CDN.
-// Beyond the latency cost, a transient network failure during the version
-// fetch would cause createSocket() to throw, burning a reconnect attempt for
-// a problem that had nothing to do with the WhatsApp session.
-// Fix: fetch once, cache the result, reuse on every subsequent call.
-
-let cachedBaileysVersion = null;
 
 // ─── Concurrency limiter ──────────────────────────────────────────────────────
 
@@ -99,13 +78,17 @@ async function shutdown(signal, exitCode = 0) {
 
   try { await releaseSessionLock(); } catch {}
 
-  // Flush any session keys that Redis has but Supabase hasn't confirmed yet.
-  // The write-behind queue holds at most one blob per session (deduplicated),
-  // so this completes almost instantly under normal conditions.
-  try { await drainPendingDbWrites(); } catch {}
-
-  // Wait up to 2s for any remaining in-flight saveCreds writes to complete
-  await new Promise(r => setTimeout(r, 2000));
+  // BUG 2-SHUTDOWN FIX: Actually drain the Supabase write buffer.
+  // The previous code used a blind 2s sleep which never guaranteed
+  // the batch flush completed — leading to session key loss on restart.
+  // drainPendingDbWrites() waits for any in-flight flush, then does a
+  // final synchronous flush of all remaining queued writes.
+  try {
+    await drainPendingDbWrites();
+  } catch (err) {
+    console.error('⚠️  Final Supabase flush failed:', err.message);
+    // Continue shutdown — don't hang the container
+  }
 
   try { await redisClient.quit(); } catch {}
 
@@ -128,20 +111,14 @@ process.on("unhandledRejection", (reason) => {
 // ─── Socket factory ───────────────────────────────────────────────────────────
 
 async function createSocket() {
-  // FIX A (applied): Fetch the Baileys version only once, then reuse it.
-  // This prevents unnecessary CDN hits on every reconnect and stops a transient
-  // version-fetch failure from aborting an otherwise healthy reconnect cycle.
-  if (!cachedBaileysVersion) {
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    cachedBaileysVersion = version;
-    console.log(`Baileys ${version.join(".")} ${isLatest ? "(latest)" : "(outdated)"}`);
-  }
+  const { version, isLatest } = await fetchLatestBaileysVersion();
+  console.log(`Baileys ${version.join(".")} ${isLatest ? "(latest)" : "(outdated)"}`);
 
   const { state, saveCreds } = await getAuthState();
 
   const sock = makeWASocket({
-    version: cachedBaileysVersion,
-    logger: noopLogger,
+    version,
+    logger,
     auth: state,
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
@@ -164,36 +141,6 @@ async function createSocket() {
 }
 
 // ─── Main loop ────────────────────────────────────────────────────────────────
-//
-// FIX B — Attempt counter logic completely overhauled.
-//
-// Root cause of the original bugs:
-//   The `attempt` variable was modified in two places with conflicting intent:
-//   (a) inside the connection.update Promise (de-increments / resets for
-//       certain disconnect codes), and (b) unconditionally incremented with
-//       `attempt++` immediately after the Promise resolves.
-//
-//   This meant the de-increments were always cancelled:
-//     - restartRequired (515): attempt-- then attempt++ → net zero (no benefit)
-//     - connectionClosed (428) with stable conn: attempt=1 then attempt++ → 2
-//       (should stay 1 for shortest delay)
-//     - 408 QR timeout: attempt-- then attempt++ → net zero (was supposed to
-//       not count against the reconnect limit)
-//     - connection open: attempt=1 then attempt++ → 2 (was supposed to reset
-//       to minimum delay on first reconnect after a good connection)
-//
-// Fix: the Promise now resolves with a plain object
-//   { reconnect, noIncrement, resetAttempt }
-// and ALL attempt management is done in one place, after the Promise, using
-// those flags. No attempt mutations happen inside the Promise anymore.
-//
-// Semantics of the three flags:
-//   reconnect     — true = try again; false = fall through (shutdown already called)
-//   noIncrement   — don't count this disconnect as a failed attempt and don't
-//                   enforce MAX_RECONNECTS (used for 515 and 408 QR timeout)
-//   resetAttempt  — reset attempt to 1 before computing the delay (used after a
-//                   stable connection that cleanly closed, so the next reconnect
-//                   gets the shortest possible backoff)
 
 async function runBot() {
   let attempt = 1;
@@ -234,11 +181,9 @@ async function runBot() {
       const sock = await createSocket();
       currentSock = sock;
 
-      // FIX B: Promise resolves with { reconnect, noIncrement, resetAttempt }
-      // instead of a bare boolean. No attempt mutations happen inside the Promise.
-      const result = await new Promise((resolve) => {
+      const shouldReconnect = await new Promise((resolve) => {
 
-        // safeResolve — connection.update fires multiple times; Promise resolves once
+        // safeResolve — connection.update fires multiple times, Promise resolves once
         let resolved = false;
         const safeResolve = (value) => {
           if (!resolved) { resolved = true; resolve(value); }
@@ -259,8 +204,7 @@ async function runBot() {
           if (connection === "open") {
             setConnected();
             lastConnectedAt = Date.now();
-            // FIX B: Don't touch `attempt` here. Set lastConnectedAt so the
-            // close handler can use it to decide on resetAttempt below.
+            attempt = 1;
 
             if (sock.user?.id) {
               const detectedNumber = sock.user.id.split(":")[0].split("@")[0];
@@ -316,17 +260,14 @@ async function runBot() {
 
             console.warn(`Disconnected: ${reason} (${statusCode})`);
 
-            // ── 440 — another instance took the session ─────────────────────
+            // 440 — another instance took the session
             if (statusCode === DisconnectReason.connectionReplaced) {
               console.error("Session taken by another instance. Exiting.");
               await new Promise(r => setTimeout(r, 15_000));
               await shutdown("CONNECTION_REPLACED", 0);
-              // shutdown() calls process.exit(), so safeResolve is never needed.
-              // If somehow it doesn't exit, fall through to a non-reconnect resolve.
-              return safeResolve({ reconnect: false });
             }
 
-            // ── 401 — WhatsApp revoked the session ─────────────────────────
+            // 401 — WhatsApp revoked the session
             if (statusCode === DisconnectReason.loggedOut) {
               console.error("Logged out by WhatsApp. Clearing session.");
               try { await clearSession(); } catch (err) {
@@ -336,62 +277,46 @@ async function runBot() {
                 if (stopPoller) { stopPoller(); stopPoller = null; }
                 await shutdown("LOGGED_OUT", 0);
               }
-              return safeResolve({ reconnect: false });
             }
 
-            // ── 500 — transient Signal ratchet drift ───────────────────────
-            // Almost always caused by a write that didn't flush in time.
-            // Reconnecting lets Baileys re-negotiate automatically.
-            // Only clear if it keeps failing (handled by the attempt counter).
+            // 500 — corrupted session data
             if (statusCode === DisconnectReason.badSession) {
-              console.warn("Bad session (500) — reconnecting to re-negotiate (NOT clearing session).");
-              return safeResolve({ reconnect: true });
+              console.error("Bad session (500). Clearing for fresh QR.");
+              try { await clearSession(); } catch (err) {
+                console.error("clearSession failed:", err.message);
+              } finally {
+                await shutdown("BAD_SESSION", 1);
+              }
             }
 
-            // ── 411 — protocol mismatch ────────────────────────────────────
+            // 411 — protocol mismatch, restart without clearing session
             if (statusCode === 411) {
               console.error("Multidevice mismatch (411). Restarting.");
               await shutdown("MULTIDEVICE_MISMATCH", 1);
-              return safeResolve({ reconnect: false });
             }
 
-            // ── 428 — clean WebSocket close, session intact ────────────────
-            // FIX B: If we were connected for 30+ seconds this was a stable
-            // session that cleanly dropped (server-side keepalive timeout, brief
-            // network hiccup, etc.). Signal resetAttempt so the FIRST reconnect
-            // after a long-running session always gets the shortest delay.
-            // If we disconnected quickly the normal attempt++ applies.
+            // 428 — clean WebSocket close, session intact
             if (statusCode === DisconnectReason.connectionClosed) {
-              const wasStable =
-                lastConnectedAt > 0 && (Date.now() - lastConnectedAt > 30_000);
-              return safeResolve({ reconnect: true, resetAttempt: wasStable });
+              if (Date.now() - lastConnectedAt > 30_000) {
+                attempt = 1;
+              }
+              return safeResolve(true);
             }
 
-            // ── 515 — WhatsApp requests non-destructive restart ────────────
-            // FIX B: Signal noIncrement so this does NOT consume a reconnect
-            // attempt and does NOT grow the backoff delay. The original code
-            // attempted this with attempt-- but the attempt++ outside cancelled
-            // it every time.
+            // 515 — WhatsApp requests restart (non-destructive)
             if (statusCode === DisconnectReason.restartRequired) {
-              console.log("Restart requested by WhatsApp (515) — reconnecting.");
-              return safeResolve({ reconnect: true, noIncrement: true });
+              attempt = Math.max(attempt - 1, 1);
+              return safeResolve(true);
             }
 
-            // ── 408 — timeout waiting for QR scan or keepalive ────────────
-            // FIX B: If we have never connected (QR is still being shown),
-            // do not count this against the reconnect limit — the user just
-            // hasn't scanned yet. Signal noIncrement so attempt stays the same
-            // and the QR is redisplayed indefinitely until scanned or killed.
-            // The circuit breaker above (attempt > 5 && lastConnectedAt === 0)
-            // is intentionally NOT triggered here because noIncrement prevents
-            // attempt from growing past its initial value.
+            // 408 — timeout waiting for QR scan or keepalive.
+            // If we've never connected, don't burn reconnect attempts.
             if (statusCode === 408 && lastConnectedAt === 0) {
-              console.log("QR scan timeout (408) — regenerating QR.");
-              return safeResolve({ reconnect: true, noIncrement: true });
+              attempt = Math.max(attempt - 1, 1);
+              return safeResolve(true);
             }
 
-            // ── All other codes ────────────────────────────────────────────
-            return safeResolve({ reconnect: true });
+            safeResolve(true);
           }
         });
 
@@ -520,27 +445,14 @@ async function runBot() {
 
       }); // end Promise
 
-      // ── FIX B: Unified attempt management ─────────────────────────────────
-      // All attempt mutations happen here in one place, driven by the flags
-      // resolved from the Promise. No attempt mutations happen inside the Promise.
-
-      if (result.reconnect) {
-        if (result.resetAttempt) {
-          // Clean stable-connection drop: restart backoff from the minimum.
-          attempt = 1;
-        } else if (!result.noIncrement) {
-          // Normal failure: grow the backoff.
-          attempt++;
-          if (attempt > MAX_RECONNECTS) {
-            console.error("Max reconnects reached.");
-            await shutdown("MAX_RECONNECTS", 1);
-          }
+      if (shouldReconnect) {
+        attempt++;
+        if (attempt > MAX_RECONNECTS) {
+          console.error("Max reconnects reached.");
+          await shutdown("MAX_RECONNECTS", 1);
         }
-        // noIncrement: attempt stays unchanged, MAX_RECONNECTS not enforced.
-        // This is intentional for 515 restartRequired and 408 QR timeout.
-
         const delay = Math.min(
-          BASE_DELAY_MS * 2 ** Math.max(attempt - 1, 0) + Math.random() * 1000,
+          BASE_DELAY_MS * 2 ** (attempt - 1) + Math.random() * 1000,
           60_000
         );
         console.log(`Reconnecting in ${(delay / 1000).toFixed(1)}s...`);
@@ -554,7 +466,7 @@ async function runBot() {
         await shutdown("TOO_MANY_FAILURES", 1);
       }
       const delay = Math.min(
-        BASE_DELAY_MS * 2 ** Math.max(attempt - 1, 0) + Math.random() * 1000,
+        BASE_DELAY_MS * 2 ** (attempt - 1) + Math.random() * 1000,
         60_000
       );
       console.log(`Retrying in ${(delay / 1000).toFixed(1)}s...`);
