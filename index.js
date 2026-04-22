@@ -37,9 +37,9 @@ startServer();
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-let botReady    = false;
-let stopPoller  = null;
-let currentSock = null;
+let botReady        = false;
+let stopPoller      = null;
+let currentSock     = null;
 let lastConnectedAt = 0;
 
 // ─── Concurrency limiter ──────────────────────────────────────────────────────
@@ -78,16 +78,13 @@ async function shutdown(signal, exitCode = 0) {
 
   try { await releaseSessionLock(); } catch {}
 
-  // BUG 2-SHUTDOWN FIX: Actually drain the Supabase write buffer.
-  // The previous code used a blind 2s sleep which never guaranteed
-  // the batch flush completed — leading to session key loss on restart.
-  // drainPendingDbWrites() waits for any in-flight flush, then does a
-  // final synchronous flush of all remaining queued writes.
+  // Drain the Supabase write buffer before exit.
+  // A blind sleep is not a flush — drainPendingDbWrites() explicitly
+  // waits for any in-flight batch and writes all remaining queued rows.
   try {
     await drainPendingDbWrites();
   } catch (err) {
-    console.error('⚠️  Final Supabase flush failed:', err.message);
-    // Continue shutdown — don't hang the container
+    console.error("⚠️  Final Supabase flush failed:", err.message);
   }
 
   try { await redisClient.quit(); } catch {}
@@ -152,7 +149,6 @@ async function runBot() {
     await new Promise(r => setTimeout(r, jitter));
   }
 
-  // Session lock — prevents two instances writing to the same Signal session
   const lockAcquired = await acquireSessionLock();
   if (!lockAcquired) {
     console.error("Another instance holds the session lock. Exiting.");
@@ -183,7 +179,7 @@ async function runBot() {
 
       const shouldReconnect = await new Promise((resolve) => {
 
-        // safeResolve — connection.update fires multiple times, Promise resolves once
+        // safeResolve — connection.update fires multiple times; Promise resolves once
         let resolved = false;
         const safeResolve = (value) => {
           if (!resolved) { resolved = true; resolve(value); }
@@ -260,16 +256,25 @@ async function runBot() {
 
             console.warn(`Disconnected: ${reason} (${statusCode})`);
 
-            // 440 — another instance took the session
+            // ── 440: connectionReplaced ────────────────────────────────────
+            // Another instance connected with the same session.
+            // Wait 15s (let the other instance stabilise) then exit cleanly.
+            // Koyeb restarts this container; the lock will be re-acquired.
+            // DO NOT clear session — the other instance may be healthy.
             if (statusCode === DisconnectReason.connectionReplaced) {
-              console.error("Session taken by another instance. Exiting.");
+              console.warn("⚠️  Session taken by another instance — waiting 15s then exiting.");
               await new Promise(r => setTimeout(r, 15_000));
               await shutdown("CONNECTION_REPLACED", 0);
+              return;
             }
 
-            // 401 — WhatsApp revoked the session
+            // ── 401: loggedOut ─────────────────────────────────────────────
+            // WhatsApp explicitly revoked the session (user removed device
+            // from phone, or account banned). The session is permanently
+            // invalid — we MUST wipe it and show a new QR.
+            // This is the ONLY status code that justifies a session clear.
             if (statusCode === DisconnectReason.loggedOut) {
-              console.error("Logged out by WhatsApp. Clearing session.");
+              console.error("🚪 Logged out by WhatsApp. Wiping session for fresh QR.");
               try { await clearSession(); } catch (err) {
                 console.error("clearSession failed:", err.message);
               } finally {
@@ -277,45 +282,75 @@ async function runBot() {
                 if (stopPoller) { stopPoller(); stopPoller = null; }
                 await shutdown("LOGGED_OUT", 0);
               }
+              return;
             }
 
-            // 500 — corrupted session data
+            // ── 500: badSession ────────────────────────────────────────────
+            // Baileys maps HTTP 500 (WhatsApp server error) to badSession.
+            // This is almost always a TRANSIENT WhatsApp server glitch, not
+            // a corrupted local session. Wiping the session and forcing a QR
+            // rescan is unnecessary and destructive.
+            //
+            // PREVIOUS BEHAVIOUR (WRONG):
+            //   clearSession() → shutdown("BAD_SESSION", 1)
+            //   This deleted healthy Signal keys from all three storage tiers
+            //   every time WhatsApp's servers hiccuped, causing unnecessary
+            //   QR rescans and session loss.
+            //
+            // CORRECT BEHAVIOUR:
+            //   Reconnect with exponential backoff. The session is intact.
+            //   If the bot genuinely had a bad session, Baileys would emit
+            //   401 (loggedOut) or the connection would permanently fail to
+            //   establish — at which point the circuit breaker exits cleanly.
             if (statusCode === DisconnectReason.badSession) {
-              console.error("Bad session (500). Clearing for fresh QR.");
-              try { await clearSession(); } catch (err) {
-                console.error("clearSession failed:", err.message);
-              } finally {
-                await shutdown("BAD_SESSION", 1);
-              }
+              console.warn("⚠️  Received badSession (500) — likely a transient WhatsApp server error. Reconnecting without clearing session.");
+              return safeResolve(true);
             }
 
-            // 411 — protocol mismatch, restart without clearing session
+            // ── 411: multideviceMismatch ───────────────────────────────────
+            // Protocol/library version mismatch. Restart so Baileys
+            // re-negotiates. DO NOT clear session — the keys are valid.
+            // If this repeats, update the @whiskeysockets/baileys package.
             if (statusCode === 411) {
-              console.error("Multidevice mismatch (411). Restarting.");
-              await shutdown("MULTIDEVICE_MISMATCH", 1);
+              console.warn("⚠️  Multidevice mismatch (411). Restarting to re-negotiate (session intact).");
+              return safeResolve(true);
             }
 
-            // 428 — clean WebSocket close, session intact
+            // ── 428: connectionClosed ──────────────────────────────────────
+            // WebSocket closed cleanly — network blip or WA server rotation.
+            // Session is fully intact. Reset attempt counter if we had a
+            // stable connection for >30s (prevents slow-burn backoff from
+            // accumulating across minor blips).
             if (statusCode === DisconnectReason.connectionClosed) {
               if (Date.now() - lastConnectedAt > 30_000) {
+                console.log("Stable connection lost (428) — resetting attempt counter.");
                 attempt = 1;
               }
               return safeResolve(true);
             }
 
-            // 515 — WhatsApp requests restart (non-destructive)
+            // ── 515: restartRequired ───────────────────────────────────────
+            // WhatsApp proactively requests a reconnect (non-destructive).
+            // Decrement attempt so this doesn't count against MAX_RECONNECTS.
             if (statusCode === DisconnectReason.restartRequired) {
+              console.log("Restart requested by WhatsApp (515) — reconnecting immediately.");
               attempt = Math.max(attempt - 1, 1);
               return safeResolve(true);
             }
 
-            // 408 — timeout waiting for QR scan or keepalive.
-            // If we've never connected, don't burn reconnect attempts.
+            // ── 408: timeout ───────────────────────────────────────────────
+            // Connection or QR scan timed out. If we've never successfully
+            // connected (lastConnectedAt === 0), don't burn reconnect attempts
+            // — we're just waiting for a QR scan.
             if (statusCode === 408 && lastConnectedAt === 0) {
               attempt = Math.max(attempt - 1, 1);
               return safeResolve(true);
             }
 
+            // ── All other codes ────────────────────────────────────────────
+            // Unknown disconnect — reconnect with standard backoff.
+            // Never clear the session on an unrecognised code.
+            console.warn(`Unknown disconnect code (${statusCode}) — reconnecting with backoff.`);
             safeResolve(true);
           }
         });
