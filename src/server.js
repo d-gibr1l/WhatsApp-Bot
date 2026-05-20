@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import Redis from 'ioredis';
-import SessionManager from './manager/session-manager.js';
+import { SessionManager } from './manager/session-manager.js';
 import { createRouter } from './api/routes.js';
 import { logger } from './utils/logger.js';
 
