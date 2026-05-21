@@ -158,13 +158,8 @@ export async function handleMessage(sock, msg) {
   if (cachedIsBanned(sender)) return;
   if (isGrp && cachedHasAllowedGroups() && !cachedIsGroupAllowed(from)) return;
 
-  const botActiveGlobal = cachedGetSetting("bot_active", "true");
-  const botActiveLocal = cachedGetSetting(`bot_active_${from}`, "true");
-
-  if (!userIsAdmin) {
-    if (botActiveGlobal !== "true") return; // Master switch kills it globally
-    if (botActiveLocal === "false") return; // Local switch kills it for this chat
-  }
+  const botActive = cachedGetSetting("bot_active", "true");
+  if (botActive !== "true" && !userIsAdmin) return;
 
   // Fix #3: Only run word filter + anti-link on non-command messages
   if (!text.startsWith(prefix)) {
