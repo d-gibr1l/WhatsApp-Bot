@@ -1,76 +1,90 @@
-\# WhatsApp Multi-Session Redis Manager
+# Multi-Session WhatsApp Baileys API with Redis Persistence
 
+A robust, production-ready WhatsApp session manager using `@whiskeysockets/baileys` and Redis (Upstash compatible) for persistence.
 
+## Features
+- **Highly Stable:** Anti "bad mac" errors protection with atomic mutex updates.
+- **Persistent Auth:** All Baileys signals and creds are safely stored in Redis.
+- **Koyeb Ready:** Optimized for serverless and cloud setups with automatic session recovery on startup.
+- **Auto Reconnect:** Intelligent exponential backoff reconnect strategy.
+- **Webhook Integration:** Dispatch WhatsApp events to external APIs.
+- **Health Monitoring:** Actively tracks frozen sockets and reconnect loops.
 
-Production-grade Baileys integration with Redis persistence, optimized for Upstash and Koyeb.
+## Requirements
+- Node.js >= 18
+- Redis Database (Upstash Redis highly recommended)
 
+## Installation
 
+1. Clone and install dependencies:
+```bash
+npm install
+```
 
-\## 🚀 Deployment
+2. Copy environment file:
+```bash
+cp .env.example .env
+```
 
+3. Update `.env` with your Upstash `REDIS_URL`.
 
+## Upstash Redis Setup Guide
+1. Go to [Upstash Console](https://console.upstash.com/).
+2. Create a new Redis Database.
+3. Scroll down to the "Connect to your database" section.
+4. Copy the "Node.js (ioredis)" URL snippet (starts with `redis://...`).
+5. Paste it into your `.env` file under `REDIS_URL`.
 
-\### Upstash Redis Setup
+## Local Development (Docker)
+Run the stack using docker-compose:
+```bash
+docker-compose up --build
+```
 
-1\. Create a Redis Database on \[Upstash](https://upstash.com/).
+## Koyeb Deployment Guide
+1. Push your repository to GitHub.
+2. Go to the [Koyeb Dashboard](https://app.koyeb.com/) and click **Create Service**.
+3. Select **GitHub** and choose your repository.
+4. Set the **Builder** to `Dockerfile`.
+5. Under **Environment variables**, add:
+   - `PORT`: `3000`
+   - `REDIS_URL`: `<your-upstash-redis-url>`
+   - `API_KEY`: `<your-secure-secret>`
+6. Deploy the service. Koyeb will automatically build and start the application. When Koyeb redeploys, active sessions will be cleanly recovered from Upstash Redis.
 
-2\. Copy the \*\*Redis URL\*\* (starts with `redis://`).
+## API Usage Example
 
-3\. Ensure "Eviction" is disabled in Upstash settings to prevent auth loss.
+Assuming `PORT=3000` and `API_KEY=my_secret`.
 
+### 1. Create a New Session
+```bash
+curl -X POST http://localhost:3000/session/create \
+  -H "x-api-key: my_secret" \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId": "test-session-1"}'
+```
+*Note: The response will include a `qr` base64 string if login is required.*
 
+### 2. Check Session Status
+```bash
+curl http://localhost:3000/session/test-session-1/status \
+  -H "x-api-key: my_secret"
+```
 
-\### Koyeb Deployment
+### 3. List All Sessions
+```bash
+curl http://localhost:3000/sessions \
+  -H "x-api-key: my_secret"
+```
 
-1\. Create a new "Web Service".
+### 4. Force Reconnect Session
+```bash
+curl -X POST http://localhost:3000/session/test-session-1/reconnect \
+  -H "x-api-key: my_secret"
+```
 
-2\. Link your GitHub repo.
-
-3\. Add the following Environment Variables:
-
-&#x20;  - `REDIS\_URL`: Your Upstash URL.
-
-&#x20;  - `API\_KEY`: A strong secret for your endpoints.
-
-&#x20;  - `WEBHOOK\_URL`: (Optional) URL to receive message events.
-
-4\. Set the Health Check path to `/health`.
-
-
-
-\## 🛠 API Usage
-
-
-
-\### Create/Connect Session
-
-`POST /api/sessions`
-
-\*\*Header:\*\* `x-api-key: your\_secret`
-
-\*\*Body:\*\* `{"id": "user\_1"}`
-
-\*Returns QR code or connection status.\*
-
-
-
-\### List Active Sessions
-
-`GET /api/sessions`
-
-
-
-\### Remove Session
-
-`DELETE /api/sessions/user\_1`
-
-
-
-\## 🛡 Anti Bad-MAC Logic
-
-\- \*\*Serialized Writes:\*\* Uses a Mutex to ensure `creds.update` and `keys.set` never overlap.
-
-\- \*\*Lazy Loading:\*\* Signal keys are pulled from Redis only when needed and cached in memory for the duration of the handshake.
-
-\- \*\*Atomic Locking:\*\* Prevents two Koyeb instances from using the same Session ID simultaneously.
-
+### 5. Delete Session
+```bash
+curl -X DELETE http://localhost:3000/session/test-session-1 \
+  -H "x-api-key: my_secret"
+```
