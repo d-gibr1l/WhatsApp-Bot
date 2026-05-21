@@ -88,7 +88,8 @@ export async function getAuthState() {
   const sessionId = getSessionId();
 
   const collectionName = process.env.MONGO_COLLECTION  || 'auth';
-  const flushIntervalMs = parseInt(process.env.MONGO_FLUSH_INTERVAL || '100', 10);
+  // Decreased flush interval to 10ms to prevent session loss on abrupt kills
+  const flushIntervalMs = parseInt(process.env.MONGO_FLUSH_INTERVAL || '10', 10);
   const maxDirtyKeys    = parseInt(process.env.MONGO_MAX_DIRTY_KEYS  || '100', 10);
 
   // Create indexes on first boot (idempotent — safe to run every time)
