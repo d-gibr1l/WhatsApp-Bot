@@ -1,0 +1,174 @@
+/**
+ * mongoSession.js
+ *
+ * Drop-in integration layer that adapts useMongoAuthState to the
+ * existing session.js interface used by index.js.
+ *
+ * Usage in index.js:
+ *
+ *   import { getAuthState, clearSession, drainPendingDbWrites } from './src/auth/mongoSession.js';
+ *
+ *   // In shutdown():
+ *   await drainPendingDbWrites();
+ *
+ * Environment variables required:
+ *   MONGODB_URI    — e.g. mongodb+srv://user:pass@cluster.mongodb.net/dbname
+ *   BOT_NUMBER     — e.g. 233503711391  (used as the session ID)
+ *
+ * Optional:
+ *   MONGO_DB_NAME          — defaults to 'whatsapp_bot'
+ *   MONGO_COLLECTION       — defaults to 'auth'
+ *   MONGO_FLUSH_INTERVAL   — WAL debounce ms, defaults to 100
+ *   MONGO_MAX_DIRTY_KEYS   — force-flush threshold, defaults to 100
+ */
+
+import { MongoClient } from 'mongodb';
+import { useMongoAuthState } from './useMongoAuthState.js';
+import { ensureMongoIndexes }  from './mongoSetup.js';
+import { botConfig }           from '../config.js';
+
+// ─── MongoDB connection (singleton) ───────────────────────────────────────────
+
+let _client = null;
+let _db     = null;
+
+async function getDb() {
+  if (_db) return _db;
+
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error('MONGODB_URI is not set. Add it as a Koyeb environment variable.');
+
+  _client = new MongoClient(uri, {
+    maxPoolSize:    10,
+    minPoolSize:    2,
+    connectTimeoutMS: 15_000,
+    socketTimeoutMS:  30_000,
+    serverSelectionTimeoutMS: 15_000,
+  });
+
+  await _client.connect();
+
+  const dbName = process.env.MONGO_DB_NAME || 'whatsapp_bot';
+  _db = _client.db(dbName);
+
+  _client.on('error', (err) =>
+    console.error('[MongoDB] Connection error (non-fatal):', err.message)
+  );
+
+  console.log('[MongoDB] Connected to:', dbName);
+
+  return _db;
+}
+
+// ─── Auth state instance (singleton per session) ──────────────────────────────
+
+let _authInstance = null;
+
+function getSessionId() {
+  const id = botConfig.BOT_NUMBER || process.env.BOT_NUMBER;
+  if (!id) {
+    throw new Error(
+      'BOT_NUMBER is not set. Add it as a Koyeb environment variable. ' +
+      'Without it, session keys are stored under the wrong prefix.'
+    );
+  }
+  return id;
+}
+
+// ─── Public API (mirrors existing session.js exports) ────────────────────────
+
+/**
+ * Returns the Baileys-compatible { state, saveCreds } pair.
+ * First call bootstraps from MongoDB; subsequent calls return the cached instance.
+ */
+export async function getAuthState() {
+  if (_authInstance) return _authInstance;
+
+  const db        = await getDb();
+  const sessionId = getSessionId();
+
+  const collectionName = process.env.MONGO_COLLECTION  || 'auth';
+  const flushIntervalMs = parseInt(process.env.MONGO_FLUSH_INTERVAL || '100', 10);
+  const maxDirtyKeys    = parseInt(process.env.MONGO_MAX_DIRTY_KEYS  || '100', 10);
+
+  // Create indexes on first boot (idempotent — safe to run every time)
+  await ensureMongoIndexes(db, collectionName);
+
+  _authInstance = await useMongoAuthState(db, sessionId, {
+    flushIntervalMs,
+    maxDirtyKeys,
+    collection: collectionName,
+  });
+
+  // Integrity check: if creds exist but are missing critical keys, throw
+  const { creds } = _authInstance.state;
+  if (creds && (!creds.noiseKey || !creds.signedIdentityKey)) {
+    throw new Error(
+      `Auth state for '${sessionId}' is incomplete — noiseKey or signedIdentityKey missing. ` +
+      'Set FORCE_FRESH_SESSION=true to force a fresh QR scan.'
+    );
+  }
+
+  if (!creds?.noiseKey) {
+    console.log(`[MongoAuth] No session found for '${sessionId}' — QR login required`);
+  }
+
+  return _authInstance;
+}
+
+/**
+ * Drain the WAL and flush all pending writes to MongoDB.
+ * Call this in SIGTERM/SIGINT handlers before process.exit().
+ */
+export async function drainPendingDbWrites() {
+  if (!_authInstance) return;
+  await _authInstance.flushNow();
+  console.log('[MongoAuth] WAL drained on shutdown.');
+}
+
+// Alias for backward compatibility with index.js
+export { drainPendingDbWrites as drainPendingDbWritesMongo };
+
+/**
+ * Clear the entire session from L1 and MongoDB.
+ * Only call this on 401 loggedOut — NEVER on 500 badSession.
+ */
+export async function clearSession() {
+  if (_authInstance) {
+    await _authInstance.clearSession();
+    _authInstance = null;
+  } else {
+    // No in-memory instance — wipe MongoDB directly
+    const db        = await getDb();
+    const sessionId = getSessionId();
+    const col = db.collection(process.env.MONGO_COLLECTION || 'auth');
+    await col.deleteMany({ _id: { $regex: `^${sessionId}:` } });
+    console.log(`[MongoAuth] Session '${sessionId}' cleared from MongoDB.`);
+  }
+}
+
+/**
+ * Close the MongoDB connection. Call this after process.exit() is imminent.
+ */
+export async function closeMongoConnection() {
+  if (_client) {
+    await _client.close();
+    _client = null;
+    _db     = null;
+    console.log('[MongoDB] Connection closed.');
+  }
+}
+
+// ─── Legacy stubs ────────────────────────────────────────────────────────────
+
+export async function loadSession() {
+  if (process.env.FORCE_FRESH_SESSION === 'true') {
+    console.log('[MongoAuth] FORCE_FRESH_SESSION — clearing all keys');
+    await clearSession();
+  }
+  return true;
+}
+
+export async function saveSession() {
+  // No-op: useMongoAuthState handles persistence via WAL automatically
+}
