@@ -1,7 +1,6 @@
 import makeWASocket, {
   DisconnectReason,
-  makeCacheableSignalKeyStore,
-  makeMessageRetryCache
+  makeCacheableSignalKeyStore
 } from '@whiskeysockets/baileys';
 import NodeCache from 'node-cache';
 import { useRedisAuthState, clearSessionAuth } from '../redis/authState.js';
