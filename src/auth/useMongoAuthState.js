@@ -456,7 +456,7 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
        * the same key from landing after the deleteOne and resurrecting the key.
        */
       set: async (data) => {
-        let hasPreKeys  = false;
+        let forceSyncFlush = false;
         const deleteKeys = [];
 
         // Phase 1: Apply all writes/deletes to L1 synchronously (no awaits)
@@ -478,9 +478,8 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
               writeKeyToL1(cacheKey, raw, ver);
               enqueueToWAL(cacheKey, raw, ver);
 
-              if (type === 'pre-key' || type === 'signed-pre-key') {
-                hasPreKeys = true;
-              }
+              // Force synchronous flush for ALL keys to prevent session loss on abrupt kills
+              forceSyncFlush = true;
             }
           }
         }
@@ -506,11 +505,10 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
 
         // Phase 3: Schedule or force flush.
         //
-        // FIX (CRITICAL-3): Always flush synchronously for pre-key writes.
-        // Baileys replenishes the pre-key pool every ~100 sends. Debouncing
-        // any pre-key write risks losing the new pool on crash, causing the
-        // "Waiting for this message" loop on restart.
-        if (hasPreKeys) {
+        // Modified: Always flush synchronously for ALL writes.
+        // Debouncing any write risks losing the ratchet state on crash, causing the
+        // "Waiting for this message" loop or Bad MAC errors on restart.
+        if (forceSyncFlush) {
           await flushNow();
         } else {
           scheduleFlush();
