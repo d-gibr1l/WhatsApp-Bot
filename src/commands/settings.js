@@ -7,22 +7,34 @@ export const settingsCommands = {
   boton: {
     adminOnly: true,
     requiresArgs: false,
-    description: "Activate the bot for all users",
-    handler: async (sock, msg, _args, from) => {
-      await setSetting("bot_active", "true");
-      await refreshSettings();
-      await replyMsg(sock, from, msg, "✅ Bot is now active.");
+    description: "Activate the bot for this chat (or use 'boton all' for global)",
+    handler: async (sock, msg, args, from) => {
+      if (args[0] && args[0].toLowerCase() === "all") {
+        await setSetting("bot_active", "true");
+        await refreshSettings();
+        await replyMsg(sock, from, msg, "✅ Bot is now globally active.");
+      } else {
+        await setSetting(`bot_active_${from}`, "true");
+        await refreshSettings();
+        await replyMsg(sock, from, msg, "✅ Bot is now active in this chat.");
+      }
     },
   },
 
   botoff: {
     adminOnly: true,
     requiresArgs: false,
-    description: "Deactivate the bot — only admins can still use commands",
-    handler: async (sock, msg, _args, from) => {
-      await setSetting("bot_active", "false");
-      await refreshSettings();
-      await replyMsg(sock, from, msg, "🔴 Bot deactivated. Only admins can use commands.");
+    description: "Deactivate the bot for this chat (or use 'botoff all' for global) — only admins can still use commands",
+    handler: async (sock, msg, args, from) => {
+      if (args[0] && args[0].toLowerCase() === "all") {
+        await setSetting("bot_active", "false");
+        await refreshSettings();
+        await replyMsg(sock, from, msg, "🔴 Bot deactivated globally. Only admins can use commands.");
+      } else {
+        await setSetting(`bot_active_${from}`, "false");
+        await refreshSettings();
+        await replyMsg(sock, from, msg, "🔴 Bot deactivated in this chat. Only admins can use commands.");
+      }
     },
   },
 

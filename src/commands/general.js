@@ -221,10 +221,22 @@ export const generalCommands = {
       const h = Math.floor(uptime / 3600);
       const m = Math.floor((uptime % 3600) / 60);
       const s = Math.floor(uptime % 60);
-      const active = cachedGetSetting("bot_active", "true");
+
+      const activeGlobal = cachedGetSetting("bot_active", "true");
+      const activeLocal = cachedGetSetting(`bot_active_${from}`, "true");
+
+      let statusText = "🔴 Inactive";
+      if (activeGlobal === "true" && activeLocal !== "false") {
+        statusText = "✅ Online (Active in this chat)";
+      } else if (activeGlobal === "true" && activeLocal === "false") {
+        statusText = "🔴 Inactive in this chat (Online globally)";
+      } else if (activeGlobal !== "true") {
+        statusText = "🔴 Inactive globally";
+      }
+
       await replyMsg(sock, from, msg,
         `*🤖 Bot Status*\n\n` +
-        `${active === "true" ? "✅ Online" : "🔴 Inactive"}\n` +
+        `${statusText}\n` +
         `📱 Number: ${botConfig.BOT_NUMBER}\n` +
         `⏱️ Uptime: ${h}h ${m}m ${s}s\n` +
         `🔧 Prefix: ${prefix}`
