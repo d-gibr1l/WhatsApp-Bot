@@ -131,6 +131,19 @@ export async function handleMessage(sock, msg) {
   if (!from)                          return;
   if (from === "status@broadcast")    return;
 
+  // ── Bulk sticker session — must be before deduplication so no images are missed
+  if (hasStickerSession(from)) {
+    // Check if the message contains an image (directly or nested)
+    const msgContent = msg.message?.ephemeralMessage?.message ||
+                       msg.message?.viewOnceMessageV2?.message ||
+                       msg.message?.viewOnceMessage?.message ||
+                       msg.message;
+    if (msgContent?.imageMessage) {
+      const handled = await handleStickerSessionImage(sock, msg, from);
+      if (handled) return;
+    }
+  }
+
   // Fix #7: Deduplication — skip if already processed
   const msgId = msg.key.id;
   if (msgId && seenMessage(msgId)) return;
@@ -139,12 +152,6 @@ export async function handleMessage(sock, msg) {
   // Fix #2: Safe timestamp handling across all Baileys versions
   const msgTs = (Number(msg.messageTimestamp) || 0) * 1000;
   if (msgTs && msgTs < BOT_START_TIME) return;
-
-  // ── Bulk sticker session — must be before fromMe check so sent images are caught
-  if (hasStickerSession(msg.key.remoteJid) && msg.message?.imageMessage) {
-    const handled = await handleStickerSessionImage(sock, msg, msg.key.remoteJid);
-    if (handled) return;
-  }
 
   const text     = extractText(msg).trim();
   const sender   = getSenderNumber(msg);
