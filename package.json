@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-media-bot",
   "version": "1.0.0",
-  "description": "WhatsApp Bot \u2014 MongoDB Two-Tier Auth State",
+  "description": "WhatsApp Bot — MongoDB Two-Tier Auth State",
   "main": "index.js",
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "@hapi/boom": "^10.0.1",
     "@supabase/supabase-js": "^2.98.0",
     "@whiskeysockets/baileys": "^6.7.0",
+    "async-mutex": "^0.5.0",
     "dotenv": "^16.0.0",
     "express": "^5.2.1",
     "lru-cache": "^11.0.0",

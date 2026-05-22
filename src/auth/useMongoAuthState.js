@@ -35,6 +35,7 @@
  */
 
 import { initAuthCreds, proto } from '@whiskeysockets/baileys';
+import { Mutex } from 'async-mutex';
 
 // ─── Buffer Serialization ─────────────────────────────────────────────────────
 
@@ -422,6 +423,8 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
     ? deserialize(credsEntry.raw)
     : initAuthCreds();
 
+  const mutex = new Mutex();
+
   // ─── State Object (returned to Baileys) ──────────────────────────────────
 
   const state = {
@@ -429,14 +432,16 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
 
     keys: {
       get: async (type, ids) => {
-        const result = {};
-        await Promise.all(
-          ids.map(async (id) => {
-            const val = await readKey(type, id);
-            if (val !== null && val !== undefined) result[id] = val;
-          })
-        );
-        return result;
+        return mutex.runExclusive(async () => {
+          const result = {};
+          await Promise.all(
+            ids.map(async (id) => {
+              const val = await readKey(type, id);
+              if (val !== null && val !== undefined) result[id] = val;
+            })
+          );
+          return result;
+        });
       },
 
       /**
@@ -456,63 +461,65 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
        * the same key from landing after the deleteOne and resurrecting the key.
        */
       set: async (data) => {
-        let forceSyncFlush = false;
-        const deleteKeys = [];
+        return mutex.runExclusive(async () => {
+          let forceSyncFlush = false;
+          const deleteKeys = [];
 
-        // Phase 1: Apply all writes/deletes to L1 synchronously (no awaits)
-        for (const [type, ids] of Object.entries(data)) {
-          for (const [id, value] of Object.entries(ids ?? {})) {
-            const cacheKey = docId(type, id);
+          // Phase 1: Apply all writes/deletes to L1 synchronously (no awaits)
+          for (const [type, ids] of Object.entries(data)) {
+            for (const [id, value] of Object.entries(ids ?? {})) {
+              const cacheKey = docId(type, id);
 
-            if (value === null || value === undefined) {
-              // Delete path: remove from L1 and WAL immediately.
-              // The WAL deletion is critical — it prevents the deleted key
-              // from being upserted back by the next scheduled flush.
-              l1.delete(cacheKey);
-              wal.delete(cacheKey);
-              deleteKeys.push(cacheKey);
-            } else {
-              const ver = nextVersion();
-              const raw = serialize(value);
+              if (value === null || value === undefined) {
+                // Delete path: remove from L1 and WAL immediately.
+                // The WAL deletion is critical — it prevents the deleted key
+                // from being upserted back by the next scheduled flush.
+                l1.delete(cacheKey);
+                wal.delete(cacheKey);
+                deleteKeys.push(cacheKey);
+              } else {
+                const ver = nextVersion();
+                const raw = serialize(value);
 
-              writeKeyToL1(cacheKey, raw, ver);
-              enqueueToWAL(cacheKey, raw, ver);
+                writeKeyToL1(cacheKey, raw, ver);
+                enqueueToWAL(cacheKey, raw, ver);
 
-              // Force synchronous flush for ALL keys to prevent session loss on abrupt kills
-              forceSyncFlush = true;
+                // Force synchronous flush for ALL keys to prevent session loss on abrupt kills
+                forceSyncFlush = true;
+              }
             }
           }
-        }
 
-        // Phase 2: Dispatch deletes to MongoDB.
-        //
-        // FIX (HIGH-5): Wait for any in-flight WAL flush before deleting.
-        // Without this wait, a concurrent bulkWrite upsert for the same key
-        // could land AFTER our deleteOne, resurrecting the deleted key in
-        // MongoDB. bootstrap() would then reload it as stale session state.
-        if (deleteKeys.length > 0) {
-          waitForCurrentFlush().then(() => {
-            col.bulkWrite(
-              deleteKeys.map((id) => ({ deleteOne: { filter: { _id: id } } })),
-              { ordered: false }
-            ).catch((err) =>
-              console.error('[MongoAuth] Delete error:', err.message)
+          // Phase 2: Dispatch deletes to MongoDB.
+          //
+          // FIX (HIGH-5): Wait for any in-flight WAL flush before deleting.
+          // Without this wait, a concurrent bulkWrite upsert for the same key
+          // could land AFTER our deleteOne, resurrecting the deleted key in
+          // MongoDB. bootstrap() would then reload it as stale session state.
+          if (deleteKeys.length > 0) {
+            waitForCurrentFlush().then(() => {
+              col.bulkWrite(
+                deleteKeys.map((id) => ({ deleteOne: { filter: { _id: id } } })),
+                { ordered: false }
+              ).catch((err) =>
+                console.error('[MongoAuth] Delete error:', err.message)
+              );
+            }).catch((err) =>
+              console.error('[MongoAuth] Delete pre-flush wait error:', err.message)
             );
-          }).catch((err) =>
-            console.error('[MongoAuth] Delete pre-flush wait error:', err.message)
-          );
-        }
+          }
 
-        // Phase 3: Schedule or force flush.
-        //
-        // Modified: Always flush synchronously for ALL writes.
-        // Debouncing any write risks losing the ratchet state on crash, causing the
-        // "Waiting for this message" loop or Bad MAC errors on restart.
-        if (forceSyncFlush) {
-          await flushNow();
-        } else {
-          scheduleFlush();
-        }
+          // Phase 3: Schedule or force flush.
+          //
+          // Modified: Always flush synchronously for ALL writes.
+          // Debouncing any write risks losing the ratchet state on crash, causing the
+          // "Waiting for this message" loop or Bad MAC errors on restart.
+          if (forceSyncFlush) {
+            await flushNow();
+          } else {
+            scheduleFlush();
+          }
+        });
       },
     },
   };
@@ -520,7 +527,9 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
   // ── saveCreds ─────────────────────────────────────────────────────────────
 
   const saveCreds = async () => {
-    await writeCreds(state.creds);
+    return mutex.runExclusive(async () => {
+      await writeCreds(state.creds);
+    });
   };
 
   // ── destroy ───────────────────────────────────────────────────────────────
