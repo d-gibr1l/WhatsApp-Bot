@@ -403,7 +403,13 @@ export async function handleStickerSessionImage(sock, msg, from) {
   const sender = msg.key.fromMe ? session.sender : (msg.key.participant ?? msg.key.remoteJid);
   if (sender !== session.sender) return false;
 
-  const imgMsg = msg.message?.imageMessage;
+  // Unwrap ephemeral/view-once messages
+  const messageContent = msg.message?.ephemeralMessage?.message ||
+                         msg.message?.viewOnceMessageV2?.message ||
+                         msg.message?.viewOnceMessage?.message ||
+                         msg.message;
+
+  const imgMsg = messageContent?.imageMessage;
   if (!imgMsg) return false;
 
   session.messages.push(msg);
