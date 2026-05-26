@@ -28,6 +28,7 @@ import {
   setStarting,
   setConnecting,
 } from "./src/server.js";
+import { updateYtDlp } from "./src/downloader.js";
 
 const logger = pino({ level: "silent" });
 
@@ -158,6 +159,13 @@ async function runBot() {
   if (jitter > 0) {
     console.log(`Startup jitter: ${jitter}ms`);
     await new Promise(r => setTimeout(r, jitter));
+  }
+
+  // Update yt-dlp to latest version before launching bot
+  try {
+    await updateYtDlp();
+  } catch (err) {
+    console.error("⚠️ Failed to update yt-dlp:", err.message);
   }
 
   // loadSession() handles FORCE_FRESH_SESSION if set

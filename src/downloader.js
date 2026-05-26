@@ -1,9 +1,39 @@
-import { spawn } from "child_process";
+import { spawn, exec } from "child_process";
 import { promises as fsPromises, existsSync, readdirSync } from "fs";
 import { writeFileSync, unlinkSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
 import { getSetting } from "./db.js";
+
+// ─── yt-dlp Path & Auto-Updater ──────────────────────────────────────────────
+
+export function getYtDlpPath() {
+  if (process.platform === "win32") return "yt-dlp";
+  if (existsSync("/app/yt-dlp")) return "/app/yt-dlp";
+  if (existsSync("/usr/local/bin/yt-dlp")) return "/usr/local/bin/yt-dlp";
+  return "yt-dlp";
+}
+
+export async function updateYtDlp() {
+  if (process.platform === "win32") {
+    console.log("[Downloader] Windows detected — skipping auto-update of yt-dlp.");
+    return;
+  }
+  console.log("[Downloader] Auto-updating yt-dlp to the latest release...");
+  const targetPath = "/app/yt-dlp";
+  const url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
+
+  return new Promise((resolve) => {
+    exec(`curl -L ${url} -o ${targetPath} && chmod a+rx ${targetPath}`, (err) => {
+      if (err) {
+        console.warn("[Downloader] Failed to update yt-dlp dynamically:", err.message);
+      } else {
+        console.log("[Downloader] yt-dlp successfully updated to latest version at:", targetPath);
+      }
+      resolve();
+    });
+  });
+}
 
 // ─── Platform Detection ───────────────────────────────────────────────────────
 
@@ -67,7 +97,7 @@ export async function getMediaInfo(url) {
 
   return new Promise((resolve, reject) => {
     let output = "";
-    const proc = spawn("yt-dlp", args);
+    const proc = spawn(getYtDlpPath(), args);
     proc.stdout.on("data", d => { output += d.toString(); });
     proc.on("close", async (code) => {
       if (cookiePath) await fsPromises.unlink(cookiePath).catch(() => {});
@@ -131,7 +161,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
   }
 
   return new Promise((resolve, reject) => {
-    const proc = spawn("yt-dlp", args);
+    const proc = spawn(getYtDlpPath(), args);
     let errorLog  = "";
     let finalPath = "";
 
@@ -148,8 +178,9 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
       if (cookiePath) await fsPromises.unlink(cookiePath).catch(() => {});
 
       if (code !== 0) {
-        const lastLine = errorLog.trim().split("\n").pop() || "Unknown error";
-        return reject(new Error(`yt-dlp failed: ${lastLine.slice(0, 200)}`));
+        const errorLines = errorLog.trim().split("\n");
+        const mainError = errorLines.find(line => line.includes("ERROR:")) || errorLines[errorLines.length - 1] || "Unknown error";
+        return reject(new Error(`yt-dlp failed: ${mainError.slice(0, 250)}`));
       }
 
       try {
