@@ -1,58 +1,70 @@
 /**
  * badMacInterceptor.js
  *
- * Intercepts Signal decryption errors that arrive as unhandled promise
- * rejections and recovers gracefully without crashing the bot.
+ * Two-layer suppression of Signal decryption errors:
  *
- * Two error types handled:
+ * Layer 1 — console.error shim:
+ *   Baileys and libsignal log Bad MAC errors directly via console.error,
+ *   bypassing our pino logger (which is set to "silent"). The shim intercepts
+ *   these calls and drops known-safe messages, replacing the log flood with a
+ *   single rate-limited line from us.
  *
- *  1. "Bad MAC" (libsignal Error: Bad MAC)
- *     Cause: The Signal ratchet key stored in MongoDB is stale or corrupt.
- *     Fix:   Purge the specific key from L1 + WAL + MongoDB. The next message
- *            from the same sender will trigger a fresh key exchange.
+ * Layer 2 — unhandledRejection listener:
+ *   Some Bad MAC errors escape Baileys' internal catch blocks and surface as
+ *   unhandled rejections. The listener calls purgeCorruptKey() to remove the
+ *   offending key from L1 + WAL + MongoDB so the next decrypt gets a fresh key.
  *
- *  2. "MessageCounterError: Key used already"
- *     Cause: Replay protection — WhatsApp resent an already-decrypted message.
- *            The local counter already advanced past this message ID.
- *     Fix:   Log once and drop silently. No key purge needed.
+ * Both layers share the same rate limiter and key-ID extractor.
  *
- * Rate limiting:
- *   At most one log line per session per 10 seconds to prevent log flooding
- *   during a burst of Bad MAC errors (e.g. after a restart with many queued
- *   messages from a group with a stale sender-key).
- *
- * Key ID extraction:
- *   libsignal error stacks contain the remoteJid or sender ID in the async
- *   call chain. We extract a best-effort key ID from the stack; if extraction
- *   fails we log a warning and skip the purge (safe — next resync will heal).
+ * Error types handled:
+ *  - "Bad MAC"                        → purge key + rate-limited log
+ *  - "MessageCounterError"            → drop silently (replay protection)
+ *  - "Key used already"               → drop silently (replay protection)
+ *  - "Failed to decrypt message"      → drop (Baileys wrapper, not actionable)
+ *  - "Session error:"                 → drop (Baileys wrapper, not actionable)
+ *  - "Closing session: SessionEntry"  → drop (Baileys self-heal log)
+ *  - "Closing open session"           → drop (Baileys self-heal log)
  */
 
-// ─── Rate limiter state ───────────────────────────────────────────────────────
+// ─── Rate limiter ─────────────────────────────────────────────────────────────
 
-// Map<sessionId, lastLogTimestampMs>
+// Map<key, lastLogTimestampMs>
 const lastLogTime = new Map();
-const RATE_LIMIT_MS = 10_000; // max 1 log per session per 10s
+const RATE_LIMIT_MS = 10_000; // max 1 log per key per 10s
 
-function isRateLimited(sessionId) {
-  const last = lastLogTime.get(sessionId) ?? 0;
+function isRateLimited(key) {
+  const last = lastLogTime.get(key) ?? 0;
   if (Date.now() - last < RATE_LIMIT_MS) return true;
-  lastLogTime.set(sessionId, Date.now());
+  lastLogTime.set(key, Date.now());
   return false;
+}
+
+// ─── Suppressible message patterns ───────────────────────────────────────────
+
+// These are console.error calls emitted by Baileys / libsignal internals.
+// They are NOT crashes — Baileys handles them and we handle them here.
+const SUPPRESS_PATTERNS = [
+  'Bad MAC',
+  'Key used already',
+  'MessageCounterError',
+  'Failed to decrypt message',
+  'Session error:',
+  'Closing session: SessionEntry',
+  'Closing open session in favor of incoming prekey bundle',
+];
+
+function isSuppressible(...args) {
+  const text = args.map((a) => (typeof a === 'string' ? a : String(a))).join(' ');
+  return SUPPRESS_PATTERNS.some((p) => text.includes(p));
 }
 
 // ─── Key ID extraction ────────────────────────────────────────────────────────
 
 /**
- * Attempt to extract a { type, id } pair from a libsignal error stack.
+ * Attempt to extract { type, id } from a libsignal error stack.
  *
- * libsignal errors typically embed the address string in the stack in the form:
- *   "at SessionCipher.decryptWithSessions ... for address: <jid>.<deviceId>"
- * or in the queue job wrapper:
- *   "at async <jid>.<deviceId> [as awaitable]"
- *
- * If we can extract a JID/address, we purge the 'session' key for it.
- * The type 'session' covers the per-device ratchet state — the most common
- * source of Bad MAC errors.
+ * libsignal embeds the sender address in the async call chain:
+ *   "at async 59335526904016.73 [as awaitable]"
  *
  * @param {Error} err
  * @returns {{ type: string, id: string } | null}
@@ -60,23 +72,17 @@ function isRateLimited(sessionId) {
 function extractKeyId(err) {
   const stack = err?.stack ?? '';
 
-  // Pattern 1: async queue wrapper — "at async <jid>.<deviceId> [as awaitable]"
+  // Pattern 1: "at async <jid>.<deviceId> [as awaitable]"  ← most reliable
   const queueMatch = stack.match(/at async ([\w.@:+-]+)\s+\[as awaitable\]/);
-  if (queueMatch) {
-    return { type: 'session', id: queueMatch[1] };
-  }
+  if (queueMatch) return { type: 'session', id: queueMatch[1] };
 
-  // Pattern 2: "address: <jid>.<deviceId>" in error message or stack
+  // Pattern 2: "address: <jid>.<deviceId>"
   const addrMatch = stack.match(/address:\s*([\w.@:+-]+)/);
-  if (addrMatch) {
-    return { type: 'session', id: addrMatch[1] };
-  }
+  if (addrMatch) return { type: 'session', id: addrMatch[1] };
 
-  // Pattern 3: last resort — look for a JID-like string anywhere in the stack
+  // Pattern 3: bare JID-like string anywhere in stack
   const jidMatch = stack.match(/([\d]+@s\.whatsapp\.net\.[\d]+)/);
-  if (jidMatch) {
-    return { type: 'session', id: jidMatch[1] };
-  }
+  if (jidMatch) return { type: 'session', id: jidMatch[1] };
 
   return null;
 }
@@ -84,69 +90,107 @@ function extractKeyId(err) {
 // ─── Interceptor installation ─────────────────────────────────────────────────
 
 let _installed = false;
+let _originalConsoleError = null;
 
 /**
  * Install the Bad MAC interceptor.
  *
- * Must be called once after the Baileys socket is created and wired.
- * Safe to call on reconnects — subsequent calls are no-ops (the process-level
- * listener is only installed once; the session ID and purgeCorruptKey function
- * are updated via the closure references on first install).
+ * Safe to call multiple times — only installs once.
  *
  * @param {Function} purgeCorruptKey - async (type: string, id: string) => void
- *   Imported from mongoSession.js
  * @param {Function} getSessionId    - () => string
- *   Returns the current BOT_NUMBER / session ID for rate-limit keying
  */
 export function installBadMacInterceptor(purgeCorruptKey, getSessionId) {
   if (_installed) return;
   _installed = true;
 
+  // ── Layer 1: console.error shim ────────────────────────────────────────────
+  // Silences Bad MAC / decrypt error messages that Baileys and libsignal print
+  // directly to console.error (bypassing our pino "silent" logger).
+  // Replaced with a single rate-limited line per session per 10 seconds.
+  _originalConsoleError = console.error.bind(console);
+
+  console.error = (...args) => {
+    if (!isSuppressible(...args)) {
+      // Not a known-safe error — pass through unchanged
+      _originalConsoleError(...args);
+      return;
+    }
+
+    // Known-safe error: emit our own rate-limited summary instead of the flood
+    const sessionId = getSessionId();
+    const text = args.map((a) => (typeof a === 'string' ? a : String(a))).join(' ');
+
+    if (text.includes('Bad MAC')) {
+      // Try to extract a key ID from an Error argument for targeted purge
+      const errArg = args.find((a) => a instanceof Error);
+      const keyInfo = errArg ? extractKeyId(errArg) : null;
+
+      if (!isRateLimited(`console:mac:${sessionId}`)) {
+        const keyStr = keyInfo ? ` (key: ${keyInfo.id})` : '';
+        _originalConsoleError(
+          `[BadMAC] Decryption failure for session '${sessionId}'${keyStr}. ` +
+          `Baileys is self-healing — message dropped gracefully.`
+        );
+      }
+
+      // Attempt a targeted key purge even if rate-limited (purge is safe to call repeatedly)
+      if (keyInfo) {
+        purgeCorruptKey(keyInfo.type, keyInfo.id).catch(() => {});
+      }
+      return;
+    }
+
+    if (text.includes('Key used already') || text.includes('MessageCounterError')) {
+      if (!isRateLimited(`console:counter:${sessionId}`)) {
+        _originalConsoleError(
+          `[BadMAC] Replay protection for session '${sessionId}' — message dropped (normal in busy groups).`
+        );
+      }
+      return;
+    }
+
+    // "Failed to decrypt", "Session error:", "Closing session/open session" —
+    // completely suppressed. These are Baileys' own heal/wrapper logs and are
+    // already covered by the Bad MAC line above.
+  };
+
+  // ── Layer 2: unhandledRejection listener ───────────────────────────────────
+  // Catches Bad MAC / counter errors that escape Baileys' internal catch blocks.
   process.on('unhandledRejection', async (reason) => {
     if (!(reason instanceof Error)) return;
 
     const msg = reason.message ?? '';
 
-    // ── MessageCounterError: replay protection ──────────────────────────────
-    // These are normal in high-traffic groups. Log at most once per interval.
+    // Replay protection — drop silently
     if (msg.includes('Key used already') || reason.name === 'MessageCounterError') {
       const sessionId = getSessionId();
-      if (!isRateLimited(sessionId)) {
-        console.warn(
-          `[BadMAC] MessageCounterError (replay protection) for session '${sessionId}'. ` +
-          `This is normal in high-traffic groups — message dropped silently.`
+      if (!isRateLimited(`unhandled:counter:${sessionId}`)) {
+        _originalConsoleError(
+          `[BadMAC] MessageCounterError (unhandled rejection) for session '${sessionId}' — dropped.`
         );
       }
-      return; // No purge needed — this is replay protection working correctly
+      return;
     }
 
-    // ── Bad MAC: corrupt ratchet key ────────────────────────────────────────
+    // Bad MAC — purge the offending key
     if (!msg.includes('Bad MAC')) return;
 
     const sessionId = getSessionId();
 
-    if (!isRateLimited(sessionId)) {
-      console.warn(
-        `[BadMAC] Decryption failure for session '${sessionId}': ${msg}. ` +
-        `Attempting key purge and recovery.`
+    if (!isRateLimited(`unhandled:mac:${sessionId}`)) {
+      _originalConsoleError(
+        `[BadMAC] Unhandled Bad MAC for session '${sessionId}'. Purging key.`
       );
     }
 
-    // Extract the offending key ID from the error stack
     const keyInfo = extractKeyId(reason);
-    if (!keyInfo) {
-      console.warn(
-        `[BadMAC] Could not extract key ID from error stack — skipping purge. ` +
-        `The session will self-heal on next key exchange.`
-      );
-      return;
-    }
+    if (!keyInfo) return; // No key ID — Baileys will self-heal via prekey bundle
 
-    // Purge the corrupt key from L1, WAL, and MongoDB
     try {
       await purgeCorruptKey(keyInfo.type, keyInfo.id);
     } catch (err) {
-      console.error(`[BadMAC] Purge failed for ${keyInfo.type}:${keyInfo.id}:`, err.message);
+      _originalConsoleError(`[BadMAC] Purge failed for ${keyInfo.type}:${keyInfo.id}:`, err.message);
     }
   });
 
