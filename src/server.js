@@ -457,6 +457,18 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
           <button class="input-btn" onclick="updateSettingText('rapidapi_key')">Save</button>
         </div>
       </div>
+
+      <!-- YouTube Cookies -->
+      <div class="setting-card" style="grid-column: 1 / -1;">
+        <div class="setting-info">
+          <h3>YouTube Cookies (Netscape Format)</h3>
+          <p>Provide Netscape HTTP cookies to bypass YouTube's data center blocks (e.g., "Sign in to confirm you are not a bot" or "HTTP Error 403: Forbidden").</p>
+        </div>
+        <div style="margin-top:12px; display:flex; flex-direction:column; gap:8px; width:100%;">
+          <textarea id="setting-yt_cookies" class="form-input" rows="6" placeholder="# Netscape HTTP Cookie File..." style="width:100%; font-family:var(--font-m); font-size:0.78rem; resize:vertical;"></textarea>
+          <button class="input-btn" onclick="updateSettingText('yt_cookies')">Save Cookies</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -615,7 +627,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
     });
 
     // Process other text inputs
-    ['max_warnings', 'sticker_pack_name', 'sticker_pack_author', 'gemini_api_key', 'groq_api_key', 'tavily_api_key', 'rapidapi_key'].forEach(key => {
+    ['max_warnings', 'sticker_pack_name', 'sticker_pack_author', 'gemini_api_key', 'groq_api_key', 'tavily_api_key', 'rapidapi_key', 'yt_cookies'].forEach(key => {
       const el = document.getElementById('setting-' + key);
       if (el && map.has(key)) {
         el.value = map.get(key);

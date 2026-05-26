@@ -3,39 +3,35 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
-import { getSetting } from "../db.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
-
-async function getCookiesFlag() {
-  try {
-    const cookies = await getSetting("yt_cookies", null);
-    if (!cookies || cookies.trim() === "") return "";
-    const cookiePath = join(tmpdir(), "yt_cookies.txt");
-    writeFileSync(cookiePath, cookies);
-    return `--cookies "${cookiePath}"`;
-  } catch {
-    return "";
-  }
-}
+import { getYtDlpPath, getCookiesPath } from "../downloader.js";
 
 // Extract audio from a URL using yt-dlp
 async function extractFromUrl(url, outPath) {
-  const cookiesFlag = await getCookiesFlag();
+  const cookiePath = await getCookiesPath();
+  const cookiesFlag = cookiePath ? `--cookies "${cookiePath}"` : "";
+  const ytDlpPath = getYtDlpPath();
 
   // Get title if possible
   let title = "audio";
   try {
     const info = execSync(
-      `yt-dlp --dump-json --no-playlist ${cookiesFlag} "${url}"`,
+      `"${ytDlpPath}" --dump-json --no-playlist ${cookiesFlag} "${url}"`,
       { timeout: 30000, encoding: "utf8" }
     );
     title = JSON.parse(info).title ?? "audio";
   } catch {}
 
-  execSync(
-    `yt-dlp -x --audio-format mp3 --audio-quality 0 ${cookiesFlag} -o "${outPath}" "${url}"`,
-    { timeout: 120000 }
-  );
+  try {
+    execSync(
+      `"${ytDlpPath}" -x --audio-format mp3 --audio-quality 0 ${cookiesFlag} -o "${outPath}" "${url}"`,
+      { timeout: 120000 }
+    );
+  } finally {
+    if (cookiePath && existsSync(cookiePath)) {
+      try { unlinkSync(cookiePath); } catch {}
+    }
+  }
 
   return title;
 }

@@ -3,6 +3,7 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
+import { getYtDlpPath, getCookiesPath } from "../downloader.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -29,12 +30,22 @@ function formatNumber(n) {
   return String(n);
 }
 
-function getYtDlpInfo(url) {
-  const json = execSync(
-    `yt-dlp --dump-json --no-playlist "${url}"`,
-    { timeout: 30000, encoding: "utf8" }
-  );
-  return JSON.parse(json);
+async function getYtDlpInfo(url) {
+  const cookiePath = await getCookiesPath();
+  const cookiesFlag = cookiePath ? `--cookies "${cookiePath}"` : "";
+  const ytDlpPath = getYtDlpPath();
+
+  try {
+    const json = execSync(
+      `"${ytDlpPath}" --dump-json --no-playlist ${cookiesFlag} "${url}"`,
+      { timeout: 30000, encoding: "utf8" }
+    );
+    return JSON.parse(json);
+  } finally {
+    if (cookiePath && existsSync(cookiePath)) {
+      try { unlinkSync(cookiePath); } catch {}
+    }
+  }
 }
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
@@ -62,7 +73,7 @@ export const ytToolsCommands = {
       await reactMsg(sock, from, msg, "🔍");
 
       try {
-        const info = getYtDlpInfo(url);
+        const info = await getYtDlpInfo(url);
 
         const duration  = info.duration ? formatDuration(Math.floor(info.duration)) : "N/A";
         const views     = formatNumber(info.view_count);
@@ -133,6 +144,9 @@ export const ytToolsCommands = {
 
       const tmpDir  = join(tmpdir(), `sub_${Date.now()}`);
       const tmpBase = join(tmpDir, "sub");
+      const cookiePath = await getCookiesPath();
+      const cookiesFlag = cookiePath ? `--cookies "${cookiePath}"` : "";
+      const ytDlpPath = getYtDlpPath();
 
       try {
         // Create temp dir
@@ -142,7 +156,7 @@ export const ytToolsCommands = {
         let subFile = null;
         try {
           execSync(
-            `yt-dlp --write-subs --sub-lang ${lang} --skip-download --convert-subs srt -o "${tmpBase}" "${url}"`,
+            `"${ytDlpPath}" --write-subs --sub-lang ${lang} --skip-download --convert-subs srt ${cookiesFlag} -o "${tmpBase}" "${url}"`,
             { timeout: 30000 }
           );
           subFile = `${tmpBase}.${lang}.srt`;
@@ -151,7 +165,7 @@ export const ytToolsCommands = {
 
         if (!subFile) {
           execSync(
-            `yt-dlp --write-auto-subs --sub-lang ${lang} --skip-download --convert-subs srt -o "${tmpBase}" "${url}"`,
+            `"${ytDlpPath}" --write-auto-subs --sub-lang ${lang} --skip-download --convert-subs srt ${cookiesFlag} -o "${tmpBase}" "${url}"`,
             { timeout: 30000 }
           );
           subFile = `${tmpBase}.${lang}.srt`;
@@ -182,7 +196,7 @@ export const ytToolsCommands = {
 
         // Get title for header
         let title = url;
-        try { title = getYtDlpInfo(url).title; } catch {}
+        try { title = (await getYtDlpInfo(url)).title; } catch {}
 
         const subtitleText = textLines.join("\n");
         const header = `📝 *Subtitles: ${title}*\n🌐 Language: ${lang}\n\n`;
@@ -207,6 +221,9 @@ export const ytToolsCommands = {
         }
       } finally {
         try { execSync(`rm -rf "${tmpDir}"`); } catch {}
+        if (cookiePath && existsSync(cookiePath)) {
+          try { unlinkSync(cookiePath); } catch {}
+        }
       }
     },
   },
@@ -237,11 +254,14 @@ export const ytToolsCommands = {
 
       const tmpVid = join(tmpdir(), `gif_vid_${Date.now()}.mp4`);
       const tmpGif = join(tmpdir(), `gif_out_${Date.now()}.mp4`); // WhatsApp GIF = looping mp4
+      const cookiePath = await getCookiesPath();
+      const cookiesFlag = cookiePath ? `--cookies "${cookiePath}"` : "";
+      const ytDlpPath = getYtDlpPath();
 
       try {
         // Download video
         execSync(
-          `yt-dlp -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 -o "${tmpVid}" "${url}"`,
+          `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} -o "${tmpVid}" "${url}"`,
           { timeout: 120000 }
         );
 
@@ -279,6 +299,9 @@ export const ytToolsCommands = {
       } finally {
         try { unlinkSync(tmpVid); } catch {}
         try { unlinkSync(tmpGif); } catch {}
+        if (cookiePath && existsSync(cookiePath)) {
+          try { unlinkSync(cookiePath); } catch {}
+        }
       }
     },
   },

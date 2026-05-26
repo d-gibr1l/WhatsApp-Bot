@@ -8,6 +8,7 @@ import { setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
+import { getYtDlpPath, getCookiesPath } from "../downloader.js";
 
 const execAsync = promisify(exec);
 
@@ -97,10 +98,13 @@ async function videoToSticker(inputBuffer, startSec = 0, durationSec = 6) {
 
 async function urlToSticker(url, startSec = 0, durationSec = 6) {
   const tmpVid = join(tmpdir(), `su_vid_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`);
+  const cookiePath = await getCookiesPath();
+  const cookiesFlag = cookiePath ? `--cookies "${cookiePath}"` : "";
+  const ytDlpPath = getYtDlpPath();
 
   try {
     await execAsync(
-      `yt-dlp -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 -o "${tmpVid}" "${url}"`,
+      `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} -o "${tmpVid}" "${url}"`,
       { timeout: 120000 }
     );
 
@@ -108,6 +112,9 @@ async function urlToSticker(url, startSec = 0, durationSec = 6) {
     return await videoToSticker(buffer, startSec, durationSec);
   } finally {
     await fs.unlink(tmpVid).catch(() => {});
+    if (cookiePath) {
+      await fs.unlink(cookiePath).catch(() => {});
+    }
   }
 }
 
