@@ -73,7 +73,7 @@ export function extractUrl(text) {
 
 // ─── Cookies Helper ───────────────────────────────────────────────────────────
 
-async function getCookiesPath() {
+export async function getCookiesPath() {
   try {
     const cookies = await getSetting("yt_cookies", null);
     if (!cookies?.trim()) return null;
