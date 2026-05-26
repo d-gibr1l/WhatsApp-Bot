@@ -486,7 +486,8 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
 
                 // Force synchronous flush for critical session keys to prevent session loss on abrupt kills,
                 // but allow non-critical high-volume keys (e.g. sender-key) to be debounced/batched.
-                const isCriticalKey = ['pre-key', 'session', 'app-state-sync-key'].includes(type);
+                const isNonCriticalKey = ['sender-key', 'sender-key-memory'].includes(type);
+                const isCriticalKey = !isNonCriticalKey;
                 if (isCriticalKey) {
                   forceSyncFlush = true;
                 }
