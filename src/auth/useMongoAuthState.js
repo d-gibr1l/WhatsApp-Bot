@@ -32,6 +32,18 @@
  * HIGH-6: flushNow() race with non-blocking scheduleFlush(immediate=true).
  *   Fixed: flushNow() uses a single authoritative flush promise that both
  *   paths share, eliminating the race between scheduled and explicit flushes.
+ *
+ * BATCH-SET: keys.set() now collects ALL entries for the call into L1 and the
+ *   WAL atomically (no interleaved awaits during the write phase) before
+ *   calling flushNow() once. This eliminates the mid-loop flush race where
+ *   a concurrent flush could see a partial batch, causing Bad MAC errors.
+ *
+ * WAL-RETRY-CAP: bulkWrite retry counter capped at MAX_FLUSH_RETRIES (3).
+ *   A corrupted key will no longer block the WAL indefinitely.
+ *
+ * PURGE: purgeCorruptKey(type, id) atomically removes a single corrupt key
+ *   from L1, WAL, and MongoDB. Called by badMacInterceptor on decryption
+ *   failure to prevent the same bad key from causing repeated errors.
  */
 
 import { initAuthCreds, proto } from '@whiskeysockets/baileys';
@@ -106,11 +118,15 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
   const l1 = new Map();
 
   // ── Write-Ahead Log (WAL) ─────────────────────────────────────────────────
-  // Map<cacheKey, { raw: string, version: number }>
+  // Map<cacheKey, { raw: string, version: number, retries?: number }>
   // A Map.set() always keeps the latest value — 50 senderKey updates for the
   // same group produce exactly one WAL entry (the most recent).
 
   const wal = new Map();
+
+  // Maximum bulkWrite retry attempts before dropping a WAL entry.
+  // Prevents a single corrupted key from blocking the WAL forever.
+  const MAX_FLUSH_RETRIES = 3;
 
   // ── Flush state ───────────────────────────────────────────────────────────
 
@@ -269,13 +285,19 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
     } catch (err) {
       console.error(`[MongoAuth] bulkWrite failed (${ops.length} ops):`, err.message);
 
-      // Restore only non-superseded entries for retry
+      // Restore only non-superseded entries for retry, capped at MAX_FLUSH_RETRIES.
+      // A corrupted key that consistently fails will be dropped after 3 retries
+      // so it cannot block the WAL from flushing other keys indefinitely.
       for (const [cacheKey, walEntry] of snapshot) {
         if (!wal.has(cacheKey)) {
-          // Only restore if L1 still has this exact version (not superseded)
           const l1Entry = l1.get(cacheKey);
           if (l1Entry && l1Entry.version === walEntry.version) {
-            wal.set(cacheKey, walEntry);
+            const retries = (walEntry.retries ?? 0) + 1;
+            if (retries <= MAX_FLUSH_RETRIES) {
+              wal.set(cacheKey, { ...walEntry, retries });
+            } else {
+              console.warn(`[MongoAuth] Dropping WAL entry after ${MAX_FLUSH_RETRIES} retries: ${cacheKey}`);
+            }
           }
         }
       }
@@ -465,7 +487,12 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
           let forceSyncFlush = false;
           const deleteKeys = [];
 
-          // Phase 1: Apply all writes/deletes to L1 synchronously (no awaits)
+          // Phase 1: Collect ALL writes/deletes into L1 and WAL atomically
+          // (no awaits during this phase). This is the key fix for the
+          // mid-loop flush race: all entries in this keys.set() call land
+          // in L1 and the WAL as a single atomic batch before any flush
+          // is initiated. A concurrent flush that starts after this phase
+          // will see the complete batch, preventing partial-batch Bad MACs.
           for (const [type, ids] of Object.entries(data)) {
             for (const [id, value] of Object.entries(ids ?? {})) {
               const cacheKey = docId(type, id);
@@ -487,10 +514,7 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
                 // Force synchronous flush for critical session keys to prevent session loss on abrupt kills,
                 // but allow non-critical high-volume keys (e.g. sender-key) to be debounced/batched.
                 const isNonCriticalKey = ['sender-key', 'sender-key-memory'].includes(type);
-                const isCriticalKey = !isNonCriticalKey;
-                if (isCriticalKey) {
-                  forceSyncFlush = true;
-                }
+                if (!isNonCriticalKey) forceSyncFlush = true;
               }
             }
           }
@@ -511,9 +535,9 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
             }
           }
 
-          // Phase 3: Schedule or force flush.
-          //
-          // Modified: Flush synchronously for critical keys, otherwise schedule debounced flush.
+          // Phase 3: One flush call covers the entire batch (not one per key-type).
+          // flushNow() waits for any in-flight flush, then flushes the WAL snapshot
+          // that now contains the complete batch from Phase 1.
           if (forceSyncFlush) {
             await flushNow();
           } else {
@@ -564,5 +588,22 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
     console.log(`[MongoAuth] Session '${sessionId}' cleared.`);
   };
 
-  return { state, saveCreds, destroy, clearSession, flushNow };
+  // ── purgeCorruptKey ───────────────────────────────────────────────────────
+  // Called by badMacInterceptor when a Bad MAC decryption error is detected
+  // for a specific key. Atomically removes the corrupt key from L1, WAL, and
+  // MongoDB so the next message decrypt attempt generates a fresh key.
+
+  const purgeCorruptKey = async (type, id) => {
+    const cacheKey = docId(type, id);
+    l1.delete(cacheKey);
+    wal.delete(cacheKey);
+    try {
+      await col.deleteOne({ _id: cacheKey });
+      console.log(`[MongoAuth] Purged corrupt key: ${cacheKey}`);
+    } catch (err) {
+      console.error(`[MongoAuth] Failed to purge corrupt key ${cacheKey}:`, err.message);
+    }
+  };
+
+  return { state, saveCreds, destroy, clearSession, flushNow, purgeCorruptKey };
 }

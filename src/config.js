@@ -1,11 +1,13 @@
 import { config } from "dotenv";
 config();
 
-const REQUIRED_ENV = ["SUPABASE_URL", "SUPABASE_KEY"];
-for (const key of REQUIRED_ENV) {
+// Supabase is used for settings, bans, admins, and reminders (db.js).
+// It is NOT required for the WhatsApp auth system — that uses MongoDB.
+// Warn if missing but don't crash: the bot will run without Supabase features.
+const OPTIONAL_SUPABASE_VARS = ["SUPABASE_URL", "SUPABASE_KEY"];
+for (const key of OPTIONAL_SUPABASE_VARS) {
   if (!process.env[key]) {
-    console.error(`❌ Missing required environment variable: ${key}`);
-    process.exit(1);
+    console.warn(`⚠️  ${key} is not set — Supabase-backed features (settings, bans, admins) will be unavailable.`);
   }
 }
 

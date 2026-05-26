@@ -27,6 +27,16 @@ import { useMongoAuthState } from './useMongoAuthState.js';
 import { ensureMongoIndexes }  from './mongoSetup.js';
 import { botConfig }           from '../config.js';
 
+// Required credential fields for a fully-provisioned session.
+// Missing ANY of these means the session is corrupt and must be wiped.
+const REQUIRED_CRED_FIELDS = [
+  'noiseKey',
+  'signedIdentityKey',
+  'registrationId',
+  'signedPreKey',
+  'me',
+];
+
 // ─── MongoDB connection (singleton) ───────────────────────────────────────────
 
 let _client = null;
@@ -64,7 +74,7 @@ async function getDb() {
 
 let _authInstance = null;
 
-function getSessionId() {
+function _getSessionIdPrivate() {
   const id = botConfig.BOT_NUMBER || process.env.BOT_NUMBER;
   if (!id) {
     throw new Error(
@@ -85,7 +95,7 @@ export async function getAuthState() {
   if (_authInstance) return _authInstance;
 
   const db        = await getDb();
-  const sessionId = getSessionId();
+  const sessionId = _getSessionIdPrivate();
 
   const collectionName = process.env.MONGO_COLLECTION  || 'auth';
   // Decreased flush interval to 10ms to prevent session loss on abrupt kills
@@ -101,17 +111,26 @@ export async function getAuthState() {
     collection: collectionName,
   });
 
-  // Integrity check: if creds exist but are missing critical keys, self-heal by wiping session
+  // Integrity check: if creds exist but are missing any critical field,
+  // self-heal by wiping the session so a fresh QR scan is triggered.
+  // Checking all REQUIRED_CRED_FIELDS prevents partial sessions that would
+  // connect but immediately throw Bad MAC / cryptographic errors.
   const { creds } = _authInstance.state;
-  if (creds && Object.keys(creds).length > 0 && (!creds.noiseKey || !creds.signedIdentityKey)) {
-    console.warn(`[MongoAuth] Session '${sessionId}' is incomplete or corrupted (noiseKey or signedIdentityKey missing). Self-healing: clearing session.`);
-    await clearSession();
-    // Re-initialize with a fresh state
-    _authInstance = await useMongoAuthState(db, sessionId, {
-      flushIntervalMs,
-      maxDirtyKeys,
-      collection: collectionName,
-    });
+  if (creds && Object.keys(creds).length > 0) {
+    const missingFields = REQUIRED_CRED_FIELDS.filter((f) => !creds[f]);
+    if (missingFields.length > 0) {
+      console.warn(
+        `[MongoAuth] Session '${sessionId}' is incomplete (missing: ${missingFields.join(', ')}). ` +
+        `Self-healing: clearing session.`
+      );
+      await clearSession();
+      // Re-initialize with a fresh state
+      _authInstance = await useMongoAuthState(db, sessionId, {
+        flushIntervalMs,
+        maxDirtyKeys,
+        collection: collectionName,
+      });
+    }
   }
 
   if (!creds?.noiseKey) {
@@ -135,6 +154,27 @@ export async function drainPendingDbWrites() {
 export { drainPendingDbWrites as drainPendingDbWritesMongo };
 
 /**
+ * Purge a single corrupt Signal key from L1, WAL, and MongoDB.
+ * Called by badMacInterceptor when a Bad MAC decryption error occurs.
+ * This prevents the same corrupt key from causing repeated errors.
+ *
+ * @param {string} type - Baileys key type (e.g. 'session', 'pre-key')
+ * @param {string} id   - Key ID within that type
+ */
+export async function purgeCorruptKey(type, id) {
+  if (!_authInstance) return;
+  await _authInstance.purgeCorruptKey(type, id);
+}
+
+/**
+ * Returns the active session ID (BOT_NUMBER).
+ * Exposed so badMacInterceptor can include it in log messages.
+ */
+export function getSessionId() {
+  return botConfig.BOT_NUMBER || process.env.BOT_NUMBER || 'unknown';
+}
+
+/**
  * Clear the entire session from L1 and MongoDB.
  * Only call this on 401 loggedOut — NEVER on 500 badSession.
  */
@@ -145,7 +185,7 @@ export async function clearSession() {
   } else {
     // No in-memory instance — wipe MongoDB directly
     const db        = await getDb();
-    const sessionId = getSessionId();
+    const sessionId = _getSessionIdPrivate();
     const col = db.collection(process.env.MONGO_COLLECTION || 'auth');
     await col.deleteMany({ _id: { $regex: `^${sessionId}:` } });
     console.log(`[MongoAuth] Session '${sessionId}' cleared from MongoDB.`);

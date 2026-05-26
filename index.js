@@ -13,7 +13,10 @@ import {
   getAuthState,
   drainPendingDbWrites,
   closeMongoConnection,
+  purgeCorruptKey,
+  getSessionId,
 } from "./src/auth/mongoSession.js";
+import { installBadMacInterceptor } from "./src/auth/badMacInterceptor.js";
 import { handleMessage, startReminderPoller, extractText } from "./src/handler.js";
 import { loadWordFilter }   from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
@@ -33,6 +36,10 @@ import { updateYtDlp } from "./src/downloader.js";
 const logger = pino({ level: "silent" });
 
 startServer();
+
+// Install Bad MAC interceptor immediately — before any socket is created.
+// This ensures even the very first connection's decryption errors are caught.
+installBadMacInterceptor(purgeCorruptKey, getSessionId);
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -106,6 +113,14 @@ process.on("uncaughtException", (err) => {
 });
 
 process.on("unhandledRejection", (reason) => {
+  // Bad MAC and MessageCounterError are handled by installBadMacInterceptor.
+  // Skip them here to avoid duplicate logging.
+  if (reason instanceof Error) {
+    const msg = reason.message ?? '';
+    if (msg.includes('Bad MAC') || msg.includes('Key used already') || reason.name === 'MessageCounterError') {
+      return;
+    }
+  }
   console.error("Unhandled Rejection:", reason);
 });
 
