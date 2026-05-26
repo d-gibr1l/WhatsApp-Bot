@@ -15,27 +15,16 @@
  * @param {string} [collectionName='auth']
  * @param {number} [ttlDays=90]  — set to 0 to disable TTL
  */
-export async function ensureMongoIndexes(db, collectionName = 'auth', ttlDays = 90) {
+export async function ensureMongoIndexes(db, collectionName = 'auth', ttlDays = 0) {
   const col = db.collection(collectionName);
 
   // The _id field is already indexed by MongoDB — no need to create it.
-  // We create a supporting index on updatedAt for the optional TTL.
-
-  const indexes = [
-    // Partial index for session-scoped range scans (bootstrap, clearSession)
-    {
-      key: { _id: 1 },
-      name: 'idx_auth_id',
-      // This is the default primary index — already exists. Listed for clarity.
-    },
-  ];
-
-  if (ttlDays > 0) {
-    indexes.push({
-      key: { updatedAt: 1 },
-      name: 'idx_auth_ttl',
-      expireAfterSeconds: ttlDays * 24 * 60 * 60,
-    });
+  // Proactively drop the old dangerous TTL index idx_auth_ttl if it exists.
+  try {
+    await col.dropIndex('idx_auth_ttl');
+    console.log('[MongoAuth] Dropped dangerous TTL index (idx_auth_ttl) if it existed.');
+  } catch (err) {
+    // Index might not exist or drop failed, which is expected/non-fatal.
   }
 
   try {

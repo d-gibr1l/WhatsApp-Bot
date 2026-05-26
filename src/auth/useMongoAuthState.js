@@ -484,8 +484,12 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
                 writeKeyToL1(cacheKey, raw, ver);
                 enqueueToWAL(cacheKey, raw, ver);
 
-                // Force synchronous flush for ALL keys to prevent session loss on abrupt kills
-                forceSyncFlush = true;
+                // Force synchronous flush for critical session keys to prevent session loss on abrupt kills,
+                // but allow non-critical high-volume keys (e.g. sender-key) to be debounced/batched.
+                const isCriticalKey = ['pre-key', 'session', 'app-state-sync-key'].includes(type);
+                if (isCriticalKey) {
+                  forceSyncFlush = true;
+                }
               }
             }
           }
@@ -493,27 +497,22 @@ export async function useMongoAuthState(db, sessionId, options = {}) {
           // Phase 2: Dispatch deletes to MongoDB.
           //
           // FIX (HIGH-5): Wait for any in-flight WAL flush before deleting.
-          // Without this wait, a concurrent bulkWrite upsert for the same key
-          // could land AFTER our deleteOne, resurrecting the deleted key in
-          // MongoDB. bootstrap() would then reload it as stale session state.
+          // Awaiting ensures deletes complete before keys.set() returns.
           if (deleteKeys.length > 0) {
-            waitForCurrentFlush().then(() => {
-              col.bulkWrite(
+            try {
+              await waitForCurrentFlush();
+              await col.bulkWrite(
                 deleteKeys.map((id) => ({ deleteOne: { filter: { _id: id } } })),
                 { ordered: false }
-              ).catch((err) =>
-                console.error('[MongoAuth] Delete error:', err.message)
               );
-            }).catch((err) =>
-              console.error('[MongoAuth] Delete pre-flush wait error:', err.message)
-            );
+            } catch (err) {
+              console.error('[MongoAuth] Delete error:', err.message);
+            }
           }
 
           // Phase 3: Schedule or force flush.
           //
-          // Modified: Always flush synchronously for ALL writes.
-          // Debouncing any write risks losing the ratchet state on crash, causing the
-          // "Waiting for this message" loop or Bad MAC errors on restart.
+          // Modified: Flush synchronously for critical keys, otherwise schedule debounced flush.
           if (forceSyncFlush) {
             await flushNow();
           } else {

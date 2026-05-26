@@ -101,13 +101,17 @@ export async function getAuthState() {
     collection: collectionName,
   });
 
-  // Integrity check: if creds exist but are missing critical keys, throw
+  // Integrity check: if creds exist but are missing critical keys, self-heal by wiping session
   const { creds } = _authInstance.state;
-  if (creds && (!creds.noiseKey || !creds.signedIdentityKey)) {
-    throw new Error(
-      `Auth state for '${sessionId}' is incomplete — noiseKey or signedIdentityKey missing. ` +
-      'Set FORCE_FRESH_SESSION=true to force a fresh QR scan.'
-    );
+  if (creds && Object.keys(creds).length > 0 && (!creds.noiseKey || !creds.signedIdentityKey)) {
+    console.warn(`[MongoAuth] Session '${sessionId}' is incomplete or corrupted (noiseKey or signedIdentityKey missing). Self-healing: clearing session.`);
+    await clearSession();
+    // Re-initialize with a fresh state
+    _authInstance = await useMongoAuthState(db, sessionId, {
+      flushIntervalMs,
+      maxDirtyKeys,
+      collection: collectionName,
+    });
   }
 
   if (!creds?.noiseKey) {
