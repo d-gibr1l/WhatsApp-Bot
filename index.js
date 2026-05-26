@@ -292,15 +292,22 @@ async function runBot() {
             console.warn(`Disconnected: ${reason} (${statusCode})`);
 
             // ── 440: connectionReplaced ──────────────────────────────────
-            // Another client instance connected with the same session.
-            // Wait 15s to let the other instance stabilise, then exit.
-            // DO NOT clear session — the new instance may be healthy.
+            // Another instance connected with the same session (Koyeb rolling
+            // deploy). WhatsApp only sends this AFTER the new instance is
+            // healthy, so we can shut down immediately — no wait needed.
+            //
+            // The previous 15-second wait was the cause of "two instances
+            // running at the same time": both were advancing the same Signal
+            // ratchet keys for 15s, producing Bad MAC errors on the new
+            // instance. Now we drain the WAL and exit in ~1s.
+            //
+            // DO NOT clear session — the new instance is healthy and owns it.
             if (statusCode === DisconnectReason.connectionReplaced) {
-              console.warn("⚠️  Session replaced by another instance. Exiting in 15s.");
-              await new Promise(r => setTimeout(r, 15_000));
+              console.warn("⚠️  Session replaced by another instance. Shutting down immediately.");
               await shutdown("CONNECTION_REPLACED", 0);
               return;
             }
+
 
             // ── 401: loggedOut ────────────────────────────────────────────
             // WhatsApp explicitly revoked the session (user removed linked
