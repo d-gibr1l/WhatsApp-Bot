@@ -1,9 +1,10 @@
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { promisify } from "util";
 import sharp from "sharp";
+import WebP from "node-webpmux";
 import { setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
@@ -15,30 +16,29 @@ const execAsync = promisify(exec);
 // ─── Sticker metadata ─────────────────────────────────────────────────────────
 
 async function addStickerMetadata(webpBuffer, packName, authorName) {
-  const tmpIn = join(tmpdir(), `smeta_in_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
-  const tmpOut = join(tmpdir(), `smeta_out_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
-  
   try {
-    const metadata = JSON.stringify({
+    const img = new WebP.Image();
+    await img.load(webpBuffer);
+
+    const exifAttr = Buffer.from([
+      0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
+      0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x16, 0x00, 0x00, 0x00
+    ]);
+    const json = {
       "sticker-pack-id": `bot-${Date.now()}`,
       "sticker-pack-name": packName,
       "sticker-pack-publisher": authorName,
-    });
-    
-    // Safely escape single quotes for the bash command
-    const safeMetadata = metadata.replace(/'/g, "'\\''");
+    };
+    const jsonBuffer = Buffer.from(JSON.stringify(json), "utf8");
+    const exif = Buffer.concat([exifAttr, jsonBuffer]);
+    exif.writeUIntLE(jsonBuffer.length, 14, 4);
 
-    await fs.writeFile(tmpIn, webpBuffer);
-    await execAsync(`exiftool -UserComment='${safeMetadata}' -o "${tmpOut}" "${tmpIn}" 2>/dev/null`, { timeout: 10000 });
-    
-    return await fs.readFile(tmpOut);
+    img.exif = exif;
+    return await img.save(null);
   } catch (err) {
-    console.warn("Exiftool metadata injection failed, returning original buffer:", err.message);
+    console.warn("In-memory metadata injection failed, returning original buffer:", err.message);
     return webpBuffer;
-  } finally {
-    // Non-blocking cleanup
-    await fs.unlink(tmpIn).catch(() => {});
-    await fs.unlink(tmpOut).catch(() => {});
   }
 }
 
@@ -78,21 +78,55 @@ async function videoToSticker(inputBuffer, startSec = 0, durationSec = 6) {
   const packName = cachedGetSetting("sticker_pack_name", "Bot Stickers");
   const authorName = cachedGetSetting("sticker_pack_author", "WhatsApp Bot");
 
-  const tmpIn = join(tmpdir(), `sv_in_${Date.now()}_${Math.random().toString(36).substring(7)}.mp4`);
-  const tmpOut = join(tmpdir(), `sv_out_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
-  
-  await fs.writeFile(tmpIn, inputBuffer);
-
   try {
-    await execAsync(
-      `ffmpeg -ss ${startSec} -i "${tmpIn}" -t ${durationSec} -vf "scale=512:512:force_original_aspect_ratio=decrease,fps=15" -vcodec libwebp -lossless 0 -compression_level 6 -q:v 50 -loop 0 -preset picture -an -vsync 0 "${tmpOut}" -y`,
-      { timeout: 60000 }
-    );
-    const webpBuffer = await fs.readFile(tmpOut);
+    const ffmpegArgs = [
+      "-ss", startSec.toString(),
+      "-i", "pipe:0",
+      "-t", durationSec.toString(),
+      "-vf", "scale=512:512:force_original_aspect_ratio=decrease,fps=15",
+      "-vcodec", "libwebp",
+      "-lossless", "0",
+      "-compression_level", "3",
+      "-q:v", "50",
+      "-loop", "0",
+      "-preset", "picture",
+      "-an",
+      "-vsync", "0",
+      "-f", "webp",
+      "pipe:1"
+    ];
+
+    const webpBuffer = await new Promise((resolve, reject) => {
+      const ffmpeg = spawn("ffmpeg", ffmpegArgs);
+      const stdoutChunks = [];
+      const stderrChunks = [];
+
+      ffmpeg.stdout.on("data", (chunk) => stdoutChunks.push(chunk));
+      ffmpeg.stderr.on("data", (chunk) => stderrChunks.push(chunk));
+
+      ffmpeg.on("close", (code) => {
+        if (code === 0) {
+          resolve(Buffer.concat(stdoutChunks));
+        } else {
+          const stderrStr = Buffer.concat(stderrChunks).toString();
+          reject(new Error(`FFmpeg exited with code ${code}: ${stderrStr}`));
+        }
+      });
+
+      ffmpeg.on("error", (err) => reject(err));
+
+      ffmpeg.stdin.on("error", (err) => {
+        console.warn("FFmpeg stdin pipe error:", err.message);
+      });
+
+      ffmpeg.stdin.write(inputBuffer);
+      ffmpeg.stdin.end();
+    });
+
     return await addStickerMetadata(webpBuffer, packName, authorName);
-  } finally {
-    await fs.unlink(tmpIn).catch(() => {});
-    await fs.unlink(tmpOut).catch(() => {});
+  } catch (err) {
+    console.error("❌ FFmpeg stream conversion failed:", err.message);
+    throw err;
   }
 }
 
@@ -103,13 +137,28 @@ async function urlToSticker(url, startSec = 0, durationSec = 6) {
   const ytDlpPath = getYtDlpPath();
 
   try {
-    await execAsync(
-      `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} -o "${tmpVid}" "${url}"`,
-      { timeout: 120000 }
-    );
-
-    const buffer = await fs.readFile(tmpVid);
-    return await videoToSticker(buffer, startSec, durationSec);
+    const endSec = startSec + durationSec;
+    try {
+      // Attempt range download of specific section to save bandwidth/time
+      await execAsync(
+        `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} --download-sections "*${startSec}-${endSec}" -o "${tmpVid}" "${url}"`,
+        { timeout: 120000 }
+      );
+      const buffer = await fs.readFile(tmpVid);
+      // Since yt-dlp sliced the video, the resulting mp4 begins at 0s.
+      return await videoToSticker(buffer, 0, durationSec);
+    } catch (err) {
+      console.warn("⚠️ yt-dlp section download failed, falling back to full download:", err.message);
+      // Clean up failed temp file if it exists
+      await fs.unlink(tmpVid).catch(() => {});
+      // Fallback: download whole video
+      await execAsync(
+        `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} -o "${tmpVid}" "${url}"`,
+        { timeout: 120000 }
+      );
+      const buffer = await fs.readFile(tmpVid);
+      return await videoToSticker(buffer, startSec, durationSec);
+    }
   } finally {
     await fs.unlink(tmpVid).catch(() => {});
     if (cookiePath) {
