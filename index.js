@@ -309,18 +309,24 @@ async function runBot() {
             }
 
 
-            // ── 401: loggedOut ────────────────────────────────────────────
-            // WhatsApp explicitly revoked the session (user removed linked
-            // device from their phone, or account was banned).
-            // This is the ONLY code that should trigger a session wipe.
-            if (statusCode === DisconnectReason.loggedOut) {
-              console.error("🚪 Logged out by WhatsApp. Wiping session for fresh QR.");
+            // ── Fatal & Unrecoverable Disconnect Codes (401, 403, 405, 409, 412) ──
+            // These indicate unrecoverable session degradation, server-side revoking,
+            // or permanent key out-of-sync states. Trigger session wipe for fresh QR.
+            const fatalCodes = [
+              DisconnectReason.loggedOut, // 401
+              403,                        // Forbidden (e.g. banned/device revoked)
+              405,                        // Method Not Allowed
+              409,                        // Conflict / State mismatch
+              412                         // Precondition Failed (device out of sync)
+            ];
+            if (fatalCodes.includes(statusCode)) {
+              console.error(`🚪 Unrecoverable disconnect code received: ${reason} (${statusCode}). Wiping session for fresh QR.`);
               try { await clearSession(); } catch (err) {
                 console.error("clearSession failed:", err.message);
               } finally {
                 botReady = false;
                 if (stopPoller) { stopPoller(); stopPoller = null; }
-                await shutdown("LOGGED_OUT", 0);
+                await shutdown("FATAL_DISCONNECT", 0);
               }
               return;
             }
