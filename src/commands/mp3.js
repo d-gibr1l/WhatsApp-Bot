@@ -16,7 +16,7 @@ async function extractFromUrl(url, outPath) {
   let title = "audio";
   try {
     const info = execSync(
-      `"${ytDlpPath}" --dump-json --no-playlist ${cookiesFlag} "${url}"`,
+      `"${ytDlpPath}" --dump-json --no-playlist ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" "${url}"`,
       { timeout: 30000, encoding: "utf8" }
     );
     title = JSON.parse(info).title ?? "audio";
@@ -24,7 +24,7 @@ async function extractFromUrl(url, outPath) {
 
   try {
     execSync(
-      `"${ytDlpPath}" -x --audio-format mp3 --audio-quality 0 ${cookiesFlag} -o "${outPath}" "${url}"`,
+      `"${ytDlpPath}" -x --audio-format mp3 --audio-quality 0 ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${outPath}" "${url}"`,
       { timeout: 120000 }
     );
   } finally {

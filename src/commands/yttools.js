@@ -37,7 +37,7 @@ async function getYtDlpInfo(url) {
 
   try {
     const json = execSync(
-      `"${ytDlpPath}" --dump-json --no-playlist ${cookiesFlag} "${url}"`,
+      `"${ytDlpPath}" --dump-json --no-playlist ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" "${url}"`,
       { timeout: 30000, encoding: "utf8" }
     );
     return JSON.parse(json);
@@ -156,7 +156,7 @@ export const ytToolsCommands = {
         let subFile = null;
         try {
           execSync(
-            `"${ytDlpPath}" --write-subs --sub-lang ${lang} --skip-download --convert-subs srt ${cookiesFlag} -o "${tmpBase}" "${url}"`,
+            `"${ytDlpPath}" --write-subs --sub-lang ${lang} --skip-download --convert-subs srt ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${tmpBase}" "${url}"`,
             { timeout: 30000 }
           );
           subFile = `${tmpBase}.${lang}.srt`;
@@ -165,7 +165,7 @@ export const ytToolsCommands = {
 
         if (!subFile) {
           execSync(
-            `"${ytDlpPath}" --write-auto-subs --sub-lang ${lang} --skip-download --convert-subs srt ${cookiesFlag} -o "${tmpBase}" "${url}"`,
+            `"${ytDlpPath}" --write-auto-subs --sub-lang ${lang} --skip-download --convert-subs srt ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${tmpBase}" "${url}"`,
             { timeout: 30000 }
           );
           subFile = `${tmpBase}.${lang}.srt`;
@@ -261,7 +261,7 @@ export const ytToolsCommands = {
       try {
         // Download video
         execSync(
-          `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} -o "${tmpVid}" "${url}"`,
+          `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${tmpVid}" "${url}"`,
           { timeout: 120000 }
         );
 

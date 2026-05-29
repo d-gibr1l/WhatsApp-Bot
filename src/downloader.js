@@ -92,7 +92,12 @@ export async function getMediaInfo(url) {
   if (!platform) throw new Error("Unsupported platform.");
 
   const cookiePath = await getCookiesPath();
-  const args = [url, "--dump-json", "--no-playlist"];
+  const args = [
+    url,
+    "--dump-json",
+    "--no-playlist",
+    "--extractor-args", "youtube:player_client=android_vr,web_embedded;skip=dash,hls"
+  ];
   if (cookiePath) args.push("--cookies", cookiePath);
 
   return new Promise((resolve, reject) => {
@@ -132,6 +137,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     "--user-agent", userAgent,
     "--no-playlist",
     "--no-warnings",
+    "--extractor-args", "youtube:player_client=android_vr,web_embedded;skip=dash,hls",
     "--print", "after_move:filepath",
   ];
 
