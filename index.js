@@ -392,11 +392,11 @@ async function runBot() {
         const startTime = Date.now();
         const recentlyRevoked = new LRUCache({ max: 500, ttl: 5000 });
 
-        async function safeHandleDelete(sock, key) {
+        async function safeHandleDelete(sock, key, deleterJid = null) {
           const id = key?.id;
           if (!id || recentlyRevoked.has(id)) return;
           recentlyRevoked.set(id, true);
-          await handleAntiDelete(sock, key);
+          await handleAntiDelete(sock, key, deleterJid);
         }
 
         sock.ev.on("messages.upsert", async ({ messages, type }) => {
@@ -412,7 +412,8 @@ async function runBot() {
             const protoMsg = msg.message?.protocolMessage;
             if (protoMsg?.type === 0 && protoMsg?.key) {
               try {
-                await safeHandleDelete(sock, protoMsg.key);
+                const deleterJid = msg.key.participant || msg.key.remoteJid;
+                await safeHandleDelete(sock, protoMsg.key, deleterJid);
               } catch (err) {
                 console.error("Anti-delete (revoke) error:", err.message);
               }

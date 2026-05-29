@@ -1,11 +1,8 @@
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
-import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "../config.js";
+import { botConfig } from "../config.js";
 import { setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
 import { replyMsg } from "./helpers.js";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── In-memory message store (last 500 messages per chat) ────────────────────
 
@@ -63,7 +60,24 @@ async function getCachedGroupMeta(sock, chatId) {
 
 // ─── Handle delete event ──────────────────────────────────────────────────────
 
-export async function handleAntiDelete(sock, deletedKey) {
+const getDisplayName = async (sock, chatId, jid, pushName = null) => {
+  const number = jid.split("@")[0];
+  let name = pushName;
+  if (!name && chatId.endsWith("@g.us")) {
+    const meta = await getCachedGroupMeta(sock, chatId);
+    const participant = meta?.participants?.find(p => p.id === jid);
+    name = participant?.notify || participant?.name || null;
+  }
+  return name ? `${name} (+${number})` : `+${number}`;
+};
+
+const getMentions = (m) => {
+  const content = m?.ephemeralMessage?.message || m?.viewOnceMessage?.message || m?.viewOnceMessageV2?.message || m;
+  const msgData = content?.extendedTextMessage || content?.imageMessage || content?.videoMessage || content?.audioMessage || content?.documentMessage;
+  return msgData?.contextInfo?.mentionedJid || [];
+};
+
+export async function handleAntiDelete(sock, deletedKey, deleterJid = null) {
   const active = cachedGetSetting("antidelete_active", "false");
   if (active !== "true") return;
 
@@ -80,26 +94,28 @@ export async function handleAntiDelete(sock, deletedKey) {
   // Remove immediately — prevents duplicate reveals if the event fires twice
   chatMap.delete(messageId);
 
-  const senderNumber = (stored.sender ?? "").split("@")[0];
-  const timeStr      = new Date(stored.timestamp).toLocaleTimeString();
+  const timeStr = new Date(stored.timestamp).toLocaleTimeString();
 
-  // ── Display name resolution ───────────────────────────────────────────────
-  // Priority: pushName (stored at message-receive time, free) →
-  //           cached group metadata (5-min TTL, one network call) →
-  //           phone number fallback
-  let senderName = stored.pushName || null;
-  if (!senderName && chatId.endsWith("@g.us")) {
-    // Uses the 5-min cache — no live network call if metadata was fetched recently
-    const meta = await getCachedGroupMeta(sock, chatId);
-    const participant = meta?.participants?.find(p => p.id === stored.sender);
-    senderName = participant?.notify || participant?.name || null;
+  // ── Display name & Admin deleter resolution ────────────────────────────────
+  const originalSenderDisplayName = await getDisplayName(sock, chatId, stored.sender, stored.pushName);
+  
+  let deleterDisplayName = null;
+  const isSender = !deleterJid || deleterJid === stored.sender;
+  if (!isSender) {
+    deleterDisplayName = await getDisplayName(sock, chatId, deleterJid);
   }
-  const displayName = senderName ? `${senderName} (+${senderNumber})` : `+${senderNumber}`;
+
+  let headerText = `👤 *From:* ${originalSenderDisplayName}`;
+  if (deleterDisplayName) {
+    headerText += `\n🗑️ *Deleted by:* ${deleterDisplayName}`;
+  }
 
   const antideleteDest = cachedGetSetting("antidelete_dest", "chat");
   const dest = antideleteDest === "dm"
     ? `${botConfig.BOT_NUMBER}@s.whatsapp.net`
     : chatId;
+
+  const mentions = getMentions(stored.msg.message);
 
   try {
     if (stored.text) {
@@ -107,9 +123,10 @@ export async function handleAntiDelete(sock, deletedKey) {
       await sock.sendMessage(dest, {
         text:
           `🗑️ *Deleted Message Detected*\n\n` +
-          `👤 *From:* ${displayName}\n` +
+          `${headerText}\n` +
           `🕐 *Time:* ${timeStr}\n` +
           `💬 *Message:* ${stored.text}`,
+        mentions,
       });
       return;
     }
@@ -117,8 +134,7 @@ export async function handleAntiDelete(sock, deletedKey) {
     // ── Media message ─────────────────────────────────────────────────────
     // Send a "message deleted" placeholder immediately so the user sees
     // something right away, then download and re-send the media in the background.
-    // This is what makes reveals feel instant even for large videos.
-    const caption = `🗑️ *Deleted media from ${displayName} at ${timeStr}*`;
+    const caption = `🗑️ *Deleted media from ${originalSenderDisplayName} at ${timeStr}*` + (deleterDisplayName ? ` (deleted by ${deleterDisplayName})` : "");
     const mediaMsg = stored.msg.message;
     const isImage    = !!mediaMsg?.imageMessage;
     const isVideo    = !!mediaMsg?.videoMessage;
@@ -130,6 +146,7 @@ export async function handleAntiDelete(sock, deletedKey) {
     // Placeholder lands in chat immediately (<100ms)
     await sock.sendMessage(dest, {
       text: `${caption}\n_Downloading media..._`,
+      mentions,
     });
 
     // Download and re-send asynchronously — does not block the event loop
@@ -142,14 +159,16 @@ export async function handleAntiDelete(sock, deletedKey) {
         } else if (isViewOnce) {
           const voMsg = mediaMsg?.viewOnceMessage?.message ?? mediaMsg?.viewOnceMessageV2?.message;
           if (voMsg?.imageMessage) {
-            await sock.sendMessage(dest, { image: buffer, caption: caption + " *(view-once)*" });
-          } else {
-            await sock.sendMessage(dest, { video: buffer, caption: caption + " *(view-once)*" });
+            await sock.sendMessage(dest, { image: buffer, caption: caption + " *(view-once)*", mentions });
+          } else if (voMsg?.videoMessage) {
+            await sock.sendMessage(dest, { video: buffer, caption: caption + " *(view-once)*", mentions });
+          } else if (voMsg?.audioMessage) {
+            await sock.sendMessage(dest, { audio: buffer, mimetype: "audio/ogg; codecs=opus", ptt: true });
           }
         } else if (isImage) {
-          await sock.sendMessage(dest, { image: buffer, caption });
+          await sock.sendMessage(dest, { image: buffer, caption, mentions });
         } else if (isVideo) {
-          await sock.sendMessage(dest, { video: buffer, caption });
+          await sock.sendMessage(dest, { video: buffer, caption, mentions });
         } else if (isAudio) {
           await sock.sendMessage(dest, { audio: buffer, mimetype: "audio/mpeg" });
         } else if (isDoc) {
@@ -158,11 +177,14 @@ export async function handleAntiDelete(sock, deletedKey) {
             mimetype: mediaMsg.documentMessage.mimetype,
             fileName: mediaMsg.documentMessage.fileName ?? "file",
             caption,
+            mentions,
           });
         }
-      } catch {
+      } catch (err) {
+        console.error("❌ Failed to download and send media for anti-delete:", err.message);
         await sock.sendMessage(dest, {
           text: `${caption} *(media could not be retrieved)*`,
+          mentions,
         }).catch(() => {});
       }
     })();
