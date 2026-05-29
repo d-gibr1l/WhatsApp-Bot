@@ -12,10 +12,10 @@ import {
   clearSession,
   getAuthState,
   drainPendingDbWrites,
-  closeMongoConnection,
+  closeRedisConnection,
   purgeCorruptKey,
   getSessionId,
-} from "./src/auth/mongoSession.js";
+} from "./src/auth/redisSession.js";
 import { installBadMacInterceptor } from "./src/auth/badMacInterceptor.js";
 import { handleMessage, startReminderPoller, extractText } from "./src/handler.js";
 import { loadWordFilter }   from "./src/commands/wordfilter.js";
@@ -93,11 +93,11 @@ async function shutdown(signal, exitCode = 0) {
     console.error("⚠️  Final WAL flush failed:", err.message);
   }
 
-  // Close the MongoDB connection pool cleanly
+  // Close the Redis connection cleanly
   try {
-    await closeMongoConnection();
+    await closeRedisConnection();
   } catch (err) {
-    console.error("⚠️  MongoDB close failed:", err.message);
+    console.error("⚠️  Redis close failed:", err.message);
   }
 
   process.exit(exitCode);

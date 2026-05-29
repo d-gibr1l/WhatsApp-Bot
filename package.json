@@ -14,6 +14,7 @@
     "async-mutex": "^0.5.0",
     "dotenv": "^16.0.0",
     "express": "^5.2.1",
+    "ioredis": "^5.11.0",
     "lru-cache": "^11.0.0",
     "mongodb": "^6.8.0",
     "node-webpmux": "^1.1.0",
