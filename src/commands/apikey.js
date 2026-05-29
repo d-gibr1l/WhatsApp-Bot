@@ -30,15 +30,70 @@ export const apikeyCommands = {
   checkapikey: {
     adminOnly: true,
     requiresArgs: false,
-    description: "Check if the RapidAPI key is set",
+    description: "Check and test the RapidAPI key against the media APIs",
     handler: async (sock, msg, _args, from, prefix) => {
       const key = cachedGetSetting("rapidapi_key", null);
       if (!key || key.trim() === "") {
-        await replyMsg(sock, from, msg, `❌ No RapidAPI key set.\n\n📌 Use *${prefix}setapikey <key>* to set one.`);
-      } else {
-        const masked = `${key.slice(0, 4)}${"*".repeat(key.length - 8)}${key.slice(-4)}`;
-        await replyMsg(sock, from, msg, `✅ RapidAPI key is set.\n🔑 Key: ${masked}`);
+        return replyMsg(sock, from, msg, `❌ No RapidAPI key set.\n\n📌 Use *${prefix}setapikey <key>* to set one.`);
       }
+
+      const masked = `${key.slice(0, 4)}${"*".repeat(key.length - 8)}${key.slice(-4)}`;
+      await replyMsg(sock, from, msg, `🔑 RapidAPI key is configured: *${masked}*\n\n🔄 Running live connection diagnostics...`);
+
+      const testUrl = "https://www.tiktok.com/@tiktok/video/7106839352654318854";
+      let ttStatus = "Testing...";
+      let smvdStatus = "Testing...";
+
+      try {
+        const ttRes = await fetch(
+          `https://tiktok-video-no-watermark2.p.rapidapi.com/?url=${encodeURIComponent(testUrl)}&hd=1`,
+          {
+            headers: {
+              "x-rapidapi-host": "tiktok-video-no-watermark2.p.rapidapi.com",
+              "x-rapidapi-key": key,
+            },
+          }
+        );
+        if (ttRes.ok) {
+          const ttData = await ttRes.json();
+          ttStatus = ttData.code === 0 ? "🟢 Active & Working" : `🔴 API Error (code ${ttData.code}): ${ttData.msg || "Unknown error"}`;
+        } else {
+          ttStatus = `🔴 HTTP Error ${ttRes.status} (${ttRes.statusText})`;
+        }
+      } catch (err) {
+        ttStatus = `🔴 Connection Failed: ${err.message}`;
+      }
+
+      try {
+        const smvdRes = await fetch(
+          `https://social-media-video-downloader.p.rapidapi.com/smvd/get/all?url=${encodeURIComponent(testUrl)}`,
+          {
+            headers: {
+              "x-rapidapi-host": "social-media-video-downloader.p.rapidapi.com",
+              "x-rapidapi-key": key,
+            },
+          }
+        );
+        if (smvdRes.ok) {
+          const smvdData = await smvdRes.json();
+          smvdStatus = smvdData.success ? "🟢 Active & Working" : `🔴 API Error: ${smvdData.message || "Failed request"}`;
+        } else {
+          smvdStatus = `🔴 HTTP Error ${smvdRes.status} (${smvdRes.statusText})`;
+        }
+      } catch (err) {
+        smvdStatus = `🔴 Connection Failed: ${err.message}`;
+      }
+
+      await replyMsg(
+        sock,
+        from,
+        msg,
+        `📊 *RapidAPI Connection Diagnostics*\n\n` +
+          `🔑 *Key:* ${masked}\n\n` +
+          `🎵 *TikTok Downloader API:*\n${ttStatus}\n\n` +
+          `🎥 *Generic SMVD Downloader API:*\n${smvdStatus}\n\n` +
+          `💡 _If you get HTTP 403 or 401, verify that your key is active and subscribed to these specific APIs on RapidAPI._`
+      );
     },
   },
 
