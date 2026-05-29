@@ -66,10 +66,10 @@ export const apikeyCommands = {
 
       try {
         const smvdRes = await fetch(
-          `https://social-media-video-downloader.p.rapidapi.com/smvd/get/all?url=${encodeURIComponent(testUrl)}`,
+          `https://all-social-media-video-downloader.p.rapidapi.com/smvd/get/all?url=${encodeURIComponent(testUrl)}`,
           {
             headers: {
-              "x-rapidapi-host": "social-media-video-downloader.p.rapidapi.com",
+              "x-rapidapi-host": "all-social-media-video-downloader.p.rapidapi.com",
               "x-rapidapi-key": key,
             },
           }

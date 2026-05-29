@@ -244,8 +244,8 @@ async function getTikTokMediaApi(url, apiKey) {
 
 async function getGenericMediaApi(url, platform, apiKey) {
   const res = await fetch(
-    `https://social-media-video-downloader.p.rapidapi.com/smvd/get/all?url=${encodeURIComponent(url)}`,
-    { headers: { "x-rapidapi-host": "social-media-video-downloader.p.rapidapi.com", "x-rapidapi-key": apiKey } }
+    `https://all-social-media-video-downloader.p.rapidapi.com/smvd/get/all?url=${encodeURIComponent(url)}`,
+    { headers: { "x-rapidapi-host": "all-social-media-video-downloader.p.rapidapi.com", "x-rapidapi-key": apiKey } }
   );
   if (!res.ok) throw new Error(`${platform} API error: ${res.status}`);
   const data = await res.json();
