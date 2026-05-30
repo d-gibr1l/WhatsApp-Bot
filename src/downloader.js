@@ -310,6 +310,7 @@ export async function searchImages(query, count = 3) {
       .filter(url =>
         url &&
         url.startsWith("http") &&
+        url.includes("pinimg.com") &&
         !url.endsWith(".svg") &&
         !url.endsWith(".gif") &&
         !url.includes("logo") &&
