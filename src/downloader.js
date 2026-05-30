@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
 import { getSetting } from "./db.js";
 import { heavyQueue } from "./queue.js";
+import googlethis from "googlethis";
 
 // ─── yt-dlp Path & Auto-Updater ──────────────────────────────────────────────
 
@@ -298,31 +299,34 @@ export async function downloadToBuffer(url) {
 const IMAGE_SEARCH_TIMEOUT = 15_000;
 const IMAGE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-// Search Bing images and return direct image URLs
+// Search Google images and return direct image URLs (specifically optimized for Pinterest)
 export async function searchImages(query, count = 3) {
-  const params = new URLSearchParams({ q: query, form: "HDRSC2" });
-  
-  const res = await fetch(`https://www.bing.com/images/search?${params}`, {
-    headers: { "User-Agent": IMAGE_USER_AGENT },
-    signal: AbortSignal.timeout(IMAGE_SEARCH_TIMEOUT),
-  });
-
-  if (!res.ok) throw new Error(`Bing image search failed: ${res.status}`);
-
-  const html = await res.text();
-  const results = [...html.matchAll(/murl&quot;:&quot;(.*?)&quot;/g)].map(m => m[1]);
-
-  // Return direct image URLs — filter out SVGs, tiny icons, and non-http
-  return results
-    .filter(url =>
-      url &&
-      url.startsWith("http") &&
-      !url.endsWith(".svg") &&
-      !url.endsWith(".gif") &&
-      !url.includes("logo") &&
-      !url.includes("icon")
-    )
-    .slice(0, count);
+  try {
+    const images = await googlethis.image(query, { safe: false });
+    
+    // Return direct image URLs — filter out SVGs, tiny icons, and non-http
+    const results = images
+      .map(img => img.url)
+      .filter(url =>
+        url &&
+        url.startsWith("http") &&
+        !url.endsWith(".svg") &&
+        !url.endsWith(".gif") &&
+        !url.includes("logo") &&
+        !url.includes("icon")
+      )
+      .map(url => {
+        // Upgrade Pinterest thumbnails to high-res versions
+        if (url.includes("i.pinimg.com") && /\/\d+x\//.test(url)) {
+          return url.replace(/\/\d+x\//, "/736x/");
+        }
+        return url;
+      });
+      
+    return results.slice(0, count);
+  } catch (err) {
+    throw new Error(`Google image search failed: ${err.message}`);
+  }
 }
 
 // Download a single image URL to a buffer
