@@ -374,3 +374,26 @@ export async function downloadImageUrl(url) {
 
   return { buffer, contentType };
 }
+
+// ─── GIF Search (Tenor API) ───────────────────────────────────────────────────
+
+export async function searchGifs(query, limit = 5) {
+  try {
+    const url = `https://g.tenor.com/v1/search?q=${encodeURIComponent(query)}&key=LIVDSRZULELA&limit=${limit}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Tenor API error: ${res.status}`);
+    const data = await res.json();
+    
+    if (!data.results || data.results.length === 0) return [];
+    
+    // Extract mp4 URL for better WhatsApp compatibility (smaller, auto-plays as gif)
+    // or fallback to actual gif url
+    return data.results.map(r => {
+      const media = r.media[0];
+      return media.mp4 ? media.mp4.url : media.gif.url;
+    });
+  } catch (err) {
+    console.error("Tenor API Error:", err.message);
+    return [];
+  }
+}
