@@ -45,8 +45,7 @@ export const imageCommands = {
       // Fix: Append 'site:pinterest.com' to force all images to come from Pinterest.
       let imageUrls;
       try {
-        const pagedQuery = `${query} site:pinterest.com`;
-        imageUrls = await searchImages(pagedQuery, count + 4);
+        imageUrls = await searchImages(query, count + 4);
       } catch (err) {
         console.error(`Image search failed for "${query}":`, err.message);
         return replyMsg(sock, from, msg,

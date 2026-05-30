@@ -5,7 +5,6 @@ import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
 import { getSetting } from "./db.js";
 import { heavyQueue } from "./queue.js";
-import googlethis from "googlethis";
 
 // ─── yt-dlp Path & Auto-Updater ──────────────────────────────────────────────
 
@@ -299,34 +298,56 @@ export async function downloadToBuffer(url) {
 const IMAGE_SEARCH_TIMEOUT = 15_000;
 const IMAGE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-// Search Google images and return direct image URLs (specifically optimized for Pinterest)
+// Search Pinterest directly using their hidden JSON API
 export async function searchImages(query, count = 3) {
   try {
-    const images = await googlethis.image(query, { safe: false });
-    
-    // Return direct image URLs — filter out SVGs, tiny icons, and non-http
-    const results = images
-      .map(img => img.url)
-      .filter(url =>
-        url &&
-        url.startsWith("http") &&
-        url.includes("pinimg.com") &&
-        !url.endsWith(".svg") &&
-        !url.endsWith(".gif") &&
-        !url.includes("logo") &&
-        !url.includes("icon")
-      )
-      .map(url => {
-        // Upgrade Pinterest thumbnails to high-res versions
-        if (url.includes("i.pinimg.com") && /\/\d+x\//.test(url)) {
-          return url.replace(/\/\d+x\//, "/736x/");
-        }
-        return url;
-      });
-      
-    return results.slice(0, count);
+    // We first need a guest cookie to use the Pinterest API
+    const homeRes = await fetch("https://www.pinterest.com/");
+    const cookies = homeRes.headers.get("set-cookie") || "";
+
+    const endpoint = "https://www.pinterest.com/resource/BaseSearchResource/get/";
+    const options = {
+      appliedProductFilters: "---",
+      auto_correction_disabled: false,
+      bookmarks: [""],
+      page_size: count + 5, // fetch a few extra in case some don't have orig URLs
+      query: query,
+      redux_normalize_feed: true,
+      rs: "typed",
+      scope: "pins",
+      source_url: `/search/pins/?q=${encodeURIComponent(query)}&rs=typed`,
+    };
+
+    const urlQuery = new URLSearchParams({
+      source_url: options.source_url,
+      data: JSON.stringify({ options, context: {} }),
+      _: Date.now()
+    }).toString();
+
+    const res = await fetch(`${endpoint}?${urlQuery}`, {
+      headers: {
+        "User-Agent": IMAGE_USER_AGENT,
+        "x-pinterest-pws-handler": "www/search/pins/?q=[q]&rs=[rs].js",
+        "Cookie": cookies
+      },
+      signal: AbortSignal.timeout(IMAGE_SEARCH_TIMEOUT),
+    });
+
+    if (!res.ok) throw new Error(`Pinterest search failed: ${res.status}`);
+
+    const data = await res.json();
+    if (data.resource_response?.error) {
+      throw new Error(`Pinterest API error: ${data.resource_response.error.message}`);
+    }
+
+    const results = data.resource_response?.data?.results || [];
+    const imageUrls = results
+      .map(pin => pin.images?.orig?.url || pin.images?.originals?.url)
+      .filter(url => url && url.startsWith("http"));
+
+    return imageUrls.slice(0, count);
   } catch (err) {
-    throw new Error(`Google image search failed: ${err.message}`);
+    throw new Error(`Pinterest search failed: ${err.message}`);
   }
 }
 
