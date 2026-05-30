@@ -44,62 +44,112 @@ export const generalCommands = {
       const p = prefix;
       const adminUser = isAdmin(msg);
 
-      const { commands } = await import("./registry.js");
-
       const menu = [
-        `╭━━━━━━━━━━━━━━━━━━━━━━╮`,
-        `┃   🤖 *BOT COMMAND MENU*   ┃`,
-        `╰━━━━━━━━━━━━━━━━━━━━━━╯`,
+        `┌────────────────────────┐`,
+        `   🤖  *SYSTEM COMMAND DASHBOARD*`,
+        `└─────────────────────────`,
         ``,
+        `🌐  [ PUBLIC UTILITIES ]`,
+        `──────────────────────────`,
+        ` ⌗ *AI & Audio* ➔ `,
+        `      ${p}ai | ${p}aiimage | ${p}aisticker | ${p}voice | ${p}tts`,
+        ` ⌗ *Media DL* ➔ `,
+        `      ${p}dl | ${p}dlapi | ${p}mp3 | ${p}gif | ${p}image | ${p}sub`,
+        ` ⌗ *Stickers* ➔ `,
+        `      ${p}sticker | ${p}stickercrop | ${p}stickers | ${p}stickertext | ${p}toimage`,
+        ` ⌗ *Video FX* ➔ `,
+        `      ${p}avec | ${p}avm | ${p}compress | ${p}merge | ${p}reverse`,
+        ` ⌗ *Utilities* ➔ `,
+        `      ${p}google | ${p}search | ${p}qr | ${p}poll | ${p}remind | ${p}translate`,
+        ` ⌗ *Engagement* ➔ `,
+        `      ${p}8ball | ${p}fact | ${p}joke | ${p}quote | ${p}numberfact`,
+        ` ⌗ *Diagnostics* ➔ `,
+        `      ${p}botstatus | ${p}ping | ${p}info | ${p}aliases | ${p}warnings`,
+        ` ⌗ *Session* ➔ `,
+        `      ${p}cancel | ${p}done | ${p}getvar | ${p}help | ${p}menu`,
       ];
 
-      const publicCmds = [];
-      const adminCmds = [];
-
-      for (const [cmdName, cmd] of Object.entries(commands)) {
-        const line = `│ ${p}${cmdName.padEnd(14)} → ${cmd.description || "No description"}`;
-        if (cmd.adminOnly) adminCmds.push(line);
-        else publicCmds.push(line);
+      if (adminUser) {
+        menu.push(
+          ``,
+          `👮  [ ADMINISTRATION ]`,
+          `──────────────────────────`,
+          ` ⌗ *Access* ➔ `,
+          `      ${p}allowgroup | ${p}removegroup | ${p}listgroups`,
+          ` ⌗ *Staff* ➔ `,
+          `      ${p}addadmin | ${p}removeadmin | ${p}listadmins | ${p}rejectcalls`,
+          ` ⌗ *Moderation* ➔ `,
+          `      ${p}add | ${p}remove | ${p}ban | ${p}unban | ${p}banlist | ${p}user`,
+          ` ⌗ *Penalties* ➔ `,
+          `      ${p}warn | ${p}clearwarn | ${p}setmaxwarns`,
+          ` ⌗ *Core Engine* ➔ `,
+          `      ${p}boton | ${p}botoff | ${p}say | ${p}broadcast | ${p}settings | ${p}setprefix`,
+          ` ⌗ *AI Config* ➔ `,
+          `      ${p}aion | ${p}aioff | ${p}clearai | ${p}setaiprompt`,
+          ` ⌗ *Automation* ➔ `,
+          `      ${p}autoreply | ${p}listautorepies | ${p}removeautoreply | ${p}replyall | ${p}stopreplyall`,
+          ` ⌗ *Greetings* ➔ `,
+          `      ${p}welcome | ${p}setwelcome | ${p}goodbye`,
+          ` ⌗ *Scheduler* ➔ `,
+          `      ${p}send | ${p}stopsend | ${p}activesends`,
+          ` ⌗ *Storage* ➔ `,
+          `      ${p}setvar | ${p}getvar | ${p}delvar | ${p}allvar`,
+          ` ⌗ *System Logs* ➔ `,
+          `      ${p}stats | ${p}exportstats | ${p}clearstats`,
+          ` ⌗ *Integrations* ➔ `,
+          `      ${p}setapikey | ${p}setgroqkey | ${p}settavilykey | ${p}checkapikey | ${p}setmenu`,
+          ` ⌗ *Sticker Packs* ➔ `,
+          `      ${p}setpackname | ${p}setpackauthor`,
+          ``,
+          `🛡️  [ SECURITY SHIELDS ]`,
+          `──────────────────────────`,
+          ` ⌗ *Anti-Link* ➔ `,
+          `      ${p}antilinkon | ${p}antilinkoff | ${p}allowlink | ${p}removeallowlink | ${p}allowlinklist`,
+          ` ⌗ *Anti-Delete* ➔ `,
+          `      ${p}antideleteon | ${p}antideleteoff | ${p}antideletechat | ${p}antideletedm`,
+          ` ⌗ *Word Filter* ➔ `,
+          `      ${p}wfilteron | ${p}wfilteroff | ${p}addword | ${p}removeword | ${p}wordlist`
+        );
+      } else {
+        menu.push(``, `_📌 Admin & Security commands hidden._`);
       }
 
-      menu.push(`🌐 *PUBLIC COMMANDS*`);
-      menu.push(`┌─────────────────────────`);
-      menu.push(...publicCmds.sort());
-      menu.push(`└─────────────────────────`);
-      menu.push(``);
-
-      if (adminUser && adminCmds.length > 0) {
-        menu.push(`👮 *ADMIN COMMANDS*`);
-        menu.push(`┌─────────────────────────`);
-        menu.push(...adminCmds.sort());
-        menu.push(`└─────────────────────────`);
-        menu.push(``);
-      }
-
-      menu.push(`_💡 Type any command alone for usage & examples_`);
-
-      // Append active aliases if any exist
+      // Append active aliases if any exist dynamically
       const { getAllAliases } = await import("./aliases.js");
       const aliases = getAllAliases();
       if (aliases.size > 0) {
-        const aliasLines = [...aliases.entries()]
+        const aliasPairs = [...aliases.entries()]
           .sort((a, b) => a[0].localeCompare(b[0]))
-          .map(([alias, cmd]) => `│ ${p}${alias.padEnd(14)} → ${p}${cmd}`);
+          .map(([alias, cmd]) => `${p}${alias} → ${p}${cmd}`);
+        
         menu.push(
           ``,
-          `⚡ *YOUR ACTIVE ALIASES*`,
-          `┌─────────────────────────`,
-          ...aliasLines,
-          `└─────────────────────────`,
+          `⚡  [ ACTIVE MACROS ]`,
+          `──────────────────────────`,
+          ` ⌗ *Shortcut Keys* ➔ `,
+          `      ${aliasPairs.join(" | ")}`
         );
       }
 
-      if (!adminUser) {
-        menu.push(``, `_📌 Admin commands hidden._`);
-      }
+      menu.push(
+        ``,
+        `──────────────────────────`,
+        `💡 _Tip: Send any command alone for usage instructions._`,
+        `──────────────────────────`
+      );
 
       await replyMsg(sock, from, msg, menu.join("\n"));
     },
+  },
+
+  menu: {
+    adminOnly: false,
+    requiresArgs: false,
+    description: "Show the full command menu",
+    handler: async (sock, msg, args, from, prefix) => {
+      // Alias menu to help
+      return generalCommands.help.handler(sock, msg, args, from, prefix);
+    }
   },
 
   botstatus: {
