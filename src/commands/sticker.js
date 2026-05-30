@@ -135,13 +135,21 @@ async function urlToSticker(url, startSec = 0, durationSec = 6) {
   const cookiePath = await getCookiesPath();
   const cookiesFlag = cookiePath ? `--cookies "${cookiePath}"` : "";
   const ytDlpPath = getYtDlpPath();
+  
+  const { detectPlatform } = await import("../downloader.js");
+  const platform = detectPlatform(url);
+  const isImagePlatform = platform === "instagram" || platform === "pinterest";
+  
+  const formatArg = isImagePlatform ? "best" : `"bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]"`;
+  const mergeArg = isImagePlatform ? "" : "--merge-output-format mp4";
+  const endSec = startSec + durationSec;
+  const sectionsArg = isImagePlatform ? "" : `--download-sections "*${startSec}-${endSec}"`;
 
   try {
-    const endSec = startSec + durationSec;
     try {
       // Attempt range download of specific section to save bandwidth/time
       await execAsync(
-        `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" --download-sections "*${startSec}-${endSec}" -o "${tmpVid}" "${url}"`,
+        `"${ytDlpPath}" -f ${formatArg} ${mergeArg} ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" ${sectionsArg} -o "${tmpVid}" "${url}"`,
         { timeout: 120000 }
       );
       const buffer = await fs.readFile(tmpVid);
@@ -153,7 +161,7 @@ async function urlToSticker(url, startSec = 0, durationSec = 6) {
       await fs.unlink(tmpVid).catch(() => {});
       // Fallback: download whole video
       await execAsync(
-        `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${tmpVid}" "${url}"`,
+        `"${ytDlpPath}" -f ${formatArg} ${mergeArg} ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${tmpVid}" "${url}"`,
         { timeout: 120000 }
       );
       const buffer = await fs.readFile(tmpVid);
