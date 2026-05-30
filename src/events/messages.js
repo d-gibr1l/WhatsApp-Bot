@@ -37,9 +37,13 @@ export function bindMessagesEvents(sock) {
     if (type !== "notify") return;
 
     for (const msg of messages) {
-      const ts  = (Number(msg.messageTimestamp) || 0) * 1000;
+      let tsRaw = msg.messageTimestamp;
+      if (typeof tsRaw === "object" && tsRaw !== null && "low" in tsRaw) tsRaw = tsRaw.low;
+      let ts = (Number(tsRaw) || 0) * 1000;
+      if (ts > 100000000000000) ts = Math.floor(ts / 1000); // In case it was already in ms
+      
       const jid = msg?.key?.remoteJid;
-      if (ts < startTime || !msg.message || !jid) continue;
+      if (ts === 0 || ts < startTime || !msg.message || !jid) continue;
       
       chatQueue.enqueue(jid, async () => {
         try {

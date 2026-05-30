@@ -166,8 +166,11 @@ async function processMessage(sock, msg) {
   if (msgId) rememberMessage(msgId);
 
   // Fix #2: Safe timestamp handling across all Baileys versions
-  const msgTs = (Number(msg.messageTimestamp) || 0) * 1000;
-  if (msgTs && msgTs < BOT_START_TIME) return;
+  let tsRaw = msg.messageTimestamp;
+  if (typeof tsRaw === "object" && tsRaw !== null && "low" in tsRaw) tsRaw = tsRaw.low;
+  let msgTs = (Number(tsRaw) || 0) * 1000;
+  if (msgTs > 100000000000000) msgTs = Math.floor(msgTs / 1000);
+  if (msgTs === 0 || msgTs < BOT_START_TIME) return;
 
   const text     = extractText(msg).trim();
   const sender   = getSenderNumber(msg);
