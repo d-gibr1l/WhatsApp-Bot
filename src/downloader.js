@@ -146,7 +146,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     "--no-playlist",
     "--no-warnings",
     "--extractor-args", "youtube:player_client=android_vr,web_embedded;skip=dash,hls",
-    "--print", "after_move:filepath",
+    "--print", "%(title)s",
   ];
 
   if (cookiePath) args.push("--cookies", cookiePath);
@@ -177,9 +177,9 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
   return heavyQueue.execute(() => new Promise((resolve, reject) => {
     const proc = spawn(getYtDlpPath(), args);
     let errorLog  = "";
-    let finalPath = "";
+    let stdoutOut = "";
 
-    proc.stdout.on("data", d => { finalPath = d.toString().trim(); });
+    proc.stdout.on("data", d => { stdoutOut += d.toString(); });
     proc.stderr.on("data", d => { errorLog += d.toString(); });
 
     const timeout = setTimeout(() => {
@@ -198,14 +198,12 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
       }
 
       try {
-        // Fallback: scan directory if --print didn't give us a path
-        if (!finalPath || !existsSync(finalPath)) {
-          const dir    = dirname(tmpBase);
-          const prefix = basename(tmpBase);
-          const files  = (await fsPromises.readdir(dir)).filter(f => f.startsWith(prefix));
-          if (files.length === 0) throw new Error("yt-dlp produced no output file.");
-          finalPath = join(dir, files[0]);
-        }
+        const title = stdoutOut.trim().split("\n")[0] || "Video";
+        const dir    = dirname(tmpBase);
+        const prefix = basename(tmpBase);
+        const files  = (await fsPromises.readdir(dir)).filter(f => f.startsWith(prefix));
+        if (files.length === 0) throw new Error("yt-dlp produced no output file.");
+        const finalPath = join(dir, files[0]);
 
         const buffer = await fsPromises.readFile(finalPath);
         await fsPromises.unlink(finalPath).catch(() => {});
@@ -219,10 +217,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
           webp: "image/webp",
         };
 
-        resolve({
-          buffer,
-          contentType: mimeTypes[ext] || "video/mp4",
-        });
+        return resolve({ buffer, contentType: mimeTypes[ext] || "video/mp4", title });
       } catch (err) {
         reject(err);
       }

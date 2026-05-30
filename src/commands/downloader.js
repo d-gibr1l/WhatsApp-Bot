@@ -56,14 +56,7 @@ export const downloaderCommands = {
       const progressMsg = await replyMsg(sock, from, msg, "⏳ _Downloading media..._");
 
       try {
-        // Get title silently for caption
-        let title = "Video";
-        try {
-          const info = await getMediaInfo(url);
-          title = info.title;
-        } catch {}
-
-        const { buffer, contentType } = await downloadWithYtDlp(url, audioOnly, quality);
+        const { buffer, contentType, title } = await downloadWithYtDlp(url, audioOnly, quality);
         const mb = sizeMB(buffer);
 
         if (mb > MAX_MB) {
