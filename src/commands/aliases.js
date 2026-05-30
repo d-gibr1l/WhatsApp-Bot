@@ -52,15 +52,26 @@ export const aliasCommands = {
         `📌 Don't include the prefix (!) in alias or command`
       );
 
-      const alias   = args[0].toLowerCase().replace(/^!/, "");
-      const command = args[1].toLowerCase().replace(/^!/, "");
+      // Safely strip any leading non-alphanumeric character (prefix)
+      const stripPrefix = (str) => str.replace(/^[^a-zA-Z0-9]+/, "");
+      const alias   = stripPrefix(args[0].toLowerCase());
+      // Join the rest of the arguments to support multi-word aliases (e.g. "image cat")
+      const command = stripPrefix(args.slice(1).join(" ").toLowerCase());
 
       // Prevent aliasing to itself
-      if (alias === command) return replyMsg(sock, from, msg, `❌ Alias and command can't be the same.`);
+      if (alias === command || command.startsWith(alias + " ")) {
+          return replyMsg(sock, from, msg, `❌ Alias and command can't be the same or recursive.`);
+      }
 
       try {
-        await supabase.from("aliases")
-          .upsert({ alias, command }, { onConflict: "alias" });
+        // Use select then update/insert to avoid onConflict constraint errors if table lacks a unique index
+        const { data: existing } = await supabase.from("aliases").select("alias").eq("alias", alias).maybeSingle();
+        if (existing) {
+          await supabase.from("aliases").update({ command }).eq("alias", alias);
+        } else {
+          await supabase.from("aliases").insert({ alias, command });
+        }
+        
         aliasCache.set(alias, command);
         await replyMsg(sock, from, msg,
           `✅ Alias created!\n\n*${prefix}${alias}* → *${prefix}${command}*`

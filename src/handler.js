@@ -277,9 +277,17 @@ async function processMessage(sock, msg) {
   const rawCmd = args.shift()?.toLowerCase();
   if (!rawCmd) return;
 
-  const cmdName = resolveAlias(rawCmd);
+  const resolved = resolveAlias(rawCmd);
+  const resolvedParts = resolved.split(" ");
+  const cmdName = resolvedParts[0];
   const command = commands[cmdName];
-  console.log(`🔧 CMD: "${rawCmd}" → resolved: "${cmdName}" → found: ${!!command}`);
+  
+  // If the alias expands to multiple words, prepend the extra words to args
+  if (resolvedParts.length > 1) {
+    args.unshift(...resolvedParts.slice(1));
+  }
+
+  console.log(`🔧 CMD: "${rawCmd}" → resolved: "${resolved}" → found: ${!!command}`);
   if (!command) return;
 
   if (command.adminOnly && !userIsAdmin) {
