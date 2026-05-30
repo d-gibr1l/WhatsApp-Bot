@@ -298,51 +298,22 @@ export async function downloadToBuffer(url) {
 const IMAGE_SEARCH_TIMEOUT = 15_000;
 const IMAGE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-// Gets DuckDuckGo vqd token required for image API calls
-async function getDDGToken(query) {
-  const res = await fetch(
-    `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`,
-    {
-      headers: { "User-Agent": IMAGE_USER_AGENT },
-      signal: AbortSignal.timeout(IMAGE_SEARCH_TIMEOUT),
-    }
-  );
-  const html = await res.text();
-  const match = html.match(/vqd=([\d-]+)/);
-  if (!match) throw new Error("Could not get DDG search token — DuckDuckGo may have changed their API");
-  return match[1];
-}
-
-// Search DuckDuckGo images and return direct image URLs
+// Search Bing images and return direct image URLs
 export async function searchImages(query, count = 3) {
-  const vqd = await getDDGToken(query);
-
-  const params = new URLSearchParams({
-    q:   query,
-    o:   "json",
-    p:   "1",
-    vqd: vqd,
-    f:   ",,,,,",
-    l:   "us-en",
-  });
-
-  const res = await fetch(`https://duckduckgo.com/i.js?${params}`, {
-    headers: {
-      "User-Agent": IMAGE_USER_AGENT,
-      "Referer":    "https://duckduckgo.com/",
-      "Accept":     "application/json",
-    },
+  const params = new URLSearchParams({ q: query, form: "HDRSC2" });
+  
+  const res = await fetch(`https://www.bing.com/images/search?${params}`, {
+    headers: { "User-Agent": IMAGE_USER_AGENT },
     signal: AbortSignal.timeout(IMAGE_SEARCH_TIMEOUT),
   });
 
-  if (!res.ok) throw new Error(`DDG image search failed: ${res.status}`);
+  if (!res.ok) throw new Error(`Bing image search failed: ${res.status}`);
 
-  const data = await res.json();
-  const results = data?.results || [];
+  const html = await res.text();
+  const results = [...html.matchAll(/murl&quot;:&quot;(.*?)&quot;/g)].map(m => m[1]);
 
   // Return direct image URLs — filter out SVGs, tiny icons, and non-http
   return results
-    .map(r => r.image)
     .filter(url =>
       url &&
       url.startsWith("http") &&
