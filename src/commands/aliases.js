@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_KEY } from "../config.js";
 import { replyMsg, alertOwner } from "./helpers.js";
+import { commands } from "./registry.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -61,6 +62,12 @@ export const aliasCommands = {
       // Prevent aliasing to itself
       if (alias === command || command.startsWith(alias + " ")) {
           return replyMsg(sock, from, msg, `❌ Alias and command can't be the same or recursive.`);
+      }
+
+      // Ensure the target command actually exists
+      const targetCmdName = command.split(" ")[0];
+      if (!commands[targetCmdName]) {
+          return replyMsg(sock, from, msg, `❌ The target command *${prefix}${targetCmdName}* does not exist. Did you reverse the arguments? Remember: *${prefix}alias <new_alias> <existing_command>*`);
       }
 
       try {
