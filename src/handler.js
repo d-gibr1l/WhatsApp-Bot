@@ -282,6 +282,9 @@ async function processMessage(sock, msg) {
 
   if (!command) return;
 
+  const argsLog = args.length > 0 ? ` ${args.join(" ")}` : "";
+  console.log(`⚡ [CMD] ${prefix}${cmdName}${argsLog}`);
+
   if (command.adminOnly && !userIsAdmin) {
     return await replyMsg(sock, from, msg, "🚫 This command is reserved for Admins.");
   }
