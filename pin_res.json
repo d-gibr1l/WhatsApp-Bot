@@ -1,0 +1,129 @@
+{
+  "resource_response": {
+    "error": {
+      "status": "failure",
+      "http_status": 401,
+      "code": 2,
+      "message": "Authentication failed.",
+      "message_detail": "Missing access token",
+      "api_error_code": 2,
+      "extra_data": {
+        "message": "Missing access token"
+      }
+    },
+    "data": null
+  },
+  "client_context": {
+    "analysis_ua": {
+      "app_type": 5,
+      "app_version": "",
+      "browser_name": "Chrome",
+      "browser_version": "120.0.0",
+      "device_type": null,
+      "device": "Other",
+      "os_name": "Windows 10",
+      "os_version": "10"
+    },
+    "app_type_detailed": 5,
+    "app_version": "78a7973",
+    "autologin": null,
+    "batch_exp": true,
+    "browser_locale": "en-US",
+    "browser_name": "Chrome",
+    "browser_type": 1,
+    "browser_version": "120.0.0",
+    "country": "GH",
+    "country_from_hostname": "US",
+    "country_from_ip": "GH",
+    "csp_nonce": "dc8a967ff993aea45ffadbfada12682b",
+    "current_url": "https://www.pinterest.com/resource/ApiResource/get/?source_url=%2Fpin%2F888405463999317145%2F&data=%7B%22options%22%3A%7B%22url%22%3A%22%2Fv3%2Fusers%2Fme%2Frecent%2Fengaged%2Fpin%2Fstories%2F%22%2C%22data%22%3A%7B%22fields%22%3A%22pin.description%2Cpin.id%2Cpin.images%5B236x%5D%22%2C%22pin_preview_count%22%3A1%7D%7D%2C%22context%22%3A%7B%7D%7D&_=1780145056201",
+    "debug": false,
+    "deep_link": "",
+    "enabled_advertiser_countries": [
+      "AR",
+      "AT",
+      "AU",
+      "BE",
+      "BR",
+      "CA",
+      "CH",
+      "CL",
+      "CO",
+      "DE",
+      "DK",
+      "ES",
+      "FI",
+      "FR",
+      "GB",
+      "IE",
+      "IT",
+      "JP",
+      "LU",
+      "MX",
+      "NL",
+      "NO",
+      "NZ",
+      "PT",
+      "SE",
+      "US"
+    ],
+    "facebook_token": null,
+    "full_path": "/resource/ApiResource/get/?source_url=%2Fpin%2F888405463999317145%2F&data=%7B%22options%22%3A%7B%22url%22%3A%22%2Fv3%2Fusers%2Fme%2Frecent%2Fengaged%2Fpin%2Fstories%2F%22%2C%22data%22%3A%7B%22fields%22%3A%22pin.description%2Cpin.id%2Cpin.images%5B236x%5D%22%2C%22pin_preview_count%22%3A1%7D%7D%2C%22context%22%3A%7B%7D%7D&_=1780145056201",
+    "http_referrer": "",
+    "impersonator_user_id": null,
+    "invite_code": "",
+    "invite_sender_id": "",
+    "is_authenticated": false,
+    "is_bot": "false",
+    "is_perf_metrics_bot": false,
+    "is_vpn": false,
+    "has_geo_is_anon": false,
+    "has_dcip": false,
+    "is_unauth_botspam_asn": false,
+    "is_full_page": true,
+    "is_mobile_agent": false,
+    "is_sterling_on_steroids": false,
+    "is_tablet_agent": false,
+    "language": "en",
+    "locale": "en-US",
+    "origin": "https://www.pinterest.com",
+    "path": "/resource/ApiResource/get/",
+    "placed_experiences": null,
+    "referrer": null,
+    "region_from_ip": "AA",
+    "request_host": "www.pinterest.com",
+    "request_identifier": "7439281024914573",
+    "social_bot": "",
+    "stage": "prod",
+    "sterling_on_steroids_ldap": null,
+    "sterling_on_steroids_user_type": null,
+    "theme": "light",
+    "unauth_id": "b2fecfb84d0d485eba5c1559e8072d90",
+    "seo_debug": false,
+    "user_agent_can_use_native_app": false,
+    "user_agent_platform": "other",
+    "user_agent_platform_version": null,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "user": {
+      "unauth_id": "b2fecfb84d0d485eba5c1559e8072d90",
+      "ip_country": "GH",
+      "ip_region": "AA"
+    },
+    "utm_campaign": null,
+    "visible_url": "/pin/888405463999317145/"
+  },
+  "resource": {
+    "name": "ApiResource",
+    "options": {
+      "bookmarks": [
+        "-end-"
+      ],
+      "url": "/v3/users/me/recent/engaged/pin/stories/",
+      "data": {
+        "fields": "pin.description,pin.id,pin.images[236x]",
+        "pin_preview_count": 1
+      }
+    }
+  },
+  "request_identifier": "7439281024914573"
+}

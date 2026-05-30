@@ -1,8 +1,6 @@
 import express from "express";
 import qrcode from "qrcode";
 import { PORT } from "./config.js";
-import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
 import {
   setSetting,
   addAdmin,
@@ -10,7 +8,8 @@ import {
   banNumber,
   unbanNumber,
   addAutoReply,
-  removeAutoReply
+  removeAutoReply,
+  supabase
 } from "./db.js";
 import {
   refreshSettings,
@@ -19,8 +18,6 @@ import {
   refreshAutoReplies
 } from "./cache.js";
 import { clearSession } from "./auth/redisSession.js";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 export let lastQR    = null;
 export let botStatus = "starting";

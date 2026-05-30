@@ -1,9 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_KEY } from "../config.js";
-import { getWarnings, isBanned, getAdmins } from "../db.js";
+import { getWarnings, isBanned, getAdmins, supabase } from "../db.js";
 import { replyMsg, alertOwner, getTargetNumber, normalizeNumber } from "./helpers.js";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

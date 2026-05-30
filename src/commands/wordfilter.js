@@ -1,10 +1,6 @@
-import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_KEY } from "../config.js";
-import { setSetting, warnUser, banNumber } from "../db.js";
+import { setSetting, warnUser, banNumber, supabase } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
-import { replyMsg, alertOwner } from "./helpers.js";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
 
 // ─── Cache: per-chat words only ───────────────────────────────────────────────
 // chatWords: Map of chat_id -> Set of words

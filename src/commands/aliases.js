@@ -1,9 +1,6 @@
-import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_KEY } from "../config.js";
+import { supabase } from "../db.js";
 import { replyMsg, alertOwner } from "./helpers.js";
 import { commands } from "./registry.js";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── Alias Cache ──────────────────────────────────────────────────────────────
 

@@ -1,10 +1,8 @@
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
-import { setSetting } from "../db.js";
+import { setSetting, supabase } from "../db.js";
 import { cachedGetSetting, refreshSettings, isBotSentMessage, isAiSentMessage, rememberAiSent } from "../cache.js";
-import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_KEY, botConfig } from "../config.js";
+import { botConfig } from "../config.js";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 const MAX_HISTORY = 20;
 
 // ─── Per-user cooldown ────────────────────────────────────────────────────────

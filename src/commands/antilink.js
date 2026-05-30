@@ -1,10 +1,6 @@
-import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_KEY } from "../config.js";
-import { setSetting, warnUser, banNumber } from "../db.js";
+import { setSetting, warnUser, banNumber, supabase } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── Allowed Links Cache ──────────────────────────────────────────────────────
 

@@ -1,7 +1,25 @@
 import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+function createMockClient() {
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    lte: () => chain,
+    single: async () => ({ data: null, error: null }),
+    maybeSingle: async () => ({ data: null, error: null }),
+    insert: async () => ({ data: null, error: null }),
+    upsert: async () => ({ data: null, error: null }),
+    delete: () => chain,
+    update: () => chain,
+    then: (resolve) => resolve({ data: [], error: null })
+  };
+  return { from: () => chain };
+}
+
+export const supabase = (SUPABASE_URL && SUPABASE_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_KEY)
+  : createMockClient();
 
 // ─── Bulk Loaders (used strictly by cache.js to populate RAM) ─────────────────
 
