@@ -1334,5 +1334,8 @@ app.get("/health", (_, res) => {
 });
 
 export function startServer() {
-  app.listen(PORT, () => console.log(`🌐 Web server on port ${PORT}`));
+  console.log(`[Server] Attempting to bind to 0.0.0.0:${PORT}...`);
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`[Server] 🌐 Web server bound to 0.0.0.0:${PORT}`);
+  });
 }

@@ -1,6 +1,5 @@
 import { supabase } from "../db.js";
 import { replyMsg, alertOwner } from "./helpers.js";
-import { commands } from "./registry.js";
 
 // ─── Alias Cache ──────────────────────────────────────────────────────────────
 
@@ -63,6 +62,7 @@ export const aliasCommands = {
 
       // Ensure the target command actually exists
       const targetCmdName = command.split(" ")[0];
+      const { commands } = await import("./registry.js");
       if (!commands[targetCmdName]) {
           return replyMsg(sock, from, msg, `❌ The target command *${prefix}${targetCmdName}* does not exist. Did you reverse the arguments? Remember: *${prefix}alias <new_alias> <existing_command>*`);
       }
