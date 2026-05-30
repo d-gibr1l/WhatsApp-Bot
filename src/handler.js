@@ -134,6 +134,12 @@ export function startReminderPoller(sock) {
 // flushes on every reconnect.
 let connectedAt = Infinity; // Block everything until explicitly set
 
+// ─── Command Cooldown ─────────────────────────────────────────────────────────
+// WhatsApp occasionally resends identical messages (with different IDs) if it
+// doesn't receive an ACK fast enough. This strict 5-second per-user command
+// cooldown prevents the bot from processing these "retry storms".
+const commandCooldowns = new Map();
+
 export function markBotReady() {
   connectedAt = Date.now();
   console.log(`[Handler] Bot marked ready at ${connectedAt} — now accepting messages.`);
@@ -250,6 +256,15 @@ async function processMessage(sock, msg) {
   const command = commands[cmdName];
   console.log(`🔧 CMD: "${rawCmd}" → resolved: "${cmdName}" → found: ${!!command}`);
   if (!command) return;
+
+  // Fix: Strict 5-second per-user command cooldown to block WhatsApp retry storms
+  const cooldownKey = `${sender}:${cmdName}`;
+  const lastUsed = commandCooldowns.get(cooldownKey) || 0;
+  if (Date.now() - lastUsed < 5000) {
+    console.log(`⏳ Dropped duplicate command "${cmdName}" from ${sender} (cooldown)`);
+    return;
+  }
+  commandCooldowns.set(cooldownKey, Date.now());
 
   if (command.adminOnly && !userIsAdmin) {
     return await replyMsg(sock, from, msg, "🚫 This command is reserved for Admins.");
