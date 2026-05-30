@@ -52,21 +52,16 @@ export const downloaderCommands = {
       const audioOnly = args.includes("audio");
       const quality   = args.find(a => ["360", "480", "720", "1080", "best"].includes(a)) || "720";
 
-      await reactMsg(sock, from, msg, "⏳");
-      const progressMsg = await replyMsg(sock, from, msg, "⏳ _Downloading media..._");
-
       try {
         const { buffer, contentType, title } = await downloadWithYtDlp(url, audioOnly, quality);
         const mb = sizeMB(buffer);
 
         if (mb > MAX_MB) {
-          await sock.sendMessage(from, { delete: progressMsg.key });
           return replyMsg(sock, from, msg,
             `❌ File too large (${mb.toFixed(1)}MB). WhatsApp limit is 64MB.\n\n💡 Try:\n• ${prefix}dl ${url} audio\n• ${prefix}dl ${url} 360`
           );
         }
 
-        await sock.sendMessage(from, { text: `🚀 _Uploading ${mb.toFixed(1)}MB..._`, edit: progressMsg.key });
         await reactMsg(sock, from, msg, "✅");
 
         if (audioOnly || contentType.includes("audio")) {
@@ -90,11 +85,8 @@ export const downloaderCommands = {
           }, { quoted: msg });
         }
 
-        await sock.sendMessage(from, { delete: progressMsg.key }).catch(() => {});
-
       } catch (err) {
         console.error("❌ Download error:", err.message);
-        await sock.sendMessage(from, { delete: progressMsg.key }).catch(() => {});
         await reactMsg(sock, from, msg, "❌");
         await replyMsg(sock, from, msg,
           `❌ Download failed: ${err.message.slice(0, 200)}\n\n💡 If this keeps failing try *${prefix}dlapi ${url}*`

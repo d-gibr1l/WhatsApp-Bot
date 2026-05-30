@@ -147,6 +147,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     "--no-warnings",
     "--extractor-args", "youtube:player_client=android_vr,web_embedded;skip=dash,hls",
     "--print", "%(title)s",
+    "--print", "after_move:filepath",
   ];
 
   if (cookiePath) args.push("--cookies", cookiePath);
@@ -198,12 +199,24 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
       }
 
       try {
-        const title = stdoutOut.trim().split("\n")[0] || "Video";
-        const dir    = dirname(tmpBase);
-        const prefix = basename(tmpBase);
-        const files  = (await fsPromises.readdir(dir)).filter(f => f.startsWith(prefix));
-        if (files.length === 0) throw new Error("yt-dlp produced no output file.");
-        const finalPath = join(dir, files[0]);
+        const outputLines = stdoutOut.trim().split("\n").map(l => l.trim()).filter(Boolean);
+        let title = "Video";
+        let finalPath = "";
+
+        if (outputLines.length > 0) {
+          title = outputLines[0];
+          if (outputLines.length > 1) {
+            finalPath = outputLines[outputLines.length - 1];
+          }
+        }
+
+        if (!finalPath || !existsSync(finalPath)) {
+          const dir    = dirname(tmpBase);
+          const prefix = basename(tmpBase);
+          const files  = (await fsPromises.readdir(dir)).filter(f => f.startsWith(prefix));
+          if (files.length === 0) throw new Error("yt-dlp produced no output file.");
+          finalPath = join(dir, files[0]);
+        }
 
         const buffer = await fsPromises.readFile(finalPath);
         await fsPromises.unlink(finalPath).catch(() => {});
