@@ -104,37 +104,45 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId) {
   if (_installed) return;
   _installed = true;
 
-  // ── Layer 1: console.error shim ────────────────────────────────────────────
+  // ── Layer 1: console.error / console.log shim ──────────────────────────────
   // Silences Bad MAC / decrypt error messages that Baileys and libsignal print
-  // directly to console.error (bypassing our pino "silent" logger).
-  // Replaced with a single rate-limited line per session per 10 seconds.
+  // directly to console.error or console.log (bypassing our pino "silent" logger).
   _originalConsoleError = console.error.bind(console);
+  const _originalConsoleLog = console.log.bind(console);
 
   console.error = (...args) => {
     if (!isSuppressible(...args)) {
-      // Not a known-safe error — pass through unchanged
       _originalConsoleError(...args);
       return;
     }
+    handleInterceptedLog(_originalConsoleError, args);
+  };
 
-    // Known-safe error: emit our own rate-limited summary instead of the flood
+  console.log = (...args) => {
+    if (!isSuppressible(...args)) {
+      _originalConsoleLog(...args);
+      return;
+    }
+    // For console.log, we just suppress it completely unless it's a Bad MAC that needs purging
+    handleInterceptedLog(_originalConsoleLog, args, true);
+  };
+
+  function handleInterceptedLog(originalLogFn, args, isLog = false) {
     const sessionId = getSessionId();
     const text = args.map((a) => (typeof a === 'string' ? a : String(a))).join(' ');
 
     if (text.includes('Bad MAC')) {
-      // Try to extract a key ID from an Error argument for targeted purge
       const errArg = args.find((a) => a instanceof Error);
       const keyInfo = errArg ? extractKeyId(errArg) : null;
 
-      if (!isRateLimited(`console:mac:${sessionId}`)) {
+      if (!isLog && !isRateLimited(`console:mac:${sessionId}`)) {
         const keyStr = keyInfo ? ` (key: ${keyInfo.id})` : '';
-        _originalConsoleError(
+        originalLogFn(
           `[BadMAC] Decryption failure for session '${sessionId}'${keyStr}. ` +
           `Baileys is self-healing — message dropped gracefully.`
         );
       }
 
-      // Attempt a targeted key purge even if rate-limited (purge is safe to call repeatedly)
       if (keyInfo) {
         purgeCorruptKey(keyInfo.type, keyInfo.id).catch(() => {});
       }
@@ -142,18 +150,17 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId) {
     }
 
     if (text.includes('Key used already') || text.includes('MessageCounterError')) {
-      if (!isRateLimited(`console:counter:${sessionId}`)) {
-        _originalConsoleError(
-          `[BadMAC] Replay protection for session '${sessionId}' — message dropped (normal in busy groups).`
+      if (!isLog && !isRateLimited(`console:counter:${sessionId}`)) {
+        originalLogFn(
+          `[BadMAC] Replay protection for session '${sessionId}' — message dropped.`
         );
       }
       return;
     }
 
     // "Failed to decrypt", "Session error:", "Closing session/open session" —
-    // completely suppressed. These are Baileys' own heal/wrapper logs and are
-    // already covered by the Bad MAC line above.
-  };
+    // completely suppressed.
+  }
 
   // ── Layer 2: unhandledRejection listener ───────────────────────────────────
   // Catches Bad MAC / counter errors that escape Baileys' internal catch blocks.
