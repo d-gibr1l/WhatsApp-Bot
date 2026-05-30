@@ -30,7 +30,6 @@ import {
   setDisconnected,
   setStarting,
   setConnecting,
-  setBroadcastCallback
 } from "./src/server.js";
 import { updateYtDlp } from "./src/downloader.js";
 
@@ -233,17 +232,6 @@ async function runBot() {
 
           if (connection === "open") {
             setConnected();
-            setBroadcastCallback(async (text) => {
-              const groups = await sock.groupFetchAllParticipating();
-              for (const jid in groups) {
-                try {
-                  await sock.sendMessage(jid, { text });
-                  await new Promise(r => setTimeout(r, 1000));
-                } catch (e) {
-                  console.error(`Broadcast failed for ${jid}:`, e.message);
-                }
-              }
-            });
             lastConnectedAt = Date.now();
             attempt = 1; // reset counter on successful connect
 
