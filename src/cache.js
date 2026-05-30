@@ -8,10 +8,9 @@ import {
   getAllowedGroups,
   getAllSettings,
   getAllAutoReplies,
+  supabase,
 } from "./db.js";
-import pg from "pg";
 import { LRUCache } from "lru-cache";
-import { DATABASE_URL } from "./config.js";
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -124,55 +123,47 @@ export async function loadCache() {
 
 let safetyInterval  = null;
 let fallbackInterval = null;
-let pgClient        = null;
+let subscription = null;
 
 export function startCacheAutoRefresh() {
   // Clean up existing connections to prevent memory leaks on reconnect
   if (safetyInterval)  clearInterval(safetyInterval);
   if (fallbackInterval) clearInterval(fallbackInterval);
-  if (pgClient) pgClient.end().catch(() => {});
+  if (subscription) {
+    supabase.removeChannel(subscription);
+    subscription = null;
+  }
 
-  if (DATABASE_URL) {
-    pgClient = new pg.Client({ connectionString: DATABASE_URL });
+  const handleUpdate = (payload) => {
+    const table = payload.table;
+    console.log(`🔄 Cache: ${table} updated instantly via Supabase Realtime`);
+    if (table === "admins") refreshAdmins();
+    else if (table === "banned_numbers") refreshBanned();
+    else if (table === "allowed_groups") refreshGroups();
+    else if (table === "settings") refreshSettings();
+    else if (table === "auto_replies") refreshAutoReplies();
+  };
 
-    const channelMap = {
-      cache_admins:      refreshAdmins,
-      cache_banned:      refreshBanned,
-      cache_settings:    refreshSettings,
-      cache_groups:      refreshGroups,
-      cache_autoreplies: refreshAutoReplies,
-    };
-
-    pgClient.connect()
-      .then(async () => {
-        pgClient.on("notification", (msg) => {
-          const fn = channelMap[msg.channel];
-          if (fn) {
-            fn();
-            console.log(`🔄 Cache: ${msg.channel.replace("cache_", "")} updated instantly`);
-          }
-        });
-
-        for (const channel of Object.keys(channelMap)) {
-          await pgClient.query(`LISTEN ${channel}`);
+  try {
+    subscription = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public' },
+        handleUpdate
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log("✅ Supabase Realtime active — instant DB updates enabled");
+        } else if (status === 'CHANNEL_ERROR') {
+          console.warn("⚠️ Realtime channel error. Falling back to polling.");
         }
-
-        console.log("✅ LISTEN/NOTIFY cache active — instant DB updates enabled");
-
-        pgClient.on("error", (err) => {
-          console.error("❌ PG notify connection error:", err.message);
-          setTimeout(() => startCacheAutoRefresh(), 5000);
-        });
-      })
-      .catch((err) => {
-        console.warn(`⚠️ LISTEN/NOTIFY unavailable (${err.message}) — falling back to 30s polling`);
-        fallbackInterval = setInterval(loadCache, 30_000);
       });
-
+      
     // Safety net full refresh every 10 minutes
     safetyInterval = setInterval(loadCache, 10 * 60 * 1000);
-  } else {
-    console.log("ℹ️ No DATABASE_URL — using 30s polling for cache refresh");
+  } catch (err) {
+    console.warn(`⚠️ Supabase Realtime unavailable (${err.message}) — falling back to 30s polling`);
     fallbackInterval = setInterval(loadCache, 30_000);
   }
 }

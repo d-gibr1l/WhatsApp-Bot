@@ -4,6 +4,7 @@ import { writeFileSync, unlinkSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
 import { getSetting } from "./db.js";
+import { heavyQueue } from "./queue.js";
 
 // ─── yt-dlp Path & Auto-Updater ──────────────────────────────────────────────
 
@@ -103,8 +104,15 @@ export async function getMediaInfo(url) {
   return new Promise((resolve, reject) => {
     let output = "";
     const proc = spawn(getYtDlpPath(), args);
+    
+    const timeout = setTimeout(() => {
+      proc.kill();
+      reject(new Error("Media info fetch timed out (15s)"));
+    }, 15000);
+
     proc.stdout.on("data", d => { output += d.toString(); });
     proc.on("close", async (code) => {
+      clearTimeout(timeout);
       if (cookiePath) await fsPromises.unlink(cookiePath).catch(() => {});
       if (code !== 0) return reject(new Error(`Could not fetch media info.`));
       try {
@@ -166,7 +174,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     }
   }
 
-  return new Promise((resolve, reject) => {
+  return heavyQueue.execute(() => new Promise((resolve, reject) => {
     const proc = spawn(getYtDlpPath(), args);
     let errorLog  = "";
     let finalPath = "";
@@ -221,7 +229,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     });
 
     proc.on("error", reject);
-  });
+  }));
 }
 
 // ─── Legacy YouTube buffer export (used by mp3.js, sticker.js etc) ───────────

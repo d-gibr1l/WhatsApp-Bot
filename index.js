@@ -22,6 +22,9 @@ import { loadWordFilter }   from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
 import { loadAliases }      from "./src/commands/aliases.js";
 import { handleAntiDelete, storeMessage } from "./src/commands/antidelete.js";
+import { bindMessagesEvents } from "./src/events/messages.js";
+import { bindGroupEvents }    from "./src/events/groups.js";
+import { bindCallEvents }     from "./src/events/calls.js";
 import { loadCache, startCacheAutoRefresh, cachedGetSetting } from "./src/cache.js";
 import {
   startServer,
@@ -49,22 +52,7 @@ let currentSock     = null;
 let lastConnectedAt = 0;
 
 // ─── Concurrency limiter ──────────────────────────────────────────────────────
-
-function makeLimit(concurrency) {
-  let active = 0;
-  const queue = [];
-  const next = () => {
-    if (active >= concurrency || queue.length === 0) return;
-    active++;
-    const { fn, resolve, reject } = queue.shift();
-    fn().then(resolve).catch(reject).finally(() => { active--; next(); });
-  };
-  return (fn) => new Promise((resolve, reject) => {
-    queue.push({ fn, resolve, reject });
-    next();
-  });
-}
-const limit = makeLimit(5);
+// Removed makeLimit: using ChatQueueManager inside src/events/messages.js instead.
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
 // Single exit path for all signals and error codes.
@@ -385,133 +373,10 @@ async function runBot() {
           }
         });
 
-        // ── Messages + Anti-delete (single merged listener) ───────────────
-        // Merged to eliminate duplicate registration and make
-        // execution order explicit.
-
-        const startTime = Date.now();
-        const recentlyRevoked = new LRUCache({ max: 500, ttl: 5000 });
-
-        async function safeHandleDelete(sock, key, deleterJid = null) {
-          const id = key?.id;
-          if (!id || recentlyRevoked.has(id)) return;
-          recentlyRevoked.set(id, true);
-          await handleAntiDelete(sock, key, deleterJid);
-        }
-
-        sock.ev.on("messages.upsert", async ({ messages, type }) => {
-          // Pass 1: store all messages for anti-delete + detect revokes
-          for (const msg of messages) {
-            const jid = msg?.key?.remoteJid;
-            if (!jid) continue;
-
-            if (msg.message) {
-              storeMessage(msg, extractText(msg) ?? "");
-            }
-
-            const protoMsg = msg.message?.protocolMessage;
-            if (protoMsg?.type === 0 && protoMsg?.key) {
-              try {
-                const deleterJid = msg.key.participant || msg.key.remoteJid;
-                await safeHandleDelete(sock, protoMsg.key, deleterJid);
-              } catch (err) {
-                console.error("Anti-delete (revoke) error:", err.message);
-              }
-            }
-          }
-
-          if (type !== "notify") return;
-
-          // Pass 2: dispatch commands — group by chat, process concurrently
-          const byChat = new Map();
-          for (const msg of messages) {
-            const ts  = (Number(msg.messageTimestamp) || 0) * 1000;
-            const jid = msg?.key?.remoteJid;
-            if (ts < startTime || !msg.message || !jid) continue;
-            if (!byChat.has(jid)) byChat.set(jid, []);
-            byChat.get(jid).push(msg);
-          }
-
-          await Promise.all(
-            [...byChat.values()].map((chatMsgs) =>
-              limit(async () => {
-                for (const msg of chatMsgs) {
-                  try {
-                    await handleMessage(sock, msg);
-                  } catch (err) {
-                    console.error("Error processing message:", err.message);
-                  }
-                }
-              })
-            )
-          );
-        });
-
-        // ── Anti-delete: bulk delete event ────────────────────────────────
-
-        sock.ev.on("messages.delete", async (item) => {
-          try {
-            let keys = [];
-            if (item.keys)          keys = item.keys;
-            else if (item.key)      keys = [item.key];
-            else if (item.messages) keys = item.messages.map(m => m.key).filter(Boolean);
-            for (const key of keys) await safeHandleDelete(sock, key);
-          } catch (err) {
-            console.error("Anti-delete (bulk) error:", err.message);
-          }
-        });
-
-        // ── Welcome / Goodbye ─────────────────────────────────────────────
-
-        sock.ev.on("group-participants.update", async ({ id, participants, action }) => {
-          try {
-            for (const participant of participants) {
-              const number = participant.split("@")[0];
-              if (action === "add") {
-                const enabled = cachedGetSetting(`welcome_enabled_${id}`, "false");
-                if (enabled !== "true") continue;
-                const groupMeta = await sock.groupMetadata(id).catch(() => null);
-                const groupName = groupMeta?.subject || "the group";
-                const template  = cachedGetSetting(`welcome_${id}`, `Welcome *{name}* to *{group}*!`);
-                const text = template
-                  .replace(/{name}/g,   number)
-                  .replace(/{group}/g,  groupName)
-                  .replace(/{number}/g, number);
-                await sock.sendMessage(id, { text, mentions: [participant] });
-              } else if (action === "remove") {
-                const enabled = cachedGetSetting(`goodbye_enabled_${id}`, "false");
-                if (enabled !== "true") continue;
-                const groupMeta = await sock.groupMetadata(id).catch(() => null);
-                const groupName = groupMeta?.subject || "the group";
-                const template  = cachedGetSetting(`goodbye_${id}`, `*{name}* has left *{group}*. Goodbye!`);
-                const text = template
-                  .replace(/{name}/g,   number)
-                  .replace(/{group}/g,  groupName)
-                  .replace(/{number}/g, number);
-                await sock.sendMessage(id, { text });
-              }
-            }
-          } catch (err) {
-            console.error("Welcome/goodbye error:", err.message);
-          }
-        });
-
-        // ── Auto-reject calls ─────────────────────────────────────────────
-
-        sock.ev.on("call", async (calls) => {
-          try {
-            const rejectCalls = cachedGetSetting("reject_calls", "false");
-            if (rejectCalls !== "true") return;
-            for (const call of calls) {
-              if (call.status === "offer") {
-                await sock.rejectCall(call.id, call.from);
-                console.log(`📵 Rejected call from ${call.from}`);
-              }
-            }
-          } catch (err) {
-            console.error("Call reject error:", err.message);
-          }
-        });
+        // ── Events ───────────────────────────────────────────────────────
+        bindMessagesEvents(sock);
+        bindGroupEvents(sock);
+        bindCallEvents(sock);
 
       }); // end Promise
 

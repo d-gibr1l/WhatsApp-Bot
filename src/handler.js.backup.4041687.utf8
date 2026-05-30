@@ -1,4 +1,4 @@
-import { botConfig } from "./config.js";
+﻿import { botConfig } from "./config.js";
 import { commands, replyMsg, isAdmin } from "./commands/registry.js";
 import { logMessage, getPendingReminders, markReminderDone } from "./db.js";
 import {
@@ -11,9 +11,8 @@ import { handleWordFilter } from "./commands/wordfilter.js";
 import { handleAntiLink } from "./commands/antilink.js";
 import { resolveAlias } from "./commands/aliases.js";
 import { hasStickerSession, handleStickerSessionImage } from "./commands/sticker.js";
-import { LRUCache } from "lru-cache";
 
-// ─── extractText (fix #5 — simplified, removed poll noise) ───────────────────
+// ΓöÇΓöÇΓöÇ extractText (fix #5 ΓÇö simplified, removed poll noise) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 export function extractText(msg) {
   const m = msg.message || {};
@@ -29,13 +28,13 @@ export function extractText(msg) {
   );
 }
 
-// ─── getMessageType helper (fix #10) ─────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ getMessageType helper (fix #10) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 export function getMessageType(msg) {
   return Object.keys(msg.message || {})[0] ?? "unknown";
 }
 
-// ─── getSenderNumber ──────────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ getSenderNumber ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 export function getSenderNumber(msg) {
   if (msg.key.fromMe) return botConfig.BOT_NUMBER;
@@ -50,50 +49,44 @@ export function getSenderNumber(msg) {
   return (participant ?? remoteJid).split("@")[0];
 }
 
-// ─── Error Alert (fix #9 — more context) ─────────────────────────────────────
-
-const alertRateLimit = new LRUCache({ max: 50, ttl: 60000 }); // Max 1 alert per min per error
+// ΓöÇΓöÇΓöÇ Error Alert (fix #9 ΓÇö more context) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 export async function alertOwner(sock, context, err, extra = {}) {
   try {
-    const errorKey = `${context}:${err.message}`;
-    if (alertRateLimit.has(errorKey)) return;
-    alertRateLimit.set(errorKey, true);
-
     const ownerJid = `${botConfig.BOT_NUMBER}@s.whatsapp.net`;
     await sock.sendMessage(ownerJid, {
       text:
-        `⚠️ *Bot Error Alert*\n\n` +
-        `📍 *Where:* ${context}\n` +
-        `❌ *Error:* ${err.message}\n` +
-        (extra.sender ? `👤 *Sender:* ${extra.sender}\n` : "") +
-        (extra.from    ? `💬 *Chat:* ${extra.from}\n`   : "") +
-        (extra.text    ? `📝 *Message:* ${String(extra.text).slice(0, 50)}\n` : "") +
-        `🕐 *Time:* ${new Date().toLocaleString()}\n` +
-        `🔢 *Stack:* ${err.stack?.split("\n")[1]?.trim() ?? "N/A"}`,
+        `ΓÜá∩╕Å *Bot Error Alert*\n\n` +
+        `≡ƒôì *Where:* ${context}\n` +
+        `Γ¥î *Error:* ${err.message}\n` +
+        (extra.sender ? `≡ƒæñ *Sender:* ${extra.sender}\n` : "") +
+        (extra.from    ? `≡ƒÆ¼ *Chat:* ${extra.from}\n`   : "") +
+        (extra.text    ? `≡ƒô¥ *Message:* ${String(extra.text).slice(0, 50)}\n` : "") +
+        `≡ƒòÉ *Time:* ${new Date().toLocaleString()}\n` +
+        `≡ƒöó *Stack:* ${err.stack?.split("\n")[1]?.trim() ?? "N/A"}`,
     });
   } catch (e) {
     console.error("Critical: Could not alert owner.", e.message);
   }
 }
 
-// ─── Usage Builder ────────────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Usage Builder ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 function buildUsageMessage(cmdName, command, prefix) {
   const swap = (str) => str.replaceAll("!", prefix);
   const lines = [
-    `📖 *How to use ${prefix}${cmdName}*`,
-    `📝 *Description:* ${command.description}\n`,
+    `≡ƒôû *How to use ${prefix}${cmdName}*`,
+    `≡ƒô¥ *Description:* ${command.description}\n`,
   ];
-  if (command.usage)          lines.push(`🔧 *Syntax:* ${swap(command.usage)}`);
+  if (command.usage)          lines.push(`≡ƒöº *Syntax:* ${swap(command.usage)}`);
   if (command.examples?.length) {
-    lines.push(`💡 *Examples:*\n${command.examples.map((e) => `• ${swap(e)}`).join("\n")}`);
+    lines.push(`≡ƒÆí *Examples:*\n${command.examples.map((e) => `ΓÇó ${swap(e)}`).join("\n")}`);
   }
-  if (command.notes)          lines.push(`\n📌 *Notes:* ${swap(command.notes)}`);
+  if (command.notes)          lines.push(`\n≡ƒôî *Notes:* ${swap(command.notes)}`);
   return lines.join("\n");
 }
 
-// ─── Reminder Poller (fix #8 — overlap protection) ───────────────────────────
+// ΓöÇΓöÇΓöÇ Reminder Poller (fix #8 ΓÇö overlap protection) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 export function startReminderPoller(sock) {
   let running = false;
@@ -107,16 +100,16 @@ export function startReminderPoller(sock) {
       for (const reminder of due) {
         try {
           await sock.sendMessage(reminder.chat_id, {
-            text: `⏰ *Reminder*\n\n${reminder.message}`,
+            text: `ΓÅ░ *Reminder*\n\n${reminder.message}`,
           });
           await markReminderDone(reminder.id);
         } catch (err) {
-          console.error(`❌ Reminder ID ${reminder.id} failed:`, err.message);
+          console.error(`Γ¥î Reminder ID ${reminder.id} failed:`, err.message);
           await alertOwner(sock, `Reminder Poller (ID: ${reminder.id})`, err);
         }
       }
     } catch (err) {
-      console.error("❌ Poller Database Error:", err.message);
+      console.error("Γ¥î Poller Database Error:", err.message);
     } finally {
       running = false;
     }
@@ -126,28 +119,19 @@ export function startReminderPoller(sock) {
   return () => clearInterval(intervalId);
 }
 
-// ─── Message Handler ──────────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Message Handler ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 const BOT_START_TIME = Date.now();
 
 export async function handleMessage(sock, msg) {
-  try {
-    await processMessage(sock, msg);
-  } catch (err) {
-    console.error("Critical unhandled error in handleMessage:", err.message);
-    await alertOwner(sock, "Global handleMessage Exception", err);
-  }
-}
 
-async function processMessage(sock, msg) {
-
-  // ── Fix #1: Fast early exits — skip invalid/system messages ─────────────
+  // ΓöÇΓöÇ Fix #1: Fast early exits ΓÇö skip invalid/system messages ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
   if (!msg.message) return;
   const from = msg.key.remoteJid;
   if (!from)                          return;
   if (from === "status@broadcast")    return;
 
-  // ── Bulk sticker session — must be before deduplication so no images are missed
+  // ΓöÇΓöÇ Bulk sticker session ΓÇö must be before deduplication so no images are missed
   if (hasStickerSession(from)) {
     // Check if the message contains an image (directly or nested)
     const msgContent = msg.message?.ephemeralMessage?.message ||
@@ -160,7 +144,7 @@ async function processMessage(sock, msg) {
     }
   }
 
-  // Fix #7: Deduplication — skip if already processed
+  // Fix #7: Deduplication ΓÇö skip if already processed
   const msgId = msg.key.id;
   if (msgId && seenMessage(msgId)) return;
   if (msgId) rememberMessage(msgId);
@@ -177,7 +161,7 @@ async function processMessage(sock, msg) {
 
   if (msg.key.fromMe && !text) return;
 
-  // ── Guardrails — fast RAM checks, no DB ─────────────────────────────────
+  // ΓöÇΓöÇ Guardrails ΓÇö fast RAM checks, no DB ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
   if (cachedIsBanned(sender)) return;
   if (isGrp && cachedHasAllowedGroups() && !cachedIsGroupAllowed(from)) return;
 
@@ -199,10 +183,10 @@ async function processMessage(sock, msg) {
     }
   }
 
-  // Activity logging — buffered, non-blocking
+  // Activity logging ΓÇö buffered, non-blocking
   logMessage(sender, from, isGrp);
 
-  // ── Auto-replies and AI ──────────────────────────────────────────────────
+  // ΓöÇΓöÇ Auto-replies and AI ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
   if (!text.startsWith(prefix)) {
     if (msg.message?.extendedTextMessage?.contextInfo) {
       const handled = await handleAiReply(sock, msg, from);
@@ -216,27 +200,25 @@ async function processMessage(sock, msg) {
     return;
   }
 
-  // ── Command routing ──────────────────────────────────────────────────────
+  // ΓöÇΓöÇ Command routing ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
-  // Fix #6: Support quoted arguments gracefully handling unmatched quotes
-  const args = [];
-  const regex = /"([^"]*)"|(\S+)/g;
-  const strippedText = text.slice(prefix.length).trim();
-  let m;
-  while ((m = regex.exec(strippedText)) !== null) {
-    args.push(m[1] !== undefined ? m[1] : m[2]);
-  }
+  // Fix #6: Support quoted arguments e.g. !remind "buy milk tomorrow"
+  const args = text
+    .slice(prefix.length)
+    .trim()
+    .match(/"[^"]+"|\S+/g)
+    ?.map((a) => a.replace(/"/g, "")) || [];
 
   const rawCmd = args.shift()?.toLowerCase();
   if (!rawCmd) return;
 
   const cmdName = resolveAlias(rawCmd);
   const command = commands[cmdName];
-  console.log(`🔧 CMD: "${rawCmd}" → resolved: "${cmdName}" → found: ${!!command}`);
+  console.log(`≡ƒöº CMD: "${rawCmd}" ΓåÆ resolved: "${cmdName}" ΓåÆ found: ${!!command}`);
   if (!command) return;
 
   if (command.adminOnly && !userIsAdmin) {
-    return await replyMsg(sock, from, msg, "🚫 This command is reserved for Admins.");
+    return await replyMsg(sock, from, msg, "≡ƒÜ½ This command is reserved for Admins.");
   }
 
   if (command.requiresArgs && args.length === 0) {
@@ -246,8 +228,8 @@ async function processMessage(sock, msg) {
   try {
     await command.handler(sock, msg, args, from, prefix);
   } catch (err) {
-    console.error(`💥 Error in ${prefix}${cmdName}:`, err);
-    await replyMsg(sock, from, msg, "⚠️ An internal error occurred while processing that command.");
+    console.error(`≡ƒÆÑ Error in ${prefix}${cmdName}:`, err);
+    await replyMsg(sock, from, msg, "ΓÜá∩╕Å An internal error occurred while processing that command.");
     await alertOwner(sock, `Command: ${prefix}${cmdName}`, err, { sender, from, text });
   }
 }

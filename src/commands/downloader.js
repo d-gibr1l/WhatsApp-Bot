@@ -53,6 +53,7 @@ export const downloaderCommands = {
       const quality   = args.find(a => ["360", "480", "720", "1080", "best"].includes(a)) || "720";
 
       await reactMsg(sock, from, msg, "⏳");
+      const progressMsg = await replyMsg(sock, from, msg, "⏳ _Downloading media..._");
 
       try {
         // Get title silently for caption
@@ -66,11 +67,13 @@ export const downloaderCommands = {
         const mb = sizeMB(buffer);
 
         if (mb > MAX_MB) {
+          await sock.sendMessage(from, { delete: progressMsg.key });
           return replyMsg(sock, from, msg,
             `❌ File too large (${mb.toFixed(1)}MB). WhatsApp limit is 64MB.\n\n💡 Try:\n• ${prefix}dl ${url} audio\n• ${prefix}dl ${url} 360`
           );
         }
 
+        await sock.sendMessage(from, { text: `🚀 _Uploading ${mb.toFixed(1)}MB..._`, edit: progressMsg.key });
         await reactMsg(sock, from, msg, "✅");
 
         if (audioOnly || contentType.includes("audio")) {
@@ -94,8 +97,11 @@ export const downloaderCommands = {
           }, { quoted: msg });
         }
 
+        await sock.sendMessage(from, { delete: progressMsg.key }).catch(() => {});
+
       } catch (err) {
         console.error("❌ Download error:", err.message);
+        await sock.sendMessage(from, { delete: progressMsg.key }).catch(() => {});
         await reactMsg(sock, from, msg, "❌");
         await replyMsg(sock, from, msg,
           `❌ Download failed: ${err.message.slice(0, 200)}\n\n💡 If this keeps failing try *${prefix}dlapi ${url}*`
@@ -125,7 +131,7 @@ export const downloaderCommands = {
         `📖 *How to use ${prefix}dlapi*\n\n🔧 *Syntax:* ${prefix}dlapi <url>\n\n📌 Use this only if *${prefix}dl* fails.`
       );
 
-      const apiKey = await getSetting("rapidapi_key", null);
+      const apiKey = cachedGetSetting("rapidapi_key", null);
       if (!apiKey) return replyMsg(sock, from, msg,
         `❌ RapidAPI key not set.\n\n📌 Admin can set it with: *${prefix}setapikey <key>*`
       );

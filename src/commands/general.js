@@ -44,152 +44,39 @@ export const generalCommands = {
       const p = prefix;
       const adminUser = isAdmin(msg);
 
+      const { commands } = await import("./registry.js");
+
       const menu = [
         `╭━━━━━━━━━━━━━━━━━━━━━━╮`,
         `┃   🤖 *BOT COMMAND MENU*   ┃`,
         `╰━━━━━━━━━━━━━━━━━━━━━━╯`,
         ``,
-        `🤖 *AI & SEARCH*`,
-        `┌─────────────────────────`,
-        `│ ${p}ai           → Chat with AI (Groq)`,
-        `│ ${p}clearai      → Clear AI history`,
-        `│ ${p}search       → Search the internet`,
-        `│ ${p}voice        → AI reply as voice note`,
-        `│ ${p}tts          → Text to speech`,
-        `│ ${p}aisticker    → Generate AI sticker`,
-        `│ ${p}aiimage      → Generate AI image`,
-        `└─────────────────────────`,
-        ``,
-        `📥 *MEDIA & DOWNLOADS*`,
-        `┌─────────────────────────`,
-        `│ ${p}dl           → Download video/audio`,
-        `│ ${p}dlapi        → Download via API (fallback)`,
-        `│ ${p}mp3          → Extract audio from URL or video`,
-        `│ ${p}gif          → Create GIF from any video URL`,
-        `│ ${p}info         → Get video info & thumbnail`,
-        `│ ${p}sub          → Extract subtitles from video`,
-        `│ ${p}compress     → Compress a video`,
-        `│ ${p}reverse      → Reverse a video or audio`,
-        `│ ${p}merge        → Merge two videos into one`,
-        `│ ${p}avm          → Merge audio into a video`,
-        `│ ${p}avec         → Audio to video (black bg)`,
-        `│ ${p}sticker      → Image/video/URL to sticker`,
-        `│ ${p}stickers     → Bulk convert images to stickers`,
-        `│ ${p}stickercrop  → Crop & zoom before sticker`,
-        `│ ${p}stickertext  → Add text to a sticker`,
-        `│ ${p}toimage      → Convert sticker to image`,
-        `│ ${p}qr           → Generate or decode QR code`,
-        `│ ${p}viewonce     → Reveal view-once media`,
-        `│ ${p}translate    → Translate text`,
-        `└─────────────────────────`,
-        ``,
-        `🎮 *FUN*`,
-        `┌─────────────────────────`,
-        `│ ${p}joke         → Random joke`,
-        `│ ${p}fact         → Random fun fact`,
-        `│ ${p}quote        → Random quote`,
-        `│ ${p}8ball        → Magic 8-ball`,
-        `│ ${p}poll         → Create a group poll`,
-        `└─────────────────────────`,
-        ``,
-        `🛠️ *UTILITY*`,
-        `┌─────────────────────────`,
-        `│ ${p}ping         → Latency & uptime`,
-        `│ ${p}botstatus    → Bot info`,
-        `│ ${p}remind       → Set a reminder`,
-        `│ ${p}google       → Simple Google search`,
-        `│ ${p}stats        → Message stats`,
-        `│ ${p}getvar       → Get a stored variable`,
-        `│ ${p}aliases      → List shortcuts`,
-        `└─────────────────────────`,
-        ``,
-        `_💡 Type any command alone for usage & examples_`,
       ];
 
-      if (adminUser) {
-        menu.push(
-          ``,
-          `👮 *MODERATION*`,
-          `┌─────────────────────────`,
-          `│ ${p}warn         → Warn a user`,
-          `│ ${p}warnings     → Check warnings`,
-          `│ ${p}clearwarn    → Reset warnings`,
-          `│ ${p}setmaxwarns  → Set warn limit`,
-          `│ ${p}ban/unban    → Ban control`,
-          `│ ${p}banlist      → List banned`,
-          `│ ${p}add/remove   → Group members`,
-          `│ ${p}welcome      → Welcome new members`,
-          `│ ${p}goodbye      → Goodbye messages`,
-          `└─────────────────────────`,
-          ``,
-          `🛡️ *PROTECTION*`,
-          `┌─────────────────────────`,
-          `│ ${p}antilinkon/off    → Anti-link`,
-          `│ ${p}allowlink         → Whitelist domain`,
-          `│ ${p}allowlinklist     → View whitelist`,
-          `│ ${p}antideleteon/off  → Anti-delete`,
-          `│ ${p}antideletedm      → Reveals to DM`,
-          `│ ${p}antideletechat    → Reveals to chat`,
-          `└─────────────────────────`,
-          ``,
-          `🔤 *WORD FILTER*`,
-          `┌─────────────────────────`,
-          `│ ${p}wfilteron/off  → Toggle filter`,
-          `│ ${p}addword         → Add filtered word`,
-          `│ ${p}removeword      → Remove filtered word`,
-          `│ ${p}wordlist        → List filtered words`,
-          `└─────────────────────────`,
-          ``,
-          `💬 *AUTO-REPLY*`,
-          `┌─────────────────────────`,
-          `│ ${p}autoreply        → Add keyword reply`,
-          `│ ${p}removeautoreply  → Remove reply`,
-          `│ ${p}listautorepies   → List replies`,
-          `│ ${p}replyall         → Reply to everything`,
-          `│ ${p}stopreplyall     → Stop reply-all`,
-          `└─────────────────────────`,
-          ``,
-          `📅 *SCHEDULER*`,
-          `┌─────────────────────────`,
-          `│ ${p}send         → Schedule messages`,
-          `│ ${p}stopsend     → Stop scheduled`,
-          `│ ${p}activesends  → List schedules`,
-          `└─────────────────────────`,
-          ``,
-          `⚙️ *SETTINGS*`,
-          `┌─────────────────────────`,
-          `│ ${p}rejectcalls  → Auto-reject calls`,
-          `│ ${p}setvar        → Store a variable`,
-          `│ ${p}delvar        → Delete a variable`,
-          `│ ${p}allvar        → List all variables`,
-          `│ ${p}boton/off       → Toggle bot`,
-          `│ ${p}aion/off        → Toggle AI`,
-          `│ ${p}dlon/off        → Toggle downloader`,
-          `│ ${p}addadmin        → Add admin`,
-          `│ ${p}removeadmin     → Remove admin`,
-          `│ ${p}listadmins      → List admins`,
-          `│ ${p}setprefix       → Change prefix`,
-          `│ ${p}setgroqkey      → Groq AI key`,
-          `│ ${p}settavilykey    → Tavily search key`,
-          `│ ${p}setaiprompt     → AI personality`,
-          `│ ${p}setapikey       → RapidAPI key`,
-          `│ ${p}setpackname     → Sticker pack name`,
-          `│ ${p}setpackauthor   → Sticker pack author`,
-          `│ ${p}broadcast       → Mass message`,
-          `│ ${p}say             → Speak as bot`,
-          `│ ${p}exportstats     → Export CSV`,
-          `│ ${p}clearstats      → Wipe logs`,
-          `│ ${p}settings        → View all settings`,
-          `└─────────────────────────`,
-          ``,
-          `⚡ *ALIASES*`,
-          `┌─────────────────────────`,
-          `│ ${p}alias           → Create shortcut`,
-          `│ ${p}removealias     → Remove shortcut`,
-          `│ ${p}aliases         → List shortcuts`,
-          `└─────────────────────────`,
-        );
+      const publicCmds = [];
+      const adminCmds = [];
+
+      for (const [cmdName, cmd] of Object.entries(commands)) {
+        const line = `│ ${p}${cmdName.padEnd(14)} → ${cmd.description || "No description"}`;
+        if (cmd.adminOnly) adminCmds.push(line);
+        else publicCmds.push(line);
       }
+
+      menu.push(`🌐 *PUBLIC COMMANDS*`);
+      menu.push(`┌─────────────────────────`);
+      menu.push(...publicCmds.sort());
+      menu.push(`└─────────────────────────`);
+      menu.push(``);
+
+      if (adminUser && adminCmds.length > 0) {
+        menu.push(`👮 *ADMIN COMMANDS*`);
+        menu.push(`┌─────────────────────────`);
+        menu.push(...adminCmds.sort());
+        menu.push(`└─────────────────────────`);
+        menu.push(``);
+      }
+
+      menu.push(`_💡 Type any command alone for usage & examples_`);
 
       // Append active aliases if any exist
       const { getAllAliases } = await import("./aliases.js");
@@ -197,7 +84,7 @@ export const generalCommands = {
       if (aliases.size > 0) {
         const aliasLines = [...aliases.entries()]
           .sort((a, b) => a[0].localeCompare(b[0]))
-          .map(([alias, cmd]) => `│ ${p}${alias.padEnd(12)} → ${p}${cmd}`);
+          .map(([alias, cmd]) => `│ ${p}${alias.padEnd(14)} → ${p}${cmd}`);
         menu.push(
           ``,
           `⚡ *YOUR ACTIVE ALIASES*`,
@@ -207,7 +94,10 @@ export const generalCommands = {
         );
       }
 
-      menu.push(``, `_📌 Admin sections only visible to admins._`);
+      if (!adminUser) {
+        menu.push(``, `_📌 Admin commands hidden._`);
+      }
+
       await replyMsg(sock, from, msg, menu.join("\n"));
     },
   },
