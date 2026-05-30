@@ -339,7 +339,7 @@ export const ytToolsCommands = {
 
         for (const url of toDownload) {
           try {
-            const buffer = await downloadImageUrl(url);
+            const { buffer } = await downloadImageUrl(url);
             if (!buffer) throw new Error("Empty buffer");
 
             await sock.sendMessage(from, {

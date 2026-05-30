@@ -362,8 +362,8 @@ export async function downloadImageUrl(url) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const contentType = res.headers.get("content-type") || "image/jpeg";
-  if (!contentType.startsWith("image/")) {
-    throw new Error(`Not an image: ${contentType}`);
+  if (!contentType.startsWith("image/") && !contentType.startsWith("video/")) {
+    throw new Error(`Not an image or video: ${contentType}`);
   }
 
   const arrayBuffer = await res.arrayBuffer();
