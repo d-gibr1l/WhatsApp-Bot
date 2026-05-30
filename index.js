@@ -25,7 +25,7 @@ import { handleAntiDelete, storeMessage } from "./src/commands/antidelete.js";
 import { bindMessagesEvents } from "./src/events/messages.js";
 import { bindGroupEvents }    from "./src/events/groups.js";
 import { bindCallEvents }     from "./src/events/calls.js";
-import { loadCache, startCacheAutoRefresh, cachedGetSetting } from "./src/cache.js";
+import { loadCache, startCacheAutoRefresh, cachedGetSetting, loadSeenMessages } from "./src/cache.js";
 import {
   startServer,
   setQR,
@@ -251,7 +251,9 @@ async function runBot() {
               await loadAliases();
               if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
-              console.log("✅ Bot ready! Waiting 3s for message sync...");
+              console.log("✅ Bot ready! Loading seen messages and waiting 3s for sync...");
+              // Load previously processed message IDs from Redis
+              await loadSeenMessages();
               // Give WhatsApp 3 seconds to flush historical messages
               // before we start processing commands
               setTimeout(() => markBotReady(), 3000);
@@ -265,6 +267,7 @@ async function runBot() {
               if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
               console.log("🔄 Reconnected — caches refreshed. Waiting 3s for sync...");
+              await loadSeenMessages();
               setTimeout(() => markBotReady(), 3000);
             }
           }

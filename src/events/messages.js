@@ -2,6 +2,7 @@ import { LRUCache } from "lru-cache";
 import { handleMessage, extractText, isBotReady } from "../handler.js";
 import { handleAntiDelete, storeMessage } from "../commands/antidelete.js";
 import { chatQueue } from "../queue.js";
+import { rememberMessage } from "../cache.js";
 
 const recentlyRevoked = new LRUCache({ max: 500, ttl: 5000 });
 
@@ -38,7 +39,15 @@ export function bindMessagesEvents(sock) {
     // Block ALL command processing until the bot is marked ready.
     // This prevents replying to historical messages that WhatsApp
     // flushes immediately after every reconnect.
-    if (!isBotReady()) return;
+    // BUT: still record their IDs in the dedup cache so they're
+    // recognized as "already processed" once the bot becomes ready.
+    if (!isBotReady()) {
+      for (const msg of messages) {
+        const id = msg?.key?.id;
+        if (id) rememberMessage(id);
+      }
+      return;
+    }
 
     for (const msg of messages) {
       const jid = msg?.key?.remoteJid;

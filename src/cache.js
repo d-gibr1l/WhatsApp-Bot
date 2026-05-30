@@ -11,6 +11,20 @@ import {
   supabase,
 } from "./db.js";
 import { LRUCache } from "lru-cache";
+import Redis from "ioredis";
+
+// ─── Redis for message deduplication ──────────────────────
+let _dedupRedis = null;
+const DEDUP_KEY = "bot:seen_msgs";
+const DEDUP_TTL = 3600; // 1 hour
+
+function getDedupRedis() {
+  if (_dedupRedis) return _dedupRedis;
+  const url = process.env.REDIS_URL || 'redis://localhost:6379';
+  _dedupRedis = new Redis(url);
+  _dedupRedis.on('error', err => console.error('[DedupRedis] Error:', err.message));
+  return _dedupRedis;
+}
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -235,7 +249,21 @@ export function cachedGetAutoReply(text) {
   return response;
 }
 
-// ─── LRU Message Trackers ─────────────────────────────────
+// ─── LRU Message Trackers (Redis-backed for restart persistence) ──
+
+// Pre-populate the in-memory LRU from Redis on startup.
+// This ensures that messages processed in a previous session
+// are still recognized as "seen" after a restart.
+export async function loadSeenMessages() {
+  try {
+    const redis = getDedupRedis();
+    const ids = await redis.smembers(DEDUP_KEY);
+    for (const id of ids) messageCache.set(id, true);
+    console.log(`✅ Loaded ${ids.length} seen message IDs from Redis`);
+  } catch (err) {
+    console.warn("⚠️ Could not load seen messages from Redis:", err.message);
+  }
+}
 
 export function seenMessage(id) {
   return messageCache.has(id);
@@ -244,6 +272,13 @@ export function seenMessage(id) {
 export function rememberMessage(id) {
   messageCache.set(id, true);
   stats.messagesSeen++;
+  // Fire-and-forget write to Redis (non-blocking)
+  try {
+    const redis = getDedupRedis();
+    redis.sadd(DEDUP_KEY, id).catch(() => {});
+    // Refresh TTL so the set auto-expires after 1 hour of inactivity
+    redis.expire(DEDUP_KEY, DEDUP_TTL).catch(() => {});
+  } catch {}
 }
 
 export function isBotSentMessage(id) {
