@@ -145,6 +145,10 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     "--user-agent", userAgent,
     "--no-playlist",
     "--no-warnings",
+    "--force-ipv4",
+    "--concurrent-fragments", "10",
+    "--downloader", "aria2c,native",
+    "--downloader-args", "aria2c:\"-x 16 -k 1M\"",
     "--extractor-args", "youtube:player_client=android_vr,web_embedded;skip=dash,hls",
     "--print", "%(title)s",
     "--print", "after_move:filepath",
@@ -168,10 +172,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
 
     // Only apply video post-processing for video platforms
     if (!isImagePlatform) {
-      args.push(
-        "--merge-output-format", "mp4",
-        "--postprocessor-args", "ffmpeg:-movflags +faststart"
-      );
+      args.push("--merge-output-format", "mp4");
     }
   }
 
