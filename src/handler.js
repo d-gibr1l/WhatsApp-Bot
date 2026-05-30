@@ -189,7 +189,19 @@ async function processMessage(sock, msg) {
   if (typeof tsRaw === "object" && tsRaw !== null && "low" in tsRaw) tsRaw = tsRaw.low;
   let msgTs = (Number(tsRaw) || 0) * 1000;
   if (msgTs > 100000000000000) msgTs = Math.floor(msgTs / 1000);
-  if (msgTs === 0 || msgTs < connectedAt) return;
+  
+  // DEBUG: Log the timestamp of commands to see if they are actually old
+  const isCmd = extractText(msg)?.trim()?.startsWith(cachedGetSetting("bot_prefix", "!"));
+  if (isCmd) {
+    console.log(`[DEBUG] Command received. msgTs=${msgTs}, connectedAt=${connectedAt}, diff=${Date.now() - msgTs}ms, isNaN=${isNaN(msgTs)}`);
+  }
+
+  // If we couldn't parse a timestamp, or it's older than the bot's connection time,
+  // drop it to avoid answering historical commands on restart.
+  if (!msgTs || isNaN(msgTs) || msgTs < connectedAt) {
+    if (isCmd) console.log(`[DEBUG] Dropped historical command!`);
+    return;
+  }
 
   const text     = extractText(msg).trim();
   const sender   = getSenderNumber(msg);
