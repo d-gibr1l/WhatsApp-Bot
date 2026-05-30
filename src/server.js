@@ -18,7 +18,7 @@ import {
   refreshBanned,
   refreshAutoReplies
 } from "./cache.js";
-import { clearSession } from "./auth/mongoSession.js";
+import { clearSession } from "./auth/redisSession.js";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
