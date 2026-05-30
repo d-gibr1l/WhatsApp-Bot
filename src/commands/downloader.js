@@ -52,6 +52,8 @@ export const downloaderCommands = {
       const audioOnly = args.includes("audio");
       const quality   = args.find(a => ["360", "480", "720", "1080", "best"].includes(a)) || "720";
 
+      await reactMsg(sock, from, msg, "⌛");
+
       try {
         const { buffer, contentType, title } = await downloadWithYtDlp(url, audioOnly, quality);
         const mb = sizeMB(buffer);
