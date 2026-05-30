@@ -3,7 +3,7 @@ import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
-import { getYtDlpPath, getCookiesPath } from "../downloader.js";
+import { getYtDlpPath, getCookiesPath, searchGifs, downloadImageUrl } from "../downloader.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -232,75 +232,137 @@ export const ytToolsCommands = {
   gif: {
     adminOnly: false,
     requiresArgs: true,
-    description: "Create a GIF from any video URL",
-    usage: "!gif <url> [start] [duration]",
+    description: "Search for GIFs or create a GIF from a video URL",
+    usage: "!gif <query> OR !gif <url> [start] [duration]",
     examples: [
-      "!gif https://youtu.be/xxxx",
-      "!gif https://youtu.be/xxxx 0:30",
+      "!gif michael jackson 3",
       "!gif https://youtu.be/xxxx 0:30 5",
-      "!gif https://youtu.be/xxxx 1:20 10",
     ],
-    notes: "Default: first 6 seconds. Max 15 seconds. Start time format: 0:30 or 90.",
+    notes: "If you provide words, it searches Tenor. If you provide a URL, it makes a GIF from the video.",
     handler: async (sock, msg, args, from, prefix) => {
-      const url = args[0];
-      if (!url?.startsWith("http")) return replyMsg(sock, from, msg,
-        `📖 *${prefix}gif <url> [start] [duration]*\n\nCreate a GIF from any video.\n\n💡 Examples:\n• ${prefix}gif https://youtu.be/xxxx\n• ${prefix}gif https://youtu.be/xxxx 0:30\n• ${prefix}gif https://youtu.be/xxxx 0:30 8`
+      const urlOrQuery = args[0];
+      if (!urlOrQuery) return replyMsg(sock, from, msg,
+        `📖 *${prefix}gif <url> [start] [duration]*\n` +
+        `Create a GIF from a video.\n\n` +
+        `📖 *${prefix}gif <search term> [count]*\n` +
+        `Search and download GIFs.\n\n` +
+        `💡 *Examples:*\n` +
+        `• ${prefix}gif https://youtu.be/xxxx 0:30 8\n` +
+        `• ${prefix}gif michael jackson 3`
       );
 
-      const startSec   = args[1] ? parseTimestamp(args[1]) : 0;
-      const durationSec = args[2] ? Math.min(parseInt(args[2]), 15) : 6;
+      if (urlOrQuery.startsWith("http")) {
+        // --- YOUTUBE GIF CREATOR ---
+        const url = args[0];
+        const startSec   = args[1] ? parseTimestamp(args[1]) : 0;
+        const durationSec = args[2] ? Math.min(parseInt(args[2]), 15) : 6;
 
-      await reactMsg(sock, from, msg, "⏳");
+        await reactMsg(sock, from, msg, "⏳");
 
-      const tmpVid = join(tmpdir(), `gif_vid_${Date.now()}.mp4`);
-      const tmpGif = join(tmpdir(), `gif_out_${Date.now()}.mp4`); // WhatsApp GIF = looping mp4
-      const cookiePath = await getCookiesPath();
-      const cookiesFlag = cookiePath ? `--cookies "${cookiePath}"` : "";
-      const ytDlpPath = getYtDlpPath();
+        const tmpVid = join(tmpdir(), `gif_vid_${Date.now()}.mp4`);
+        const tmpGif = join(tmpdir(), `gif_out_${Date.now()}.mp4`);
+        const cookiePath = await getCookiesPath();
+        const cookiesFlag = cookiePath ? `--cookies "${cookiePath}"` : "";
+        const ytDlpPath = getYtDlpPath();
 
-      try {
-        // Download video
-        execSync(
-          `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${tmpVid}" "${url}"`,
-          { timeout: 120000 }
-        );
-
-        if (!existsSync(tmpVid)) throw new Error("yt-dlp produced no file.");
-
-        // Convert clip to GIF-like looping mp4 (no audio, optimized for WhatsApp)
-        execSync(
-          `ffmpeg -ss ${startSec} -i "${tmpVid}" -t ${durationSec} -vf "fps=15,scale=320:-2:flags=lanczos" -an -movflags +faststart -loop 0 "${tmpGif}" -y`,
-          { timeout: 60000 }
-        );
-
-        if (!existsSync(tmpGif)) throw new Error("ffmpeg produced no output.");
-
-        const buffer = readFileSync(tmpGif);
-        const mb = buffer.length / (1024 * 1024);
-
-        if (mb > 64) {
-          return replyMsg(sock, from, msg,
-            `❌ GIF too large (${mb.toFixed(1)}MB).\n\n💡 Try a shorter duration:\n• ${prefix}gif ${url} ${args[1] || "0:00"} 4`
+        try {
+          execSync(
+            `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${tmpVid}" "${url}"`,
+            { timeout: 120000 }
           );
+
+          if (!existsSync(tmpVid)) throw new Error("yt-dlp produced no file.");
+
+          execSync(
+            `ffmpeg -ss ${startSec} -i "${tmpVid}" -t ${durationSec} -vf "fps=15,scale=320:-2:flags=lanczos" -an -movflags +faststart -loop 0 "${tmpGif}" -y`,
+            { timeout: 60000 }
+          );
+
+          if (!existsSync(tmpGif)) throw new Error("ffmpeg produced no output.");
+
+          const buffer = readFileSync(tmpGif);
+          const mb = buffer.length / (1024 * 1024);
+
+          if (mb > 64) {
+            return replyMsg(sock, from, msg,
+              `❌ GIF too large (${mb.toFixed(1)}MB).\n\n💡 Try a shorter duration:\n• ${prefix}gif ${url} ${args[1] || "0:00"} 4`
+            );
+          }
+
+          await reactMsg(sock, from, msg, "✅");
+          await sock.sendMessage(from, {
+            video: buffer,
+            mimetype: "video/mp4",
+            gifPlayback: true,
+            caption: "",
+          }, { quoted: msg });
+
+        } catch (err) {
+          console.error("❌ gif error:", err.message);
+          await failMsg(sock, from, msg, err, "gif");
+        } finally {
+          try { unlinkSync(tmpVid); } catch {}
+          try { unlinkSync(tmpGif); } catch {}
+          if (cookiePath && existsSync(cookiePath)) {
+            try { unlinkSync(cookiePath); } catch {}
+          }
+        }
+      } else {
+        // --- TENOR GIF SEARCH ---
+        let queryParts = [...args];
+        let count = 3;
+
+        const lastArg = queryParts[queryParts.length - 1];
+        if (/^\d+$/.test(lastArg)) {
+          count = Math.min(Math.max(parseInt(lastArg, 10), 1), 10);
+          queryParts.pop();
         }
 
-        await reactMsg(sock, from, msg, "✅");
-        // Send as gifPlayback so WhatsApp plays it as a GIF
-        await sock.sendMessage(from, {
-          video: buffer,
-          mimetype: "video/mp4",
-          gifPlayback: true,
-          caption: "",
-        }, { quoted: msg });
+        const query = queryParts.join(" ").trim();
+        await reactMsg(sock, from, msg, "🔍");
 
-      } catch (err) {
-        console.error("❌ gif error:", err.message);
-        await failMsg(sock, from, msg, err, "gif");
-      } finally {
-        try { unlinkSync(tmpVid); } catch {}
-        try { unlinkSync(tmpGif); } catch {}
-        if (cookiePath && existsSync(cookiePath)) {
-          try { unlinkSync(cookiePath); } catch {}
+        let gifUrls;
+        try {
+          gifUrls = await searchGifs(query, count + 2);
+        } catch (err) {
+          console.error(`GIF search failed for "${query}":`, err.message);
+          return replyMsg(sock, from, msg, `❌ GIF search failed. Please try again later.`);
+        }
+
+        if (!gifUrls || !gifUrls.length) {
+          return replyMsg(sock, from, msg, `❌ No GIFs found for *${query}*.`);
+        }
+
+        const toDownload = gifUrls.slice(0, count);
+        let sent = 0;
+        let failed = 0;
+
+        for (const url of toDownload) {
+          try {
+            const buffer = await downloadImageUrl(url);
+            if (!buffer) throw new Error("Empty buffer");
+
+            await sock.sendMessage(from, {
+              video: buffer,
+              mimetype: "video/mp4",
+              gifPlayback: true,
+            }, { quoted: msg });
+
+            sent++;
+            await new Promise(r => setTimeout(r, 800));
+          } catch (err) {
+            console.error(`GIF download failed [${url.slice(0, 60)}]:`, err.message);
+            failed++;
+          }
+        }
+
+        if (sent === 0) {
+          await replyMsg(sock, from, msg, `❌ Couldn't download any GIFs for *${query}*.\n\nTry a different search term.`);
+        } else {
+          await reactMsg(sock, from, msg, "✅");
+          if (failed > 0) {
+            await replyMsg(sock, from, msg, `⚠️ Only found ${sent} downloadable GIF${sent !== 1 ? "s" : ""} for *${query}* (${failed} failed).`);
+          }
         }
       }
     },
