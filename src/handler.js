@@ -204,19 +204,6 @@ async function processMessage(sock, msg) {
 
   if (msg.key.fromMe && !text) return;
 
-  // Fix: Drop retry storms using exact-text signatures (sender + text).
-  // This allows rapid commands (e.g. "!img cat" then "!img dog") but
-  // drops identical ghost retries sent by Baileys/WhatsApp.
-  if (text) {
-    const signature = `${sender}:${text}`;
-    const lastSeen = messageSignatures.get(signature) || 0;
-    if (Date.now() - lastSeen < 10000) {
-      // It's an exact duplicate of a recent message from this user
-      return;
-    }
-    messageSignatures.set(signature, Date.now());
-  }
-
   // ── Guardrails — fast RAM checks, no DB ─────────────────────────────────
   if (cachedIsBanned(sender)) return;
   if (isGrp && cachedHasAllowedGroups() && !cachedIsGroupAllowed(from)) return;
