@@ -1,10 +1,9 @@
 import { LRUCache } from "lru-cache";
-import { handleMessage, extractText } from "../handler.js";
+import { handleMessage, extractText, isBotReady } from "../handler.js";
 import { handleAntiDelete, storeMessage } from "../commands/antidelete.js";
 import { chatQueue } from "../queue.js";
 
 const recentlyRevoked = new LRUCache({ max: 500, ttl: 5000 });
-const startTime = Date.now();
 
 async function safeHandleDelete(sock, key, deleterJid = null) {
   const id = key?.id;
@@ -36,14 +35,14 @@ export function bindMessagesEvents(sock) {
 
     if (type !== "notify") return;
 
+    // Block ALL command processing until the bot is marked ready.
+    // This prevents replying to historical messages that WhatsApp
+    // flushes immediately after every reconnect.
+    if (!isBotReady()) return;
+
     for (const msg of messages) {
-      let tsRaw = msg.messageTimestamp;
-      if (typeof tsRaw === "object" && tsRaw !== null && "low" in tsRaw) tsRaw = tsRaw.low;
-      let ts = (Number(tsRaw) || 0) * 1000;
-      if (ts > 100000000000000) ts = Math.floor(ts / 1000); // In case it was already in ms
-      
       const jid = msg?.key?.remoteJid;
-      if (ts === 0 || ts < startTime || !msg.message || !jid) continue;
+      if (!msg.message || !jid) continue;
       
       chatQueue.enqueue(jid, async () => {
         try {

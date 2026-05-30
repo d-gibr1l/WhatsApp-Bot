@@ -17,7 +17,7 @@ import {
   getSessionId,
 } from "./src/auth/redisSession.js";
 import { installBadMacInterceptor } from "./src/auth/badMacInterceptor.js";
-import { handleMessage, startReminderPoller, extractText } from "./src/handler.js";
+import { handleMessage, startReminderPoller, extractText, markBotReady } from "./src/handler.js";
 import { loadWordFilter }   from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
 import { loadAliases }      from "./src/commands/aliases.js";
@@ -251,7 +251,10 @@ async function runBot() {
               await loadAliases();
               if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
-              console.log("✅ Bot ready!");
+              console.log("✅ Bot ready! Waiting 3s for message sync...");
+              // Give WhatsApp 3 seconds to flush historical messages
+              // before we start processing commands
+              setTimeout(() => markBotReady(), 3000);
 
             } else {
               // Reconnect — refresh caches
@@ -261,7 +264,8 @@ async function runBot() {
               await loadAliases();
               if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
-              console.log("🔄 Reconnected — caches refreshed.");
+              console.log("🔄 Reconnected — caches refreshed. Waiting 3s for sync...");
+              setTimeout(() => markBotReady(), 3000);
             }
           }
 

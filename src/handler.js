@@ -127,8 +127,21 @@ export function startReminderPoller(sock) {
 }
 
 // ─── Message Handler ──────────────────────────────────────────────────────────
+// ─── Connected timestamp ──────────────────────────────────────────────────────
+// This is set by index.js AFTER the socket opens and caches load.
+// Any message with a timestamp before this value is silently dropped.
+// This prevents the bot from replying to historical messages that WhatsApp
+// flushes on every reconnect.
+let connectedAt = Infinity; // Block everything until explicitly set
 
-const BOT_START_TIME = Date.now();
+export function markBotReady() {
+  connectedAt = Date.now();
+  console.log(`[Handler] Bot marked ready at ${connectedAt} — now accepting messages.`);
+}
+
+export function isBotReady() {
+  return connectedAt !== Infinity;
+}
 
 export async function handleMessage(sock, msg) {
   try {
@@ -165,12 +178,12 @@ async function processMessage(sock, msg) {
   if (msgId && seenMessage(msgId)) return;
   if (msgId) rememberMessage(msgId);
 
-  // Fix #2: Safe timestamp handling across all Baileys versions
+  // Fix #2: Drop messages older than the bot's connection timestamp
   let tsRaw = msg.messageTimestamp;
   if (typeof tsRaw === "object" && tsRaw !== null && "low" in tsRaw) tsRaw = tsRaw.low;
   let msgTs = (Number(tsRaw) || 0) * 1000;
   if (msgTs > 100000000000000) msgTs = Math.floor(msgTs / 1000);
-  if (msgTs === 0 || msgTs < BOT_START_TIME) return;
+  if (msgTs === 0 || msgTs < connectedAt) return;
 
   const text     = extractText(msg).trim();
   const sender   = getSenderNumber(msg);
