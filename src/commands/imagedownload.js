@@ -41,10 +41,12 @@ export const imageCommands = {
       await reactMsg(sock, from, msg, "🔍");
 
       // ── Search ────────────────────────────────────────────────────────────
-      // Fetch count+4 URLs since some will fail to download
+      // Fetch count+4 URLs since some will fail to download.
+      // Fix: Append 'site:pinterest.com' to force all images to come from Pinterest.
       let imageUrls;
       try {
-        imageUrls = await searchImages(query, count + 4);
+        const pagedQuery = `${query} site:pinterest.com`;
+        imageUrls = await searchImages(pagedQuery, count + 4);
       } catch (err) {
         console.error(`Image search failed for "${query}":`, err.message);
         return replyMsg(sock, from, msg,
