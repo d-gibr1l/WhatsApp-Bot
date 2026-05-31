@@ -173,7 +173,7 @@ async function processMessage(sock, msg) {
                        msg.message?.viewOnceMessageV2?.message ||
                        msg.message?.viewOnceMessage?.message ||
                        msg.message;
-    if (msgContent?.imageMessage) {
+    if (msgContent?.imageMessage || msgContent?.videoMessage) {
       const handled = await handleStickerSessionImage(sock, msg, from);
       if (handled) return;
     }

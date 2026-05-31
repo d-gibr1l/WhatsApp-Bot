@@ -469,8 +469,8 @@ export async function handleStickerSessionImage(sock, msg, from) {
                          msg.message?.viewOnceMessage?.message ||
                          msg.message;
 
-  const imgMsg = messageContent?.imageMessage;
-  if (!imgMsg) return false;
+  const hasMedia = messageContent?.imageMessage || messageContent?.videoMessage;
+  if (!hasMedia) return false;
 
   session.messages.push(msg);
   await reactMsg(sock, from, msg, "📸");
@@ -540,7 +540,19 @@ export const bulkStickerCommands = {
         await Promise.all(chunk.map(async (imgMsg) => {
           try {
             const buffer = await downloadMediaMessage(imgMsg, "buffer", {});
-            const webp = await imageToSticker(buffer);
+            
+            // Check if the message is a video or image
+            const messageContent = imgMsg.message?.ephemeralMessage?.message ||
+                                   imgMsg.message?.viewOnceMessageV2?.message ||
+                                   imgMsg.message?.viewOnceMessage?.message ||
+                                   imgMsg.message;
+            
+            const isVideo = !!messageContent?.videoMessage;
+            
+            const webp = isVideo 
+              ? await videoToSticker(buffer)
+              : await imageToSticker(buffer);
+              
             await sock.sendMessage(from, { sticker: webp }, { quoted: msg });
           } catch (err) {
             console.error("Bulk conversion failed for a message", err.message);
