@@ -1270,18 +1270,26 @@ async function broadcastStats() {
   try {
     const now = Date.now();
     if (!cachedStatsPayload || now - lastStatsFetch >= 5000) {
-      const [logs, admins, banned, autoReplies, settings] = await Promise.all([
-        supabase.from("message_logs").select("number, is_group, sent_at"),
+      const today = new Date().toISOString().split("T")[0];
+      const [
+        totalRes, todayRes, groupsRes, recentLogs, 
+        admins, banned, autoReplies, settings
+      ] = await Promise.all([
+        supabase.from("message_logs").select("*", { count: "exact", head: true }),
+        supabase.from("message_logs").select("*", { count: "exact", head: true }).gte("sent_at", today),
+        supabase.from("message_logs").select("*", { count: "exact", head: true }).eq("is_group", true),
+        supabase.from("message_logs").select("number, is_group, sent_at").order("sent_at", { ascending: false }).limit(1000),
         supabase.from("admins").select("number"),
         supabase.from("banned_numbers").select("number, reason"),
         supabase.from("auto_replies").select("keyword, response"),
         supabase.from("settings").select("key, value"),
       ]);
-      const data  = logs.data ?? [];
-      const total = data.length;
-      const today = new Date().toISOString().split("T")[0];
-      const todayCount = data.filter(l => l.sent_at?.startsWith(today)).length;
-      const groups = data.filter(l => l.is_group).length;
+
+      const total = totalRes.count || 0;
+      const todayCount = todayRes.count || 0;
+      const groups = groupsRes.count || 0;
+      
+      const data = recentLogs.data ?? [];
       const senderMap = {};
       for (const l of data) {
         if (!senderMap[l.number]) senderMap[l.number] = { count: 0, last: l.sent_at };
@@ -1291,6 +1299,7 @@ async function broadcastStats() {
       const topSenders = Object.entries(senderMap)
         .sort((a, b) => b[1].count - a[1].count).slice(0, 5)
         .map(([number, v]) => ({ number, count: v.count, last: v.last }));
+        
       cachedStatsPayload = {
         total, today: todayCount, groups, dms: total - groups,
         adminCount: admins.data?.length ?? 0,
