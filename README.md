@@ -1,6 +1,6 @@
 <div align="center">
   <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" width="100" height="100" alt="WhatsApp Logo"/>
-  <h1>Supercharged WhatsApp Bot</h1>
+  <h1>Gib's WhatsApp Bot</h1>
   <p>A lightning-fast, feature-rich WhatsApp bot built with Baileys and Node.js.</p>
 </div>
 
