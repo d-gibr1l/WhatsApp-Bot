@@ -78,6 +78,8 @@ async function videoToSticker(inputBuffer, startSec = 0, durationSec = 6) {
   const packName = cachedGetSetting("sticker_pack_name", "Bot Stickers");
   const authorName = cachedGetSetting("sticker_pack_author", "WhatsApp Bot");
 
+  const tmpOut = join(tmpdir(), `vid_out_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
+
   try {
     const ffmpegArgs = [
       "-ss", startSec.toString(),
@@ -93,40 +95,34 @@ async function videoToSticker(inputBuffer, startSec = 0, durationSec = 6) {
       "-an",
       "-vsync", "0",
       "-f", "webp",
-      "pipe:1"
+      "-y", tmpOut
     ];
 
-    const webpBuffer = await new Promise((resolve, reject) => {
+    await new Promise((resolve, reject) => {
       const ffmpeg = spawn("ffmpeg", ffmpegArgs);
-      const stdoutChunks = [];
       const stderrChunks = [];
 
-      ffmpeg.stdout.on("data", (chunk) => stdoutChunks.push(chunk));
       ffmpeg.stderr.on("data", (chunk) => stderrChunks.push(chunk));
 
       ffmpeg.on("close", (code) => {
-        if (code === 0) {
-          resolve(Buffer.concat(stdoutChunks));
-        } else {
-          const stderrStr = Buffer.concat(stderrChunks).toString();
-          reject(new Error(`FFmpeg exited with code ${code}: ${stderrStr}`));
-        }
+        if (code === 0) resolve();
+        else reject(new Error(`FFmpeg exited with code ${code}: ${Buffer.concat(stderrChunks).toString()}`));
       });
 
       ffmpeg.on("error", (err) => reject(err));
-
-      ffmpeg.stdin.on("error", (err) => {
-        console.warn("FFmpeg stdin pipe error:", err.message);
-      });
+      ffmpeg.stdin.on("error", (err) => console.warn("FFmpeg stdin pipe error:", err.message));
 
       ffmpeg.stdin.write(inputBuffer);
       ffmpeg.stdin.end();
     });
 
+    const webpBuffer = await fs.readFile(tmpOut);
     return await addStickerMetadata(webpBuffer, packName, authorName);
   } catch (err) {
     console.error("❌ FFmpeg stream conversion failed:", err.message);
     throw err;
+  } finally {
+    await fs.unlink(tmpOut).catch(() => {});
   }
 }
 
