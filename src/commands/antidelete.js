@@ -3,11 +3,11 @@ import { botConfig } from "../config.js";
 import { setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
 import { replyMsg } from "./helpers.js";
+import { LRUCache } from "lru-cache";
 
-// ─── In-memory message store (last 500 messages per chat) ────────────────────
-
-const messageStore = new Map();
-const MAX_PER_CHAT = 500;
+// ─── In-memory message store (Global LRU Cache) ────────────────────────────────
+// Holds 50,000 messages globally. Ensures busy chats don't drop history quickly.
+const messageStore = new LRUCache({ max: 50000 });
 
 export function storeMessage(msg, text) {
   const from = msg.key.remoteJid;
@@ -15,30 +15,19 @@ export function storeMessage(msg, text) {
   if (!from || !id) return;
 
   const m = msg.message || {};
-  const isSystem = !!(
-    m.protocolMessage ||
-    m.senderKeyDistributionMessage ||
-    m.messageContextInfo
-  );
-  if (isSystem && !text && !m.imageMessage && !m.videoMessage &&
-      !m.audioMessage && !m.documentMessage && !m.stickerMessage &&
-      !m.viewOnceMessage && !m.viewOnceMessageV2) return;
+  
+  // Only ignore pure Baileys protocol/encryption updates. 
+  // DO NOT ignore messageContextInfo, as it drops WhatsApp Web messages!
+  if (m.protocolMessage || m.senderKeyDistributionMessage) return;
 
-  if (!messageStore.has(from)) messageStore.set(from, new Map());
-  const chatMap = messageStore.get(from);
-
-  chatMap.set(id, {
+  messageStore.set(id, {
     text,
     sender:    msg.key.participant ?? msg.key.remoteJid,
     pushName:  msg.pushName || null,
     timestamp: Date.now(),
     msg,
+    chatId:    from
   });
-
-  if (chatMap.size > MAX_PER_CHAT) {
-    const oldest = chatMap.keys().next().value;
-    chatMap.delete(oldest);
-  }
 }
 
 // ─── Group metadata cache ─────────────────────────────────────────────────────
@@ -85,14 +74,11 @@ export async function handleAntiDelete(sock, deletedKey, deleterJid = null) {
   const messageId = deletedKey.id;
   if (!chatId || !messageId) return;
 
-  const chatMap = messageStore.get(chatId);
-  if (!chatMap) return;
-
-  const stored = chatMap.get(messageId);
+  const stored = messageStore.get(messageId);
   if (!stored) return;
 
   // Remove immediately — prevents duplicate reveals if the event fires twice
-  chatMap.delete(messageId);
+  messageStore.delete(messageId);
 
   const timeStr = new Date(stored.timestamp).toLocaleTimeString();
 
