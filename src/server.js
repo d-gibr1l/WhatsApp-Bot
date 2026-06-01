@@ -9,6 +9,7 @@ import {
   unbanNumber,
   addAutoReply,
   removeAutoReply,
+  cleanupAntiDeleteStore,
   supabase
 } from "./db.js";
 import {
@@ -1324,6 +1325,11 @@ async function broadcastStats() {
 }
 
 setInterval(broadcastStats, 1000);
+
+// ─── Database Cleanup Tasks ───────────────────────────────────────────────────
+setInterval(() => {
+  cleanupAntiDeleteStore().catch(err => console.error("Cleanup error:", err));
+}, 12 * 60 * 60 * 1000); // Run every 12 hours
 
 // ─── QR Image ─────────────────────────────────────────────────────────────────
 

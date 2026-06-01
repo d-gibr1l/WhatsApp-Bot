@@ -229,6 +229,40 @@ export async function markReminderDone(id) {
   await supabase.from("reminders").update({ done: true }).eq("id", id);
 }
 
+// ─── Anti-Delete Store ────────────────────────────────────────────────────────
+
+export async function storeAntiDeletePayload(id, chatId, sender, pushName, payload) {
+  const { error } = await supabase
+    .from("antidelete_store")
+    .upsert({ id, chat_id: chatId, sender, push_name: pushName, payload }, { onConflict: "id" });
+  if (error) console.error("❌ storeAntiDeletePayload error:", error.message);
+}
+
+export async function getAntiDeletePayload(id) {
+  try {
+    const { data, error } = await supabase
+      .from("antidelete_store")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.error("❌ getAntiDeletePayload error:", err.message);
+    return null;
+  }
+}
+
+export async function cleanupAntiDeleteStore() {
+  // Delete messages older than 7 days
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { error } = await supabase
+    .from("antidelete_store")
+    .delete()
+    .lt("created_at", sevenDaysAgo);
+  if (error) console.error("❌ cleanupAntiDeleteStore error:", error.message);
+}
+
 // ─── Buffered Stats Logging ───────────────────────────────────────────────────
 
 let logBuffer = [];

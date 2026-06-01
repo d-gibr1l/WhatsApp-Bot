@@ -1,6 +1,6 @@
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { botConfig } from "../config.js";
-import { setSetting } from "../db.js";
+import { setSetting, storeAntiDeletePayload, getAntiDeletePayload } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
 import { replyMsg } from "./helpers.js";
 import { LRUCache } from "lru-cache";
@@ -20,14 +20,23 @@ export function storeMessage(msg, text) {
   // DO NOT ignore messageContextInfo, as it drops WhatsApp Web messages!
   if (m.protocolMessage || m.senderKeyDistributionMessage) return;
 
-  messageStore.set(id, {
+  const sender = msg.key.participant ?? msg.key.remoteJid;
+  const pushName = msg.pushName || null;
+  
+  const payload = {
     text,
-    sender:    msg.key.participant ?? msg.key.remoteJid,
-    pushName:  msg.pushName || null,
+    sender,
+    pushName,
     timestamp: Date.now(),
     msg,
-    chatId:    from
-  });
+    chatId: from
+  };
+
+  // Instant in-memory cache
+  messageStore.set(id, payload);
+  
+  // Persistent database cold storage (fire and forget)
+  storeAntiDeletePayload(id, from, sender, pushName, payload).catch(() => {});
 }
 
 // ─── Group metadata cache ─────────────────────────────────────────────────────
@@ -74,11 +83,17 @@ export async function handleAntiDelete(sock, deletedKey, deleterJid = null) {
   const messageId = deletedKey.id;
   if (!chatId || !messageId) return;
 
-  const stored = messageStore.get(messageId);
-  if (!stored) return;
-
-  // Remove immediately — prevents duplicate reveals if the event fires twice
-  messageStore.delete(messageId);
+  let stored = messageStore.get(messageId);
+  
+  if (!stored) {
+    // Fallback to Supabase cold storage (survives restarts)
+    const dbRecord = await getAntiDeletePayload(messageId);
+    if (!dbRecord) return;
+    stored = dbRecord.payload;
+  } else {
+    // Remove from RAM immediately — prevents duplicate reveals
+    messageStore.delete(messageId);
+  }
 
   const timeStr = new Date(stored.timestamp).toLocaleTimeString();
 
