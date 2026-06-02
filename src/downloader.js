@@ -59,7 +59,7 @@ export function detectPlatform(url) {
     rumble:      /rumble\.com/,
     bilibili:    /bilibili\.com|b23\.tv/,
     imgur:       /imgur\.com/,
-  };
+    ytsearch:    /^ytsearch\d*:/,
   for (const [platform, regex] of Object.entries(patterns)) {
     if (regex.test(url.toLowerCase())) return platform;
   }
