@@ -1,5 +1,6 @@
 import { botConfig } from "./config.js";
 import { commands, replyMsg, isAdmin } from "./commands/registry.js";
+import { reactMsg } from "./commands/helpers.js";
 import { logMessage, getPendingReminders, markReminderDone } from "./db.js";
 import {
   cachedIsBanned, cachedIsGroupAllowed, cachedHasAllowedGroups,
@@ -268,6 +269,9 @@ async function processMessage(sock, msg) {
   }
 
   if (!command) return;
+
+  // React to all valid commands before processing
+  await reactMsg(sock, from, msg, "⏳").catch(() => {});
 
   const argsLog = args.length > 0 ? ` ${args.join(" ")}` : "";
   console.log(`⚡ [CMD] ${prefix}${cmdName}${argsLog}`);

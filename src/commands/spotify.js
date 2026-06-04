@@ -42,11 +42,8 @@ export const spotifyCommands = {
           }
         }
 
-        const caption = `🎧 *${title}*\n👤 *${artist}*\n\n_Downloading high-quality audio..._`;
-        const placeholder = await sock.sendMessage(from, { text: caption }, { quoted: msg });
-
         // 2. Download the highest quality audio from YouTube matching the track using ytsearch
-        const searchString = `ytsearch1:"${title} ${artist} audio"`;
+        const searchString = `ytsearch1:${title} ${artist} audio`;
         const { buffer } = await downloadWithYtDlp(searchString, true); // audioOnly = true
 
         // 3. Write ID3 Tags (Cover Art, Title, Artist, Album)
@@ -86,9 +83,6 @@ export const spotifyCommands = {
             }
           }
         }, { quoted: msg });
-
-        // Cleanup placeholder
-        await sock.sendMessage(from, { delete: placeholder.key });
 
       } catch (err) {
         console.error("Spotify downloader error:", err);
