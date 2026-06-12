@@ -14,6 +14,7 @@ import {
   drainPendingDbWrites,
   closeRedisConnection,
   purgeCorruptKey,
+  purgeAllKeysForJid,
   getSessionId,
 } from "./src/auth/redisSession.js";
 import { installBadMacInterceptor } from "./src/auth/badMacInterceptor.js";
@@ -42,7 +43,7 @@ startServer();
 
 // Install Bad MAC interceptor immediately — before any socket is created.
 // This ensures even the very first connection's decryption errors are caught.
-installBadMacInterceptor(purgeCorruptKey, getSessionId);
+installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAllKeysForJid);
 
 // ─── State ────────────────────────────────────────────────────────────────────
 

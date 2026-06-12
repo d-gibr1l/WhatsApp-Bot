@@ -32,6 +32,24 @@
 const lastLogTime = new Map();
 const RATE_LIMIT_MS = 10_000; // max 1 log per key per 10s
 
+// Map<jid, {count: number, windowStart: number}>
+const badMacCounts = new Map();
+
+// Periodically prune the maps so they don't grow unbounded
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, time] of lastLogTime.entries()) {
+    if (now - time > RATE_LIMIT_MS * 10) {
+      lastLogTime.delete(key);
+    }
+  }
+  for (const [jid, data] of badMacCounts.entries()) {
+    if (now - data.windowStart > 60_000) {
+      badMacCounts.delete(jid);
+    }
+  }
+}, 5 * 60_000);
+
 function isRateLimited(key) {
   const last = lastLogTime.get(key) ?? 0;
   if (Date.now() - last < RATE_LIMIT_MS) return true;
@@ -99,8 +117,9 @@ let _originalConsoleError = null;
  *
  * @param {Function} purgeCorruptKey - async (type: string, id: string) => void
  * @param {Function} getSessionId    - () => string
+ * @param {Function} [purgeAllForJid] - async (jid: string) => void
  */
-export function installBadMacInterceptor(purgeCorruptKey, getSessionId) {
+export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAllForJid) {
   if (_installed) return;
   _installed = true;
 
@@ -144,7 +163,7 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId) {
       }
 
       if (keyInfo) {
-        purgeCorruptKey(keyInfo.type, keyInfo.id).catch(() => {});
+        purgeForBadMac(keyInfo).catch(() => {});
       }
       return;
     }
@@ -195,11 +214,40 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId) {
     if (!keyInfo) return; // No key ID — Baileys will self-heal via prekey bundle
 
     try {
-      await purgeCorruptKey(keyInfo.type, keyInfo.id);
+      await purgeForBadMac(keyInfo);
     } catch (err) {
       _originalConsoleError(`[BadMAC] Purge failed for ${keyInfo.type}:${keyInfo.id}:`, err.message);
     }
   });
+
+  async function purgeForBadMac(keyInfo) {
+    if (!purgeAllForJid) {
+      // Fallback if not provided
+      await purgeCorruptKey(keyInfo.type, keyInfo.id);
+      return;
+    }
+
+    // Circuit Breaker logic
+    const jid = keyInfo.id;
+    const now = Date.now();
+    let stats = badMacCounts.get(jid) || { count: 0, windowStart: now };
+    
+    // Reset window if it's been more than 60 seconds
+    if (now - stats.windowStart > 60_000) {
+      stats = { count: 0, windowStart: now };
+    }
+    
+    stats.count++;
+    badMacCounts.set(jid, stats);
+
+    if (stats.count >= 3) {
+      _originalConsoleError(`[BadMAC] Circuit Breaker: JID ${jid} hit ${stats.count} bad MACs in 60s. Wiping all session keys.`);
+      await purgeAllForJid(jid);
+      badMacCounts.delete(jid); // Reset after full wipe
+    } else {
+      await purgeCorruptKey(keyInfo.type, keyInfo.id);
+    }
+  }
 
   console.log('[BadMAC] Interceptor installed — Bad MAC errors will be handled gracefully.');
 }
