@@ -102,6 +102,14 @@ function extractKeyId(err) {
   const jidMatch = stack.match(/([\d]+@s\.whatsapp\.net\.[\d]+)/);
   if (jidMatch) return { type: 'session', id: jidMatch[1] };
 
+  // Pattern 4: group JID
+  const groupMatch = stack.match(/([\d]+@g\.us)/);
+  if (groupMatch) return { type: 'sender-key', id: groupMatch[1] };
+
+  // Pattern 5: linked device JID
+  const lidMatch = stack.match(/([\d]+@lid)/);
+  if (lidMatch) return { type: 'session', id: lidMatch[1] };
+
   return null;
 }
 
@@ -109,6 +117,18 @@ function extractKeyId(err) {
 
 let _installed = false;
 let _originalConsoleError = null;
+let _unhandledHandler = null;
+const _recentlyPurged = new Map();
+
+export function uninstallBadMacInterceptor() {
+  if (!_installed) return;
+  console.error = _originalConsoleError;
+  if (_unhandledHandler) process.off('unhandledRejection', _unhandledHandler);
+  _installed = false;
+  lastLogTime.clear();
+  badMacCounts.clear();
+  _recentlyPurged.clear();
+}
 
 /**
  * Install the Bad MAC interceptor.
@@ -183,7 +203,7 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
 
   // ── Layer 2: unhandledRejection listener ───────────────────────────────────
   // Catches Bad MAC / counter errors that escape Baileys' internal catch blocks.
-  process.on('unhandledRejection', async (reason) => {
+  _unhandledHandler = async (reason) => {
     if (!(reason instanceof Error)) return;
 
     const msg = reason.message ?? '';
@@ -218,9 +238,15 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
     } catch (err) {
       _originalConsoleError(`[BadMAC] Purge failed for ${keyInfo.type}:${keyInfo.id}:`, err.message);
     }
-  });
+  };
+  process.on('unhandledRejection', _unhandledHandler);
 
   async function purgeForBadMac(keyInfo) {
+    const now = Date.now();
+    const last = _recentlyPurged.get(keyInfo.id) ?? 0;
+    if (now - last < 2000) return; // deduplicate within 2-second window
+    _recentlyPurged.set(keyInfo.id, now);
+
     if (!purgeAllForJid) {
       // Fallback if not provided
       await purgeCorruptKey(keyInfo.type, keyInfo.id);

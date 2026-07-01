@@ -16,6 +16,26 @@ import { botConfig } from '../config.js';
 let _redis = null;
 let _authInstance = null;
 const _l1Cache = new Map();
+const L1_MAX = 2000;
+const KEY_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
+
+function l1Set(key, value) {
+  if (_l1Cache.size >= L1_MAX) {
+    _l1Cache.delete(_l1Cache.keys().next().value);
+  }
+  _l1Cache.set(key, value);
+}
+
+async function scanKeys(redis, pattern) {
+  const keys = [];
+  let cursor = '0';
+  do {
+    const [nextCursor, batch] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 200);
+    keys.push(...batch);
+    cursor = nextCursor;
+  } while (cursor !== '0');
+  return keys;
+}
 
 // Required credential fields for a fully-provisioned session.
 // Missing ANY of these means the session is corrupt and must be wiped.
@@ -70,10 +90,16 @@ export async function getAuthState() {
   };
 
   const writeCreds = async (creds) => {
-    await redis.set(credsKey, serialize(creds));
+    await redis.set(credsKey, serialize(creds), 'EX', KEY_TTL_SECONDS);
   };
 
-  let creds = await readCreds();
+  let creds;
+  try {
+    creds = await readCreds();
+  } catch (err) {
+    console.warn('[RedisAuth] Could not read creds from Redis, starting fresh:', err.message);
+    creds = initAuthCreds();
+  }
 
   const checkIntegrity = async () => {
     if (creds && Object.keys(creds).length > 0) {
@@ -136,8 +162,8 @@ export async function getAuthState() {
           const key = `${sessionId}:${category}-${id}`;
           const value = data[category][id];
           if (value) {
-            _l1Cache.set(key, value);
-            pipeline.set(key, serialize(value));
+            l1Set(key, value);
+            pipeline.set(key, serialize(value), 'EX', KEY_TTL_SECONDS);
           } else {
             _l1Cache.delete(key);
             pipeline.del(key);
@@ -155,7 +181,7 @@ export async function getAuthState() {
   _authInstance = {
     state: { creds, keys },
     saveCreds: async () => {
-      await writeCreds(creds);
+      await writeCreds(_authInstance.state.creds);
     }
   };
 
@@ -165,13 +191,14 @@ export async function getAuthState() {
 export async function clearSession() {
   const redis = getRedis();
   const sessionId = getSessionId();
-  if (_authInstance) {
-    _authInstance.state.creds = initAuthCreds();
-  }
+  _authInstance = null;
   _l1Cache.clear();
-  const keys = await redis.keys(`${sessionId}:*`);
+  const keys = await scanKeys(redis, `${sessionId}:*`);
   if (keys.length > 0) {
-    await redis.del(...keys);
+    const BATCH = 500;
+    for (let i = 0; i < keys.length; i += BATCH) {
+      await redis.del(...keys.slice(i, i + BATCH));
+    }
   }
   console.log(`[RedisAuth] Session '${sessionId}' cleared.`);
 }
@@ -182,7 +209,10 @@ export async function drainPendingDbWrites() {
 
 export async function closeRedisConnection() {
   if (_redis) {
-    await _redis.quit();
+    await Promise.race([
+      _redis.quit(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('quit timeout')), 3000))
+    ]).catch(() => _redis.disconnect());
     _redis = null;
     console.log('[RedisAuth] Connection closed.');
   }
@@ -208,17 +238,17 @@ export async function purgeAllKeysForJid(jid) {
     `${sessionId}:sender-key-memory-${baseJid}*`
   ];
 
-  let keysToDelete = [];
-  for (const pattern of patterns) {
-    const keys = await redis.keys(pattern);
-    keysToDelete.push(...keys);
-  }
+  const results = await Promise.all(patterns.map(p => scanKeys(redis, p)));
+  const keysToDelete = results.flat();
 
   if (keysToDelete.length > 0) {
     for (const key of keysToDelete) {
       _l1Cache.delete(key);
     }
-    await redis.del(...keysToDelete);
+    const BATCH = 500;
+    for (let i = 0; i < keysToDelete.length; i += BATCH) {
+      await redis.del(...keysToDelete.slice(i, i + BATCH));
+    }
     console.log(`[RedisAuth] Circuit Breaker: Purged ${keysToDelete.length} keys for JID ${baseJid}`);
   }
 }
