@@ -255,7 +255,6 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
 
     // Circuit Breaker logic
     const jid = keyInfo.id;
-    const now = Date.now();
     let stats = badMacCounts.get(jid) || { count: 0, windowStart: now };
     
     // Reset window if it's been more than 60 seconds
