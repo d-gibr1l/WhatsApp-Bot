@@ -1,18 +1,19 @@
 import { reactMsg, replyMsg } from "./helpers.js";
 import { botConfig } from "../config.js";
+import { cachedGetSetting } from "../cache.js";
 
 export const imdbCommands = {
   imdb: {
     adminOnly: false,
     requiresArgs: true,
     description: "Search for a movie or TV show on IMDb",
-    usage: "!imdb <title>",
-    example: "!imdb inception",
-    handler: async (sock, msg, args, from) => {
-      const apiKey = botConfig.OMDB_API_KEY || process.env.OMDB_API_KEY;
+    usage: "<prefix>imdb <title>",
+    example: "<prefix>imdb inception",
+    handler: async (sock, msg, args, from, prefix) => {
+      const apiKey = cachedGetSetting("omdb_api_key", null) || botConfig.OMDB_API_KEY || process.env.OMDB_API_KEY;
       
       if (!apiKey) {
-        await replyMsg(sock, from, msg, "❌ The OMDB API key is missing! The bot owner must set it using: `!setconfig OMDB_API_KEY <key>`");
+        await replyMsg(sock, from, msg, `❌ The OMDB API key is missing! The bot owner must set it using: \`${prefix}setomdbkey <key>\``);
         return;
       }
 

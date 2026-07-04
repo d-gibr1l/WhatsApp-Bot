@@ -27,6 +27,29 @@ export const apikeyCommands = {
     },
   },
 
+  setomdbkey: {
+    adminOnly: true,
+    requiresArgs: true,
+    description: "Set the OMDB API key for the IMDb movie search command",
+    usage: "<prefix>setomdbkey <key>",
+    examples: ["<prefix>setomdbkey abc123xyz"],
+    notes: "Get your free key from omdbapi.com/apikey.aspx. Stored securely in the database.",
+    handler: async (sock, msg, args, from, prefix) => {
+      const key = args[0]?.trim();
+      if (!key) return replyMsg(sock, from, msg,
+        `📖 *How to use ${prefix}setomdbkey*\n\n🔧 *Syntax:*\n${prefix}setomdbkey <key>\n\n📌 Get your free key from omdbapi.com/apikey.aspx`
+      );
+      try {
+        await setSetting("omdb_api_key", key);
+        await refreshSettings();
+        await replyMsg(sock, from, msg, "✅ OMDB API key updated successfully.");
+      } catch (err) {
+        await replyMsg(sock, from, msg, `❌ ${err.message}`);
+        await alertOwner(sock, `${prefix}setomdbkey`, err);
+      }
+    },
+  },
+
   checkapikey: {
     adminOnly: true,
     requiresArgs: false,
