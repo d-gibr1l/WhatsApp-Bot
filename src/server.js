@@ -456,6 +456,18 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
         </div>
       </div>
 
+      <!-- OMDB API Key -->
+      <div class="setting-card">
+        <div class="setting-info">
+          <h3>OMDB API Key</h3>
+          <p>Used for the IMDb movie search command.</p>
+        </div>
+        <div class="input-group" style="margin-top:12px;">
+          <input type="password" id="setting-omdb_api_key" class="form-input" placeholder="Paste OMDB API Key here"/>
+          <button class="input-btn" onclick="updateSettingText('omdb_api_key')">Save</button>
+        </div>
+      </div>
+
       <!-- YouTube Cookies -->
       <div class="setting-card" style="grid-column: 1 / -1;">
         <div class="setting-info">
@@ -625,7 +637,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
     });
 
     // Process other text inputs
-    ['max_warnings', 'sticker_pack_name', 'sticker_pack_author', 'gemini_api_key', 'groq_api_key', 'tavily_api_key', 'rapidapi_key', 'yt_cookies'].forEach(key => {
+    ['max_warnings', 'sticker_pack_name', 'sticker_pack_author', 'gemini_api_key', 'groq_api_key', 'tavily_api_key', 'rapidapi_key', 'omdb_api_key', 'yt_cookies'].forEach(key => {
       const el = document.getElementById('setting-' + key);
       if (el && map.has(key)) {
         el.value = map.get(key);
