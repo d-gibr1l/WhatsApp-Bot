@@ -415,7 +415,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
           <p>Used for the Google Gemini vision and text LLM features.</p>
         </div>
         <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="setting-gemini_api_key" class="form-input" placeholder="Paste Gemini Key here" autocomplete="new-password" spellcheck="false"/>
+          <input type="text" id="setting-gemini_api_key" class="form-input" placeholder="Paste Gemini Key here" autocomplete="new-password" spellcheck="false"/>
           <button class="input-btn" onclick="updateSettingText('gemini_api_key')">Save</button>
         </div>
       </div>
@@ -427,7 +427,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
           <p>Used for high-speed Llama-3 AI response generation.</p>
         </div>
         <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="setting-groq_api_key" class="form-input" placeholder="Paste Groq Key here" autocomplete="new-password" spellcheck="false"/>
+          <input type="text" id="setting-groq_api_key" class="form-input" placeholder="Paste Groq Key here" autocomplete="new-password" spellcheck="false"/>
           <button class="input-btn" onclick="updateSettingText('groq_api_key')">Save</button>
         </div>
       </div>
@@ -439,7 +439,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
           <p>Used by the AI search command to search the web.</p>
         </div>
         <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="setting-tavily_api_key" class="form-input" placeholder="Paste Tavily Key here" autocomplete="new-password" spellcheck="false"/>
+          <input type="text" id="setting-tavily_api_key" class="form-input" placeholder="Paste Tavily Key here" autocomplete="new-password" spellcheck="false"/>
           <button class="input-btn" onclick="updateSettingText('tavily_api_key')">Save</button>
         </div>
       </div>
@@ -451,7 +451,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
           <p>Used for media downloads (Instagram, YouTube, etc.).</p>
         </div>
         <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="setting-rapidapi_key" class="form-input" placeholder="Paste RapidAPI Key here" autocomplete="new-password" spellcheck="false"/>
+          <input type="text" id="setting-rapidapi_key" class="form-input" placeholder="Paste RapidAPI Key here" autocomplete="new-password" spellcheck="false"/>
           <button class="input-btn" onclick="updateSettingText('rapidapi_key')">Save</button>
         </div>
       </div>
@@ -463,7 +463,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
           <p>Used for the IMDb movie search command.</p>
         </div>
         <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="setting-tmdb_api_key" class="form-input" placeholder="Paste TMDB API Key here" autocomplete="new-password" spellcheck="false"/>
+          <input type="text" id="setting-tmdb_api_key" class="form-input" placeholder="Paste TMDB API Key here" autocomplete="new-password" spellcheck="false"/>
           <button class="input-btn" onclick="updateSettingText('tmdb_api_key')">Save</button>
         </div>
       </div>
@@ -640,7 +640,12 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
     ['max_warnings', 'sticker_pack_name', 'sticker_pack_author', 'gemini_api_key', 'groq_api_key', 'tavily_api_key', 'rapidapi_key', 'tmdb_api_key', 'yt_cookies'].forEach(key => {
       const el = document.getElementById('setting-' + key);
       if (el && map.has(key)) {
-        el.value = map.get(key);
+        let val = map.get(key);
+        if (val && (key.includes('api_key') || key === 'yt_cookies') && val.length > 5) {
+          const visible = Math.ceil(val.length / 3);
+          val = val.substring(0, visible) + '•'.repeat(val.length - visible);
+        }
+        el.value = val;
       }
     });
   }
@@ -670,7 +675,11 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
 
   function updateSettingText(key) {
     const el = document.getElementById('setting-' + key);
-    saveSetting(key, el.value.trim());
+    const val = el.value.trim();
+    if (val.includes('•••')) {
+      return showToast('Please paste a full key before saving. Do not save the masked key.', 'error');
+    }
+    saveSetting(key, val);
   }
 
   // ── Manage Auto Replies ────────────────────────────────────────────────────
