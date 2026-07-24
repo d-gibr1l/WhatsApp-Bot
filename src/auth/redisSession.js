@@ -15,6 +15,7 @@ import { botConfig } from '../config.js';
 
 let _redis = null;
 let _authInstance = null;
+let _authPromise = null;
 const _l1Cache = new Map();
 const L1_MAX = 2000;
 const KEY_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
@@ -56,7 +57,7 @@ function getRedis() {
   const url = process.env.REDIS_URL || 'redis://localhost:6379';
   _redis = new Redis(url);
   _redis.on('error', err => console.error('[RedisAuth] Error:', err.message));
-  console.log('[RedisAuth] Connected');
+  _redis.on('ready', () => console.log('[RedisAuth] Connected'));
   return _redis;
 }
 
@@ -71,14 +72,29 @@ const serialize = (value) => JSON.stringify(value);
 const deserialize = (raw, keyType) => {
   if (!raw) return null;
   const value = JSON.parse(raw, bufferReviver);
+  return normalizeForType(value, keyType);
+};
+
+// Ensure a value has the same shape whether it came from Redis (read path) or
+// straight from Baileys (write path). Baileys hands us a plain object for
+// app-state-sync-key on set, but expects the proto form on get — so the L1
+// cache must store the proto form in both cases to stay consistent.
+function normalizeForType(value, keyType) {
   if (keyType === 'app-state-sync-key' && value) {
     return proto.Message.AppStateSyncKeyData.fromObject(value);
   }
   return value;
-};
+}
 
 export async function getAuthState() {
   if (_authInstance) return _authInstance;
+  // Guard against concurrent callers building two instances during startup.
+  if (_authPromise) return _authPromise;
+  _authPromise = _buildAuthState().finally(() => { _authPromise = null; });
+  return _authPromise;
+}
+
+async function _buildAuthState() {
   const redis = getRedis();
   const sessionId = getSessionId();
 
@@ -148,7 +164,7 @@ export async function getAuthState() {
           }
           if (raw) {
             const parsed = deserialize(raw, type);
-            _l1Cache.set(key, parsed);
+            l1Set(key, parsed);
             data[id] = parsed;
           }
         }
@@ -162,7 +178,7 @@ export async function getAuthState() {
           const key = `${sessionId}:${category}-${id}`;
           const value = data[category][id];
           if (value) {
-            l1Set(key, value);
+            l1Set(key, normalizeForType(value, category));
             pipeline.set(key, serialize(value), 'EX', KEY_TTL_SECONDS);
           } else {
             _l1Cache.delete(key);
@@ -204,7 +220,9 @@ export async function clearSession() {
 }
 
 export async function drainPendingDbWrites() {
-  console.log('[RedisAuth] No WAL to drain. Writes are synchronous.');
+  // No write-ahead log in the Redis backend — keys.set/saveCreds write through
+  // to Redis immediately, so there is nothing buffered to flush on shutdown.
+  console.log('[RedisAuth] No pending writes to drain. Writes are synchronous.');
 }
 
 export async function closeRedisConnection() {

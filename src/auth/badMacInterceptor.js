@@ -12,7 +12,7 @@
  * Layer 2 — unhandledRejection listener:
  *   Some Bad MAC errors escape Baileys' internal catch blocks and surface as
  *   unhandled rejections. The listener calls purgeCorruptKey() to remove the
- *   offending key from L1 + WAL + MongoDB so the next decrypt gets a fresh key.
+ *   offending key from the L1 cache + Redis so the next decrypt gets a fresh key.
  *
  * Both layers share the same rate limiter and key-ID extractor.
  *
@@ -31,12 +31,15 @@
 // Map<key, lastLogTimestampMs>
 const lastLogTime = new Map();
 const RATE_LIMIT_MS = 10_000; // max 1 log per key per 10s
+const PURGE_DEDUP_MS = 2_000; // collapse duplicate purges of the same key within 2s
 
 // Map<jid, {count: number, windowStart: number}>
 const badMacCounts = new Map();
 
-// Periodically prune the maps so they don't grow unbounded
-setInterval(() => {
+// Periodically prune the maps so they don't grow unbounded.
+// Timer id is captured so uninstall can clear it; unref() keeps it from
+// holding the process open on its own.
+const _pruneTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, time] of lastLogTime.entries()) {
     if (now - time > RATE_LIMIT_MS * 10) {
@@ -48,7 +51,13 @@ setInterval(() => {
       badMacCounts.delete(jid);
     }
   }
+  for (const [id, time] of _recentlyPurged.entries()) {
+    if (now - time > PURGE_DEDUP_MS) {
+      _recentlyPurged.delete(id);
+    }
+  }
 }, 5 * 60_000);
+_pruneTimer.unref?.();
 
 function isRateLimited(key) {
   const last = lastLogTime.get(key) ?? 0;
@@ -117,13 +126,16 @@ function extractKeyId(err) {
 
 let _installed = false;
 let _originalConsoleError = null;
+let _originalConsoleLog = null;
 let _unhandledHandler = null;
 const _recentlyPurged = new Map();
 
 export function uninstallBadMacInterceptor() {
   if (!_installed) return;
-  console.error = _originalConsoleError;
+  if (_originalConsoleError) console.error = _originalConsoleError;
+  if (_originalConsoleLog) console.log = _originalConsoleLog;
   if (_unhandledHandler) process.off('unhandledRejection', _unhandledHandler);
+  clearInterval(_pruneTimer);
   _installed = false;
   lastLogTime.clear();
   badMacCounts.clear();
@@ -147,7 +159,7 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
   // Silences Bad MAC / decrypt error messages that Baileys and libsignal print
   // directly to console.error or console.log (bypassing our pino "silent" logger).
   _originalConsoleError = console.error.bind(console);
-  const _originalConsoleLog = console.log.bind(console);
+  _originalConsoleLog = console.log.bind(console);
 
   console.error = (...args) => {
     if (!isSuppressible(...args)) {
@@ -243,35 +255,35 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
 
   async function purgeForBadMac(keyInfo) {
     const now = Date.now();
-    const last = _recentlyPurged.get(keyInfo.id) ?? 0;
-    if (now - last < 2000) return; // deduplicate within 2-second window
-    _recentlyPurged.set(keyInfo.id, now);
-
-    if (!purgeAllForJid) {
-      // Fallback if not provided
-      await purgeCorruptKey(keyInfo.type, keyInfo.id);
-      return;
-    }
-
-    // Circuit Breaker logic
     const jid = keyInfo.id;
+
+    // Always count the failure toward the circuit breaker, even inside the
+    // dedup window — bursts of bad MACs for one JID are exactly the runaway
+    // case the breaker is meant to catch, so they must not be swallowed.
     let stats = badMacCounts.get(jid) || { count: 0, windowStart: now };
-    
-    // Reset window if it's been more than 60 seconds
     if (now - stats.windowStart > 60_000) {
-      stats = { count: 0, windowStart: now };
+      stats = { count: 0, windowStart: now }; // reset expired window
     }
-    
     stats.count++;
     badMacCounts.set(jid, stats);
 
-    if (stats.count >= 3) {
+    // Circuit Breaker: too many failures for one JID → wipe all its keys.
+    // This runs regardless of the dedup window.
+    if (purgeAllForJid && stats.count >= 3) {
       _originalConsoleError(`[BadMAC] Circuit Breaker: JID ${jid} hit ${stats.count} bad MACs in 60s. Wiping all session keys.`);
       await purgeAllForJid(jid);
-      badMacCounts.delete(jid); // Reset after full wipe
-    } else {
-      await purgeCorruptKey(keyInfo.type, keyInfo.id);
+      badMacCounts.delete(jid);   // reset after full wipe
+      _recentlyPurged.delete(jid); // allow the next individual purge immediately
+      return;
     }
+
+    // Below the breaker threshold: purge just the offending key, but collapse
+    // duplicate single-key purges of the same JID within the dedup window.
+    const last = _recentlyPurged.get(jid) ?? 0;
+    if (now - last < PURGE_DEDUP_MS) return;
+    _recentlyPurged.set(jid, now);
+
+    await purgeCorruptKey(keyInfo.type, keyInfo.id);
   }
 
   console.log('[BadMAC] Interceptor installed — Bad MAC errors will be handled gracefully.');
