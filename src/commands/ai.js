@@ -5,19 +5,6 @@ import { botConfig } from "../config.js";
 
 const MAX_HISTORY = 20;
 
-// ─── Per-user cooldown ────────────────────────────────────────────────────────
-const COOLDOWN_MS = 10_000;
-const lastUsed    = new Map();
-
-function checkCooldown(userId) {
-  const now  = Date.now();
-  const last = lastUsed.get(userId) ?? 0;
-  if (now - last < COOLDOWN_MS) return Math.ceil((COOLDOWN_MS - (now - last)) / 1000);
-  lastUsed.set(userId, now);
-  if (lastUsed.size > 1000) lastUsed.delete(lastUsed.keys().next().value);
-  return 0;
-}
-
 // ─── Conversation history (Supabase) ─────────────────────────────────────────
 
 async function getHistory(chatId) {
@@ -129,12 +116,6 @@ export const aiCommands = {
       const groqKey = cachedGetSetting("groq_api_key", null);
       if (!groqKey) return replyMsg(sock, from, msg,
         `❌ Groq API key not set. Admin must run *${prefix}setgroqkey <key>* first.\n\n📌 Get a free key at: console.groq.com`
-      );
-
-      const senderJid = msg.key.participant ?? msg.key.remoteJid;
-      const wait = checkCooldown(senderJid);
-      if (wait > 0) return replyMsg(sock, from, msg,
-        `⏳ Please wait *${wait}s* before sending another AI message.`
       );
 
       const userMessage = args.join(" ");
@@ -257,8 +238,6 @@ export async function handleAiReply(sock, msg, from) {
   if (!text) return false;
 
   const senderJid = msg.key.participant ?? msg.key.remoteJid;
-  const wait = checkCooldown(senderJid);
-  if (wait > 0) return true;
 
   try {
     await reactMsg(sock, from, msg, "🤖");
