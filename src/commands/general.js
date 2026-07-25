@@ -58,6 +58,7 @@ export const generalCommands = {
 │ ${p}mp3
 │ ${p}gif
 │ ${p}image
+│ ${p}spotify
 └ ${p}sub
 
 ╭━━〔 🎨 STICKER STUDIO 〕━━╮
@@ -66,6 +67,8 @@ export const generalCommands = {
 │ ${p}stickercrop
 │ ${p}stickers
 │ ${p}stickertext
+│ ${p}triggered
+│ ${p}wasted
 └ ${p}toimage
 
 ╭━━〔 🎬 VIDEO ENGINE 〕━━╮
@@ -83,6 +86,7 @@ export const generalCommands = {
 │ ${p}qr
 │ ${p}poll
 │ ${p}remind
+│ ${p}lyrics
 └ ${p}translate
 
 ╭━━〔 🎮 FUN & ENGAGEMENT 〕━━╮
@@ -90,6 +94,7 @@ export const generalCommands = {
 │ ${p}8ball
 │ ${p}fact
 │ ${p}joke
+│ ${p}meme
 │ ${p}quote
 └ ${p}numberfact
 
