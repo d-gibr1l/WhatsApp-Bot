@@ -44,101 +44,143 @@ export const generalCommands = {
       const p = prefix;
       const adminUser = isAdmin(msg);
 
-      const menu = [
-        `┌────────────────────────┐`,
-        `   🤖  *SYSTEM COMMAND DASHBOARD*`,
-        `└─────────────────────────`,
-        ``,
-        `🌐  [ PUBLIC UTILITIES ]`,
-        `──────────────────────────`,
-        ` ⌗ *AI & Audio* ➔ `,
-        `      ${p}ai | ${p}aiimage | ${p}aisticker | ${p}voice | ${p}tts`,
-        ` ⌗ *Media DL* ➔ `,
-        `      ${p}dl | ${p}dlapi | ${p}mp3 | ${p}gif | ${p}image | ${p}sub`,
-        ` ⌗ *Stickers* ➔ `,
-        `      ${p}sticker | ${p}stickercrop | ${p}stickers | ${p}stickertext | ${p}toimage`,
-        ` ⌗ *Video FX* ➔ `,
-        `      ${p}avec | ${p}avm | ${p}compress | ${p}merge | ${p}reverse`,
-        ` ⌗ *Utilities* ➔ `,
-        `      ${p}google | ${p}search | ${p}qr | ${p}poll | ${p}remind | ${p}translate`,
-        ` ⌗ *Engagement* ➔ `,
-        `      ${p}8ball | ${p}fact | ${p}joke | ${p}quote | ${p}numberfact`,
-        ` ⌗ *Diagnostics* ➔ `,
-        `      ${p}botstatus | ${p}ping | ${p}info | ${p}aliases | ${p}warnings`,
-        ` ⌗ *Session* ➔ `,
-        `      ${p}cancel | ${p}done | ${p}getvar | ${p}help | ${p}menu`,
-      ];
+      const menu = `╭━━〔 🧠 AI & CREATION 〕━━╮
+│ ${p}ai
+│ ${p}aiimage
+│ ${p}aisticker
+│ ${p}voice
+└ ${p}tts
+
+╭━━〔 📥 MEDIA CENTER 〕━━╮
+----🌍 Download Tools
+│ ${p}dl
+│ ${p}dlapi
+│ ${p}mp3
+│ ${p}gif
+│ ${p}image
+└ ${p}sub
+
+╭━━〔 🎨 STICKER STUDIO 〕━━╮
+----🖼 Creative Tools
+│ ${p}sticker
+│ ${p}stickercrop
+│ ${p}stickers
+│ ${p}stickertext
+└ ${p}toimage
+
+╭━━〔 🎬 VIDEO ENGINE 〕━━╮
+----🎞 Processing Tools
+│ ${p}avec
+│ ${p}avm
+│ ${p}compress
+│ ${p}merge
+└ ${p}reverse
+
+╭━━〔 🛠 UTILITY HUB 〕━━╮
+----⚙ Everyday Tools
+│ ${p}google
+│ ${p}search
+│ ${p}qr
+│ ${p}poll
+│ ${p}remind
+└ ${p}translate
+
+╭━━〔 🎮 FUN & ENGAGEMENT 〕━━╮
+----🎲 Entertainment
+│ ${p}8ball
+│ ${p}fact
+│ ${p}joke
+│ ${p}quote
+└ ${p}numberfact
+
+╭━━〔 📊 SYSTEM MONITOR 〕━━╮
+----🖥 Diagnostics
+│ ${p}botstatus
+│ ${p}ping
+│ ${p}info
+│ ${p}aliases
+└ ${p}warnings
+
+╭━━〔 🔄 SESSION CONTROL 〕━━╮
+----🔐 Session Tools
+│ ${p}cancel
+│ ${p}done
+│ ${p}getvar
+│ ${p}help
+└ ${p}menu
+
+╭━━〔 ⚡ ACTIVE MACROS 〕━━╮
+----🚀 Shortcuts
+
+│ ${p}admins
+└──→ ${p}listadmins
+
+│ ${p}antidelete
+└──→ ${p}antideleteon
+
+│ ${p}ask
+└──→ ${p}ai
+
+│ ${p}botoff
+└──→ ${p}all
+
+│ ${p}img
+└──→ ${p}image
+
+│ ${p}movie
+└──→ ${p}imdb
+
+│ ${p}st
+└──→ ${p}sticker
+
+│ ${p}vo
+└──→ ${p}viewonce
+
+╭━━〔 🔒 RESTRICTED AREA 〕━━╮
+----⚠ Hidden Modules
+
+│ 👑 Owner Commands
+│ 🛡 Admin Controls
+│ 🔐 Security System
+│ ⚙ Developer Tools
+
+╭━━〔 💡 QUICK GUIDE 〕━━╮
+Send any command alone to view:
+✓ Usage
+✓ Examples
+✓ Parameters
+✓ Aliases
+
+╰━━━〔 🤖 BOT CORE 〕━━━╯`;
 
       if (adminUser) {
-        menu.push(
-          ``,
-          `👮  [ ADMINISTRATION ]`,
-          `──────────────────────────`,
-          ` ⌗ *Access* ➔ `,
-          `      ${p}allowgroup | ${p}removegroup | ${p}listgroups`,
-          ` ⌗ *Staff* ➔ `,
-          `      ${p}addadmin | ${p}removeadmin | ${p}listadmins | ${p}rejectcalls`,
-          ` ⌗ *Moderation* ➔ `,
-          `      ${p}add | ${p}remove | ${p}ban | ${p}unban | ${p}banlist | ${p}user`,
-          ` ⌗ *Penalties* ➔ `,
-          `      ${p}warn | ${p}clearwarn | ${p}setmaxwarns`,
-          ` ⌗ *Core Engine* ➔ `,
-          `      ${p}boton | ${p}botoff | ${p}say | ${p}broadcast | ${p}settings | ${p}setprefix`,
-          ` ⌗ *AI Config* ➔ `,
-          `      ${p}aion | ${p}aioff | ${p}clearai | ${p}setaiprompt`,
-          ` ⌗ *Automation* ➔ `,
-          `      ${p}autoreply | ${p}listautorepies | ${p}removeautoreply | ${p}replyall | ${p}stopreplyall`,
-          ` ⌗ *Greetings* ➔ `,
-          `      ${p}welcome | ${p}setwelcome | ${p}goodbye`,
-          ` ⌗ *Scheduler* ➔ `,
-          `      ${p}send | ${p}stopsend | ${p}activesends`,
-          ` ⌗ *Storage* ➔ `,
-          `      ${p}setvar | ${p}getvar | ${p}delvar | ${p}allvar`,
-          ` ⌗ *System Logs* ➔ `,
-          `      ${p}stats | ${p}exportstats | ${p}clearstats`,
-          ` ⌗ *Integrations* ➔ `,
-          `      ${p}setapikey | ${p}setgroqkey | ${p}settavilykey | ${p}checkapikey | ${p}setmenu`,
-          ` ⌗ *Sticker Packs* ➔ `,
-          `      ${p}setpackname | ${p}setpackauthor`,
-          ``,
-          `🛡️  [ SECURITY SHIELDS ]`,
-          `──────────────────────────`,
-          ` ⌗ *Anti-Link* ➔ `,
-          `      ${p}antilinkon | ${p}antilinkoff | ${p}allowlink | ${p}removeallowlink | ${p}allowlinklist`,
-          ` ⌗ *Anti-Delete* ➔ `,
-          `      ${p}antideleteon | ${p}antideleteoff | ${p}antideletechat | ${p}antideletedm`,
-          ` ⌗ *Word Filter* ➔ `,
-          `      ${p}wfilteron | ${p}wfilteroff | ${p}addword | ${p}removeword | ${p}wordlist`
-        );
-      } else {
-        menu.push(``, `_📌 Admin & Security commands hidden._`);
+        // Append actual admin commands if the user is an admin
+        const adminMenu = `\n\n╭━━〔 👮 ADMIN CONTROLS 〕━━╮
+│ ${p}addadmin
+│ ${p}removeadmin
+│ ${p}ban
+│ ${p}unban
+│ ${p}warn
+│ ${p}clearwarn
+│ ${p}setmaxwarns
+│ ${p}settings
+│ ${p}setprefix
+│ ${p}setapikey
+│ ${p}setgroqkey
+└ ${p}setpackname
+
+╭━━〔 🛡️ SECURITY SHIELDS 〕━━╮
+│ ${p}antilinkon
+│ ${p}antilinkoff
+│ ${p}antideleteon
+│ ${p}antideleteoff
+│ ${p}wfilteron
+└ ${p}wfilteroff`;
+        await replyMsg(sock, from, msg, menu + adminMenu);
+        return;
       }
-
-      // Append active aliases if any exist dynamically
-      const { getAllAliases } = await import("./aliases.js");
-      const aliases = getAllAliases();
-      if (aliases.size > 0) {
-        const aliasPairs = [...aliases.entries()]
-          .sort((a, b) => a[0].localeCompare(b[0]))
-          .map(([alias, cmd]) => `${p}${alias} → ${p}${cmd}`);
-        
-        menu.push(
-          ``,
-          `⚡  [ ACTIVE MACROS ]`,
-          `──────────────────────────`,
-          ` ⌗ *Shortcut Keys* ➔ `,
-          `      ${aliasPairs.join(" | ")}`
-        );
-      }
-
-      menu.push(
-        ``,
-        `──────────────────────────`,
-        `💡 _Tip: Send any command alone for usage instructions._`,
-        `──────────────────────────`
-      );
-
-      await replyMsg(sock, from, msg, menu.join("\n"));
+      
+      await replyMsg(sock, from, msg, menu);
     },
   },
 
