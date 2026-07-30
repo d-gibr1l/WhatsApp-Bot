@@ -97,6 +97,7 @@ export const generalCommands = {
 │ ${p}joke
 │ ${p}meme
 │ ${p}quote
+│ ${p}tweet
 └ ${p}numberfact
 
 ╭━━〔 📊 SYSTEM MONITOR 〕━━╮
