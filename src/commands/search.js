@@ -82,9 +82,7 @@ export const searchCommands = {
           caption += "No results found.";
         }
 
-        if (sources.length > 0) {
-          caption += `\n\n🌐 *Sources:*\n${sources.map((s, i) => `${i + 1}. ${s.url}`).join("\n")}`;
-        }
+
 
         // Try to send with image, fall back to text-only if image fails
         if (imageUrl) {
