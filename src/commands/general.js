@@ -84,6 +84,7 @@ export const generalCommands = {
 │ ${p}google
 │ ${p}search
 │ ${p}qr
+│ ${p}pdf
 │ ${p}poll
 │ ${p}remind
 │ ${p}lyrics
