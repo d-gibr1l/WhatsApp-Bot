@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check badMacInterceptor.js)",
+      "Bash(node --check redisSession.js)",
+      "Bash(echo \"redisSession check note: $?\")"
+    ]
+  }
+}

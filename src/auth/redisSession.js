@@ -16,9 +16,32 @@ import { botConfig } from '../config.js';
 let _redis = null;
 let _authInstance = null;
 let _authPromise = null;
+// Bumped by clearSession(). An in-flight _buildAuthState() compares against it
+// before publishing, so a build that started before the clear cannot install
+// itself afterwards and resurrect the session that was just wiped.
+let _authGeneration = 0;
 const _l1Cache = new Map();
 const L1_MAX = 2000;
 const KEY_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
+
+// Redis writes that have been issued but not yet acknowledged, so
+// drainPendingDbWrites() can actually wait for them before shutdown.
+const _pendingWrites = new Set();
+
+function trackWrite(promise) {
+  const tracked = promise.finally(() => _pendingWrites.delete(tracked));
+  _pendingWrites.add(tracked);
+  // The caller still owns error handling for `promise`; this derived copy
+  // exists only for drain bookkeeping, so swallow to avoid reporting the same
+  // failure twice as an unhandled rejection.
+  tracked.catch(() => {});
+  return promise;
+}
+
+// Redis MATCH treats these as glob metacharacters. JIDs should never contain
+// them, but the value reaches us via a parsed error stack, so escape it rather
+// than trust the shape.
+const escapeGlob = (s) => s.replace(/[*?[\]\\]/g, '\\$&');
 
 function l1Set(key, value) {
   if (_l1Cache.size >= L1_MAX) {
@@ -38,18 +61,62 @@ async function scanKeys(redis, pattern) {
   return keys;
 }
 
-// Required credential fields for a fully-provisioned session.
-// Missing ANY of these means the session is corrupt and must be wiped.
+// Core cryptographic material that initAuthCreds() populates up front. A
+// persisted blob missing any of these is unusable and must be wiped.
+//
+// `me` is deliberately NOT listed: initAuthCreds() never sets it and Baileys
+// only fills it in once pairing completes, so treating it as required would
+// condemn every session that is still mid-QR-scan. Pairing progress is
+// reported separately in _buildAuthState().
 const REQUIRED_CRED_FIELDS = [
   'noiseKey',
   'signedIdentityKey',
   'registrationId',
   'signedPreKey',
-  'me',
 ];
 
+// The Redis keyspace namespace. Resolved once, on first use, then frozen.
+//
+// It deliberately does NOT track botConfig.BOT_NUMBER over time. That value is
+// only populated once connection.update fires "open" (index.js), but the auth
+// state must be read from Redis *before* connecting — the creds are what you
+// authenticate with, so the number cannot be known first. The dependency is
+// circular and unresolvable.
+//
+// Letting the namespace change mid-process is what makes it dangerous:
+// _buildAuthState() captures it once and keeps writing under the original
+// prefix, while purgeCorruptKey(), purgeAllKeysForJid() and clearSession()
+// each re-resolve it per call. After the number is detected those two diverge,
+// so every purge and every wipe silently targets an empty keyspace — Bad MAC
+// self-heal stops healing, and /api/system/wipe stops wiping.
+let _sessionId = null;
+let _warnedUnknownNs = false;
+let _warnedNsDrift = false;
+
 export function getSessionId() {
-  return botConfig.BOT_NUMBER || process.env.BOT_NUMBER || 'unknown';
+  if (_sessionId === null) {
+    _sessionId = botConfig.BOT_NUMBER || process.env.BOT_NUMBER || 'unknown';
+    if (_sessionId === 'unknown' && !_warnedUnknownNs) {
+      _warnedUnknownNs = true;
+      console.warn(
+        `[RedisAuth] BOT_NUMBER is unset — pinning the keyspace to 'unknown'. ` +
+        `Set BOT_NUMBER in the environment if more than one bot shares this Redis.`
+      );
+    }
+    return _sessionId;
+  }
+
+  const live = botConfig.BOT_NUMBER || process.env.BOT_NUMBER;
+  if (live && live !== _sessionId && !_warnedNsDrift) {
+    _warnedNsDrift = true;
+    console.warn(
+      `[RedisAuth] BOT_NUMBER resolved to '${live}' after the keyspace was pinned ` +
+      `to '${_sessionId}'. Keeping '${_sessionId}': switching now would point every ` +
+      `purge and wipe at an empty keyspace. Set BOT_NUMBER at startup to pin it ` +
+      `explicitly.`
+    );
+  }
+  return _sessionId;
 }
 
 function getRedis() {
@@ -97,16 +164,24 @@ export async function getAuthState() {
 async function _buildAuthState() {
   const redis = getRedis();
   const sessionId = getSessionId();
+  const generation = _authGeneration;
 
   const credsKey = `${sessionId}:creds`;
 
+  // True once creds have actually been read back from Redis. Only a persisted
+  // blob can be corrupt — a freshly initialised one is complete by construction.
+  let hadPersistedCreds = false;
+
   const readCreds = async () => {
     const raw = await redis.get(credsKey);
-    return raw ? deserialize(raw, 'creds') : initAuthCreds();
+    if (!raw) return initAuthCreds();
+    const parsed = deserialize(raw, 'creds');
+    hadPersistedCreds = true; // set only after a successful parse
+    return parsed;
   };
 
   const writeCreds = async (creds) => {
-    await redis.set(credsKey, serialize(creds), 'EX', KEY_TTL_SECONDS);
+    await trackWrite(redis.set(credsKey, serialize(creds), 'EX', KEY_TTL_SECONDS));
   };
 
   let creds;
@@ -118,24 +193,41 @@ async function _buildAuthState() {
   }
 
   const checkIntegrity = async () => {
-    if (creds && Object.keys(creds).length > 0) {
-      const missingFields = REQUIRED_CRED_FIELDS.filter((f) => !creds[f]);
-      if (missingFields.length > 0) {
-        console.warn(
-          `[RedisAuth] Session '${sessionId}' is incomplete (missing: ${missingFields.join(', ')}). ` +
-          `Self-healing: clearing session.`
-        );
-        await clearSession();
-        creds = initAuthCreds();
-      }
-    }
+    if (!hadPersistedCreds) return;
+
+    // Only null/undefined count as absent. A plain falsy test would also catch
+    // a legitimate registrationId of 0, wiping a valid session on the
+    // ~1-in-16384 chance Baileys generated one.
+    const missingFields =
+      !creds || typeof creds !== 'object'
+        ? ['<unreadable creds blob>']
+        : REQUIRED_CRED_FIELDS.filter((f) => creds[f] === undefined || creds[f] === null);
+
+    if (missingFields.length === 0) return;
+
+    console.warn(
+      `[RedisAuth] Session '${sessionId}' is corrupt (missing: ${missingFields.join(', ')}). ` +
+      `Self-healing: clearing session.`
+    );
+    await _wipeSessionKeys(redis, sessionId);
+    creds = initAuthCreds();
+    hadPersistedCreds = false;
   };
 
   await checkIntegrity();
 
-  if (!creds?.noiseKey) {
+  if (!hadPersistedCreds) {
     console.log(`[RedisAuth] No session found for '${sessionId}' — QR login required`);
+  } else if (!creds.me) {
+    console.log(
+      `[RedisAuth] Session '${sessionId}' restored but pairing never completed — resuming QR login`
+    );
   }
+
+  // Flipped by clearSession() when this instance is discarded. A socket can
+  // outlive the clear and keep emitting creds.update / key writes; those must
+  // not resurrect the session we just wiped.
+  let stale = false;
 
   const keys = {
     get: async (type, ids) => {
@@ -172,6 +264,7 @@ async function _buildAuthState() {
       return data;
     },
     set: async (data) => {
+      if (stale) return;
       const pipeline = redis.pipeline();
       for (const category of Object.keys(data)) {
         for (const id of Object.keys(data[category])) {
@@ -186,7 +279,7 @@ async function _buildAuthState() {
           }
         }
       }
-      const results = await pipeline.exec();
+      const results = await trackWrite(pipeline.exec());
       const errors = results.filter(([err]) => err);
       if (errors.length > 0) {
         console.error(`[RedisAuth] ${errors.length} errors during keys.set pipeline execution`, errors[0][0]);
@@ -194,46 +287,93 @@ async function _buildAuthState() {
     }
   };
 
-  _authInstance = {
+  // Bound to a local rather than read back off the module-level _authInstance,
+  // which clearSession() sets to null while this instance may still be in use.
+  const instance = {
     state: { creds, keys },
     saveCreds: async () => {
-      await writeCreds(_authInstance.state.creds);
-    }
+      if (stale) {
+        console.warn(
+          `[RedisAuth] Ignoring saveCreds for cleared session '${sessionId}' — ` +
+          `call getAuthState() again to rebuild auth state.`
+        );
+        return;
+      }
+      await writeCreds(instance.state.creds);
+    },
+    invalidate: () => { stale = true; }
   };
 
-  return _authInstance;
+  // clearSession() may have run while we were reading from Redis. This instance
+  // describes a session that no longer exists, so hand it back to the caller
+  // already invalidated rather than publishing it as the live one — the next
+  // getAuthState() then builds cleanly against the wiped session.
+  if (generation !== _authGeneration) {
+    instance.invalidate();
+    console.warn(
+      `[RedisAuth] Session '${sessionId}' was cleared while auth state was loading — ` +
+      `discarding the stale instance.`
+    );
+    return instance;
+  }
+
+  _authInstance = instance;
+  return instance;
+}
+
+// Deletes every key for the session without touching the cached auth instance
+// or the generation counter. _buildAuthState()'s self-heal path needs this:
+// it is *part of* the build, so bumping the generation would make the build
+// invalidate the very instance it is about to return.
+async function _wipeSessionKeys(redis, sessionId) {
+  _l1Cache.clear();
+  const keys = await scanKeys(redis, `${sessionId}:*`);
+  const BATCH = 500;
+  for (let i = 0; i < keys.length; i += BATCH) {
+    await redis.del(...keys.slice(i, i + BATCH));
+  }
 }
 
 export async function clearSession() {
   const redis = getRedis();
   const sessionId = getSessionId();
+  _authGeneration++;
+  const previous = _authInstance;
   _authInstance = null;
-  _l1Cache.clear();
-  const keys = await scanKeys(redis, `${sessionId}:*`);
-  if (keys.length > 0) {
-    const BATCH = 500;
-    for (let i = 0; i < keys.length; i += BATCH) {
-      await redis.del(...keys.slice(i, i + BATCH));
-    }
-  }
+  previous?.invalidate();
+  await _wipeSessionKeys(redis, sessionId);
   console.log(`[RedisAuth] Session '${sessionId}' cleared.`);
 }
 
 export async function drainPendingDbWrites() {
-  // No write-ahead log in the Redis backend — keys.set/saveCreds write through
-  // to Redis immediately, so there is nothing buffered to flush on shutdown.
-  console.log('[RedisAuth] No pending writes to drain. Writes are synchronous.');
+  // There is no write-ahead log — keys.set/saveCreds write through to Redis
+  // immediately — but "issued" is not "acknowledged". Anything still in flight
+  // would be lost when closeRedisConnection() runs, so wait it out here.
+  if (_pendingWrites.size === 0) {
+    console.log('[RedisAuth] No pending writes to drain.');
+    return;
+  }
+  const pending = _pendingWrites.size;
+  await Promise.allSettled([..._pendingWrites]);
+  console.log(`[RedisAuth] Drained ${pending} pending write(s).`);
 }
 
 export async function closeRedisConnection() {
-  if (_redis) {
-    await Promise.race([
-      _redis.quit(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('quit timeout')), 3000))
-    ]).catch(() => _redis.disconnect());
-    _redis = null;
-    console.log('[RedisAuth] Connection closed.');
-  }
+  if (!_redis) return;
+
+  // The cached auth instance closed over this client. Leaving it published
+  // would hand later callers an instance whose writes go to a quit connection,
+  // so retire it and let the next getAuthState() rebuild against a fresh one.
+  const previous = _authInstance;
+  _authInstance = null;
+  previous?.invalidate();
+
+  await Promise.race([
+    _redis.quit(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('quit timeout')), 3000))
+  ]).catch(() => _redis.disconnect());
+  _redis = null;
+  console.log('[RedisAuth] Connection closed.');
 }
 
 export async function purgeCorruptKey(type, id) {
@@ -248,16 +388,35 @@ export async function purgeCorruptKey(type, id) {
 export async function purgeAllKeysForJid(jid) {
   const redis = getRedis();
   const sessionId = getSessionId();
-  const baseJid = jid.split(':')[0].split('.')[0]; 
-  
-  const patterns = [
-    `${sessionId}:session-${baseJid}*`,
-    `${sessionId}:sender-key-${baseJid}*`,
-    `${sessionId}:sender-key-memory-${baseJid}*`
-  ];
+
+  // A group jid must be kept whole — sender-key ids embed the full "<n>@g.us",
+  // and splitting on '.' would truncate it to "<n>@g".
+  const isGroup = jid.includes('@');
+  const base = escapeGlob(isGroup ? jid : jid.split(':')[0].split('.')[0]);
+
+  // Key id formats, verified against Baileys 6.7.21:
+  //   session            "<user>.<device>"            (ProtocolAddress.toString)
+  //   sender-key         "<group>::<user>::<device>"  (SenderKeyName.toString)
+  //   sender-key-memory  "<group>"                    (the group jid itself)
+  // A user id never contains '.' or '_': ProtocolAddress rejects a dotted id,
+  // and jidDecode() strips any "_agent" before the address is built.
+  //
+  // Every pattern is anchored on the separator that terminates the user/group
+  // part. A bare `${base}*` also matches any longer id sharing those leading
+  // digits, so purging '123456' would wipe '1234567's keys along with it.
+  const patterns = isGroup
+    ? [
+        `${sessionId}:sender-key-${base}::*`,      // <group>::<user>::<device>
+        `${sessionId}:sender-key-memory-${base}`,  // id is the group jid itself
+      ]
+    : [
+        `${sessionId}:session-${base}.*`,          // <user>.<device>
+        `${sessionId}:sender-key-*::${base}::*`,   // this user's key in any group
+      ];
 
   const results = await Promise.all(patterns.map(p => scanKeys(redis, p)));
-  const keysToDelete = results.flat();
+  // SCAN may return the same key more than once, and patterns can overlap.
+  const keysToDelete = [...new Set(results.flat())];
 
   if (keysToDelete.length > 0) {
     for (const key of keysToDelete) {
@@ -267,7 +426,7 @@ export async function purgeAllKeysForJid(jid) {
     for (let i = 0; i < keysToDelete.length; i += BATCH) {
       await redis.del(...keysToDelete.slice(i, i + BATCH));
     }
-    console.log(`[RedisAuth] Circuit Breaker: Purged ${keysToDelete.length} keys for JID ${baseJid}`);
+    console.log(`[RedisAuth] Circuit Breaker: Purged ${keysToDelete.length} keys for JID ${base}`);
   }
 }
 
