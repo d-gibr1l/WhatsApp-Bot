@@ -191,9 +191,10 @@ async function processMessage(sock, msg) {
   let msgTs = (Number(tsRaw) || 0) * 1000;
   if (msgTs > 100000000000000) msgTs = Math.floor(msgTs / 1000);
   
-  // If we couldn't parse a timestamp, or it's older than the bot's connection time,
+  // If we couldn't parse a timestamp, or it's older than 2 minutes,
   // drop it to avoid answering historical commands on restart.
-  if (!msgTs || isNaN(msgTs) || msgTs < connectedAt) {
+  // This avoids clock drift issues compared to checking against connectedAt.
+  if (!msgTs || isNaN(msgTs) || Date.now() - msgTs > 120_000) {
     return;
   }
 
@@ -248,12 +249,24 @@ async function processMessage(sock, msg) {
 
   // Fix #6: Support quoted arguments gracefully handling unmatched quotes
   const args = [];
-  const regex = /"([^"]*)"|(\S+)/g;
   const strippedText = text.slice(prefix.length).trim();
-  let m;
-  while ((m = regex.exec(strippedText)) !== null) {
-    args.push(m[1] !== undefined ? m[1] : m[2]);
+  let currentArg = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < strippedText.length; i++) {
+    const char = strippedText[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ' ' && !inQuotes) {
+      if (currentArg) {
+        args.push(currentArg);
+        currentArg = '';
+      }
+    } else {
+      currentArg += char;
+    }
   }
+  if (currentArg) args.push(currentArg);
 
   const rawCmd = args.shift()?.toLowerCase();
   if (!rawCmd) return;

@@ -141,9 +141,13 @@ async function createSocket() {
     getMessage: async () => ({ conversation: "" }),
   });
 
-  // saveCreds is wired directly to MongoDB — no debounce, immediate write.
+  // saveCreds is wired directly to Redis — no debounce, immediate write.
   // CREDS updates are rare and losing one means a full session reset.
-  sock.ev.on("creds.update", saveCreds);
+  sock.ev.on("creds.update", (...args) => {
+    saveCreds(...args).catch((err) => {
+      console.error("⚠️ Failed to save creds update:", err.message);
+    });
+  });
 
   sock.ev.on("messaging-history.set", ({ messages }) => {
     console.log(`History sync: ${messages.length} messages received (ignored).`);
@@ -156,6 +160,7 @@ async function createSocket() {
 
 async function runBot() {
   let attempt = 1;
+  let sessionLoaded = false;
 
   // Startup jitter — staggers reconnects on Koyeb rolling deploys to prevent
   // multiple instances from hammering WhatsApp servers simultaneously.
@@ -172,9 +177,6 @@ async function runBot() {
     console.error("⚠️ Failed to update yt-dlp:", err.message);
   }
 
-  // loadSession() handles FORCE_FRESH_SESSION if set
-  await loadSession();
-
   while (attempt <= MAX_RECONNECTS) {
     console.log(`Connecting (attempt ${attempt}/${MAX_RECONNECTS})...`);
     setStarting();
@@ -188,6 +190,10 @@ async function runBot() {
     }
 
     try {
+      if (!sessionLoaded) {
+        await loadSession();
+        sessionLoaded = true;
+      }
       if (currentSock) {
         try { currentSock.ev.removeAllListeners(); } catch {}
         try { currentSock.ws?.close(); } catch {}
@@ -420,4 +426,4 @@ async function runBot() {
   }
 }
 
-runBot();
+runBot().catch((err) => console.error("Unhandled error in runBot:", err));

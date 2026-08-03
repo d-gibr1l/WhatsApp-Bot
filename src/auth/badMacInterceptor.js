@@ -117,8 +117,35 @@ const SIGNAL_ADDRESS_RE = /^[\w-]+\.\d+$/;
  * @param {Error} err
  * @returns {{ type: string, id: string, exact: boolean } | null}
  */
-function extractKeyId(err) {
-  const stack = err?.stack ?? '';
+function extractKeyId(errOrObj) {
+  if (!errOrObj) return null;
+
+  let stackParts = [];
+
+  if (typeof errOrObj === 'string') {
+    stackParts.push(errOrObj);
+  } else if (typeof errOrObj === 'object') {
+    if (errOrObj.stack) stackParts.push(String(errOrObj.stack));
+    if (errOrObj.message) stackParts.push(String(errOrObj.message));
+    if (errOrObj.jid) stackParts.push(String(errOrObj.jid));
+    if (errOrObj.chatId) stackParts.push(String(errOrObj.chatId));
+    if (errOrObj.sender) stackParts.push(String(errOrObj.sender));
+    if (errOrObj.remoteJid) stackParts.push(String(errOrObj.remoteJid));
+    if (errOrObj.id) stackParts.push(String(errOrObj.id));
+    if (errOrObj.err) {
+      if (errOrObj.err.stack) stackParts.push(String(errOrObj.err.stack));
+      if (errOrObj.err.message) stackParts.push(String(errOrObj.err.message));
+    }
+    if (errOrObj.cause) {
+      if (errOrObj.cause.stack) stackParts.push(String(errOrObj.cause.stack));
+      if (errOrObj.cause.message) stackParts.push(String(errOrObj.cause.message));
+    }
+  } else {
+    stackParts.push(String(errOrObj));
+  }
+
+  const stack = stackParts.join('\n');
+  if (!stack) return null;
 
   // Pattern 1: "at async <address> [as awaitable]"  ← most reliable
   const queueMatch = stack.match(/at async ([\w.@:+-]+)\s+\[as awaitable\]/);
@@ -247,8 +274,14 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
     const text = args.map((a) => (typeof a === 'string' ? a : String(a))).join(' ');
 
     if (text.includes('Bad MAC')) {
-      const errArg = args.find((a) => a instanceof Error);
-      const keyInfo = errArg ? extractKeyId(errArg) : null;
+      let targetArg = args.find((a) => a instanceof Error);
+      if (!targetArg) {
+        targetArg = args.find((a) => a && typeof a === 'object' && !Array.isArray(a));
+      }
+      if (!targetArg) {
+        targetArg = text;
+      }
+      const keyInfo = targetArg ? extractKeyId(targetArg) : null;
 
       if (!isLog && !isRateLimited(`console:mac:${sessionId}`)) {
         const keyStr = keyInfo ? ` (key: ${keyInfo.id})` : '';
@@ -280,83 +313,99 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
   // ── Layer 2: unhandledRejection listener ───────────────────────────────────
   // Catches Bad MAC / counter errors that escape Baileys' internal catch blocks.
   _unhandledHandler = async (reason) => {
-    const msg = reason instanceof Error ? (reason.message ?? '') : '';
-    const isCounter =
-      reason instanceof Error &&
-      (msg.includes('Key used already') || reason.name === 'MessageCounterError');
-    const isBadMac = msg.includes('Bad MAC');
+    try {
+      const msg =
+        typeof reason === 'string'
+          ? reason
+          : reason instanceof Error
+          ? (reason.message ?? '') + '\n' + (reason.stack ?? '')
+          : reason
+          ? String(reason)
+          : '';
+      const isCounter =
+        (reason && reason.name === 'MessageCounterError') ||
+        msg.includes('Key used already') ||
+        msg.includes('MessageCounterError');
+      const isBadMac = msg.includes('Bad MAC');
 
-    // Not ours — hand it back to Node's default behaviour rather than
-    // swallowing an unrelated failure.
-    if (!isCounter && !isBadMac) {
-      escalateRejection(reason);
-      return;
-    }
+      // Not ours — hand it back to Node's default behaviour rather than
+      // swallowing an unrelated failure.
+      if (!isCounter && !isBadMac) {
+        escalateRejection(reason);
+        return;
+      }
 
-    const sessionId = getSessionId();
+      const sessionId = getSessionId();
 
-    // Replay protection — drop silently
-    if (isCounter) {
-      if (!isRateLimited(`unhandled:counter:${sessionId}`)) {
+      // Replay protection — drop silently
+      if (isCounter) {
+        if (!isRateLimited(`unhandled:counter:${sessionId}`)) {
+          _originalConsoleError(
+            `[BadMAC] MessageCounterError (unhandled rejection) for session '${sessionId}' — dropped.`
+          );
+        }
+        return;
+      }
+
+      // Bad MAC — purge the offending key
+      if (!isRateLimited(`unhandled:mac:${sessionId}`)) {
         _originalConsoleError(
-          `[BadMAC] MessageCounterError (unhandled rejection) for session '${sessionId}' — dropped.`
+          `[BadMAC] Unhandled Bad MAC for session '${sessionId}'. Purging key.`
         );
       }
-      return;
-    }
 
-    // Bad MAC — purge the offending key
-    if (!isRateLimited(`unhandled:mac:${sessionId}`)) {
-      _originalConsoleError(
-        `[BadMAC] Unhandled Bad MAC for session '${sessionId}'. Purging key.`
-      );
-    }
+      const keyInfo = extractKeyId(reason);
+      if (!keyInfo) return; // No key ID — Baileys will self-heal via prekey bundle
 
-    const keyInfo = extractKeyId(reason);
-    if (!keyInfo) return; // No key ID — Baileys will self-heal via prekey bundle
-
-    try {
-      await purgeForBadMac(keyInfo);
-    } catch (err) {
-      _originalConsoleError(`[BadMAC] Purge failed for ${keyInfo.type}:${keyInfo.id}:`, err.message);
+      try {
+        await purgeForBadMac(keyInfo);
+      } catch (err) {
+        _originalConsoleError(`[BadMAC] Purge failed for ${keyInfo.type}:${keyInfo.id}:`, err.message);
+      }
+    } catch (handlerErr) {
+      _originalConsoleError('[BadMAC] Exception in unhandledRejection listener:', handlerErr);
     }
   };
   process.on('unhandledRejection', _unhandledHandler);
 
+  function getBaseJid(id) {
+    if (!id) return '';
+    if (id.endsWith('@g.us')) return id;
+    return id.split('@')[0].split(':')[0].split('.')[0];
+  }
+
   async function purgeForBadMac(keyInfo) {
     const now = Date.now();
-    const jid = keyInfo.id;
+    const baseJid = getBaseJid(keyInfo.id);
 
     // A full wipe for this JID is already running. Join it rather than queueing
     // a competing one, and don't count the failure — the wipe about to finish
     // already covers it.
-    const inFlight = _wipesInFlight.get(jid);
+    const inFlight = _wipesInFlight.get(baseJid);
     if (inFlight) return inFlight;
 
-    // Always count the failure toward the circuit breaker, even inside the
-    // dedup window — bursts of bad MACs for one JID are exactly the runaway
-    // case the breaker is meant to catch, so they must not be swallowed.
-    let stats = badMacCounts.get(jid) || { count: 0, windowStart: now };
+    // Always count the failure toward the circuit breaker by base JID
+    let stats = badMacCounts.get(baseJid) || { count: 0, windowStart: now };
     if (now - stats.windowStart > 60_000) {
       stats = { count: 0, windowStart: now }; // reset expired window
     }
     stats.count++;
-    badMacCounts.set(jid, stats);
+    badMacCounts.set(baseJid, stats);
 
     // Circuit Breaker: too many failures for one JID → wipe all its keys.
     // This runs regardless of the dedup window.
     if (purgeAllForJid && stats.count >= 3) {
-      _originalConsoleError(`[BadMAC] Circuit Breaker: JID ${jid} hit ${stats.count} bad MACs in 60s. Wiping all session keys.`);
+      _originalConsoleError(`[BadMAC] Circuit Breaker: JID ${baseJid} hit ${stats.count} bad MACs in 60s. Wiping all session keys.`);
 
       // Reset *before* awaiting. Everything up to the first await runs
       // atomically, so a concurrent caller must never observe a count that is
       // still over the threshold while the wipe is in flight.
-      badMacCounts.delete(jid);
-      _recentlyPurged.delete(jid); // allow the next individual purge immediately
+      badMacCounts.delete(baseJid);
+      _recentlyPurged.delete(baseJid); // allow the next individual purge immediately
 
-      const wipe = Promise.resolve(purgeAllForJid(jid))
-        .finally(() => _wipesInFlight.delete(jid));
-      _wipesInFlight.set(jid, wipe);
+      const wipe = Promise.resolve(purgeAllForJid(baseJid))
+        .finally(() => _wipesInFlight.delete(baseJid));
+      _wipesInFlight.set(baseJid, wipe);
       return wipe;
     }
 
@@ -369,9 +418,9 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
     // has already been counted above) and to Baileys' own prekey self-heal.
     if (!keyInfo.exact) return;
 
-    const last = _recentlyPurged.get(jid) ?? 0;
+    const last = _recentlyPurged.get(keyInfo.id) ?? 0;
     if (now - last < PURGE_DEDUP_MS) return;
-    _recentlyPurged.set(jid, now);
+    _recentlyPurged.set(keyInfo.id, now);
 
     await purgeCorruptKey(keyInfo.type, keyInfo.id);
   }

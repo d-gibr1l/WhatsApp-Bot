@@ -47,7 +47,7 @@ class Trie {
   }
 
   insert(keyword, response) {
-    const words = keyword.toLowerCase().split(/\s+/);
+    const words = keyword.toLowerCase().replace(/[.,?!;:()'"]/g, "").split(/\s+/);
     let node = this.root;
     for (const word of words) {
       if (!node.children.has(word)) node.children.set(word, new TrieNode());
@@ -57,7 +57,7 @@ class Trie {
   }
 
   search(text) {
-    const words = text.toLowerCase().split(/\s+/);
+    const words = text.toLowerCase().replace(/[.,?!;:()'"]/g, "").split(/\s+/);
     for (let i = 0; i < words.length; i++) {
       let node = this.root;
       for (let j = i; j < words.length; j++) {
@@ -106,13 +106,21 @@ function buildAutoReplyTrie(autoReplies) {
 
 export async function loadCache() {
   try {
-    const [admins, banned, groups, settings, autoReplies] = await Promise.all([
+    const results = await Promise.allSettled([
       getAdmins(),
       getBannedList(),
       getAllowedGroups(),
       getAllSettings(),
       getAllAutoReplies(),
     ]);
+
+    const getValue = (result, fallback) => result.status === "fulfilled" ? result.value : fallback;
+
+    const admins = getValue(results[0], []);
+    const banned = getValue(results[1], []);
+    const groups = getValue(results[2], []);
+    const settings = getValue(results[3], []);
+    const autoReplies = getValue(results[4], []);
 
     cache = {
       admins:        new Set((admins   || []).map(normalizeNumber)),
@@ -177,8 +185,8 @@ export function startCacheAutoRefresh() {
     // Safety net full refresh every 10 minutes
     safetyInterval = setInterval(loadCache, 10 * 60 * 1000);
   } catch (err) {
-    console.warn(`⚠️ Supabase Realtime unavailable (${err.message}) — falling back to 30s polling`);
-    fallbackInterval = setInterval(loadCache, 30_000);
+    console.warn(`⚠️ Supabase Realtime unavailable (${err.message}) — falling back to 5m polling`);
+    fallbackInterval = setInterval(loadCache, 5 * 60 * 1000);
   }
 }
 

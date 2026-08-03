@@ -1,3 +1,4 @@
+import { promises as fsPromises } from "fs";
 import { getSetting, setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
 import { getMediaInfo, downloadWithYtDlp, downloadWithApi, detectPlatform, extractUrl } from "../downloader.js";
@@ -54,9 +55,12 @@ export const downloaderCommands = {
 
       await reactMsg(sock, from, msg, "⌛");
 
+      let downloadedFilePath = null;
       try {
-        const { buffer, contentType, title } = await downloadWithYtDlp(url, audioOnly, quality);
-        const mb = sizeMB(buffer);
+        const { filePath, contentType, title } = await downloadWithYtDlp(url, audioOnly, quality);
+        downloadedFilePath = filePath;
+        const stats = await fsPromises.stat(filePath);
+        const mb = stats.size / (1024 * 1024);
 
         if (mb > MAX_MB) {
           return replyMsg(sock, from, msg,
@@ -68,20 +72,20 @@ export const downloaderCommands = {
 
         if (audioOnly || contentType.includes("audio")) {
           await sock.sendMessage(from, {
-            audio: buffer,
+            audio: { url: filePath },
             mimetype: "audio/mpeg",
             fileName: `${title.slice(0, 50)}.mp3`,
             ptt: false,
           }, { quoted: msg });
         } else if (contentType.includes("image")) {
           await sock.sendMessage(from, {
-            image: buffer,
+            image: { url: filePath },
             mimetype: contentType,
             caption: title,
           }, { quoted: msg });
         } else {
           await sock.sendMessage(from, {
-            video: buffer,
+            video: { url: filePath },
             mimetype: "video/mp4",
             caption: title,
           }, { quoted: msg });
@@ -94,6 +98,10 @@ export const downloaderCommands = {
           `❌ Download failed: ${err.message.slice(0, 200)}\n\n💡 If this keeps failing try *${prefix}dlapi ${url}*`
         );
         await alertOwner(sock, `${prefix}dl — ${url}`, err);
+      } finally {
+        if (downloadedFilePath) {
+          await fsPromises.unlink(downloadedFilePath).catch(() => {});
+        }
       }
     },
   },
@@ -125,9 +133,12 @@ export const downloaderCommands = {
 
       await reactMsg(sock, from, msg, "⏳");
 
+      let downloadedFilePath = null;
       try {
-        const { buffer, title, platform } = await downloadWithApi(url);
-        const mb = sizeMB(buffer);
+        const { filePath, title, platform } = await downloadWithApi(url);
+        downloadedFilePath = filePath;
+        const stats = await fsPromises.stat(filePath);
+        const mb = stats.size / (1024 * 1024);
 
         if (mb > MAX_MB) {
           return replyMsg(sock, from, msg, `❌ File too large (${mb.toFixed(1)}MB). WhatsApp limit is 64MB.`);
@@ -135,7 +146,7 @@ export const downloaderCommands = {
 
         await reactMsg(sock, from, msg, "✅");
         await sock.sendMessage(from, {
-          video: buffer,
+          video: { url: filePath },
           mimetype: "video/mp4",
           caption: title,
         }, { quoted: msg });
@@ -145,6 +156,10 @@ export const downloaderCommands = {
         await reactMsg(sock, from, msg, "❌");
         await failMsg(sock, from, msg, err, "dlapi");
         await alertOwner(sock, `${prefix}dlapi — ${url}`, err);
+      } finally {
+        if (downloadedFilePath) {
+          await fsPromises.unlink(downloadedFilePath).catch(() => {});
+        }
       }
     },
   },

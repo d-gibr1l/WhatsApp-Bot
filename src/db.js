@@ -2,19 +2,47 @@ import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
 
 function createMockClient() {
+  const errorObj = { data: null, error: new Error("Supabase is not configured. Please set SUPABASE_URL and SUPABASE_KEY in the environment.") };
   const chain = {
     select: () => chain,
     eq: () => chain,
     lte: () => chain,
+    lt: () => chain,
+    order: () => chain,
+    range: () => chain,
+    in: () => chain,
     single: async () => ({ data: null, error: null }),
     maybeSingle: async () => ({ data: null, error: null }),
-    insert: async () => ({ data: null, error: null }),
-    upsert: async () => ({ data: null, error: null }),
-    delete: () => chain,
-    update: () => chain,
+    insert: async () => errorObj,
+    upsert: async () => errorObj,
+    delete: () => {
+      const errChain = {
+        eq: () => errChain,
+        in: () => errChain,
+        lt: () => errChain,
+        lte: () => errChain,
+        then: (resolve) => resolve(errorObj)
+      };
+      return errChain;
+    },
+    update: () => {
+      const errChain = {
+        eq: () => errChain,
+        then: (resolve) => resolve(errorObj)
+      };
+      return errChain;
+    },
     then: (resolve) => resolve({ data: [], error: null })
   };
-  return { from: () => chain };
+  return {
+    from: () => chain,
+    removeChannel: () => {},
+    channel: () => ({
+      on: () => ({
+        subscribe: (cb) => { if (cb) cb('CHANNEL_ERROR'); }
+      })
+    })
+  };
 }
 
 export const supabase = (SUPABASE_URL && SUPABASE_KEY)

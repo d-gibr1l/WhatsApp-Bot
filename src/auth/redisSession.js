@@ -27,9 +27,17 @@ const KEY_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
 // Redis writes that have been issued but not yet acknowledged, so
 // drainPendingDbWrites() can actually wait for them before shutdown.
 const _pendingWrites = new Set();
+const _purgedKeys = new Set();
+
+function markKeyPurged(key) {
+  _l1Cache.delete(key);
+  _purgedKeys.add(key);
+  setTimeout(() => _purgedKeys.delete(key), 10000);
+}
 
 function trackWrite(promise) {
-  const tracked = promise.finally(() => _pendingWrites.delete(tracked));
+  let tracked;
+  tracked = promise.finally(() => _pendingWrites.delete(tracked));
   _pendingWrites.add(tracked);
   // The caller still owns error handling for `promise`; this derived copy
   // exists only for drain bookkeeping, so swallow to avoid reporting the same
@@ -129,13 +137,32 @@ function getRedis() {
 }
 
 const bufferReviver = (keyName, value) => {
-  if (value?.type === 'Buffer' && Array.isArray(value.data)) {
-    return Buffer.from(value.data);
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    if (value.type === 'Buffer' && Array.isArray(value.data)) {
+      return Buffer.from(value.data);
+    }
+    const keys = Object.keys(value);
+    if (
+      keys.length > 0 &&
+      keys.every((k, i) => k === String(i) && typeof value[k] === 'number' && Number.isInteger(value[k]) && value[k] >= 0 && value[k] <= 255)
+    ) {
+      const arr = new Uint8Array(keys.length);
+      for (let i = 0; i < keys.length; i++) {
+        arr[i] = value[i];
+      }
+      return Buffer.from(arr);
+    }
   }
   return value;
 };
 
-const serialize = (value) => JSON.stringify(value);
+const serialize = (value) =>
+  JSON.stringify(value, (key, val) => {
+    if (val instanceof Uint8Array && !Buffer.isBuffer(val)) {
+      return Buffer.from(val.buffer, val.byteOffset, val.byteLength);
+    }
+    return val;
+  });
 const deserialize = (raw, keyType) => {
   if (!raw) return null;
   const value = JSON.parse(raw, bufferReviver);
@@ -185,29 +212,39 @@ async function _buildAuthState() {
   };
 
   let creds;
+  let rawCredsExisted = false;
   try {
-    creds = await readCreds();
+    const raw = await redis.get(credsKey);
+    if (raw) {
+      rawCredsExisted = true;
+      creds = deserialize(raw, 'creds');
+      hadPersistedCreds = true;
+    } else {
+      creds = initAuthCreds();
+    }
   } catch (err) {
-    console.warn('[RedisAuth] Could not read creds from Redis, starting fresh:', err.message);
+    console.warn('[RedisAuth] Could not read or parse creds from Redis, starting fresh:', err.message);
     creds = initAuthCreds();
   }
 
   const checkIntegrity = async () => {
-    if (!hadPersistedCreds) return;
-
-    // Only null/undefined count as absent. A plain falsy test would also catch
-    // a legitimate registrationId of 0, wiping a valid session on the
-    // ~1-in-16384 chance Baileys generated one.
+    const isCorruptBlob = rawCredsExisted && !hadPersistedCreds;
     const missingFields =
       !creds || typeof creds !== 'object'
         ? ['<unreadable creds blob>']
         : REQUIRED_CRED_FIELDS.filter((f) => creds[f] === undefined || creds[f] === null);
 
-    if (missingFields.length === 0) return;
+    const isMissingRequired = hadPersistedCreds && missingFields.length > 0;
+
+    if (!isCorruptBlob && !isMissingRequired) return;
+
+    const reason = isCorruptBlob
+      ? 'unparseable creds blob'
+      : `missing required fields: ${missingFields.join(', ')}`;
 
     console.warn(
-      `[RedisAuth] Session '${sessionId}' is corrupt (missing: ${missingFields.join(', ')}). ` +
-      `Self-healing: clearing session.`
+      `[RedisAuth] Session '${sessionId}' is corrupt (${reason}). ` +
+      `Self-healing: clearing session keys.`
     );
     await _wipeSessionKeys(redis, sessionId);
     creds = initAuthCreds();
@@ -246,19 +283,25 @@ async function _buildAuthState() {
       }
 
       if (keysToFetch.length > 0) {
-        const results = await pipeline.exec();
-        for (let i = 0; i < keysToFetch.length; i++) {
-          const { id, key } = keysToFetch[i];
-          const [err, raw] = results[i];
-          if (err) {
-            console.error(`[RedisAuth] Error fetching key ${key}:`, err);
-            continue;
+        try {
+          const results = await pipeline.exec();
+          if (results) {
+            for (let i = 0; i < keysToFetch.length; i++) {
+              const { id, key } = keysToFetch[i];
+              const [err, raw] = results[i];
+              if (err) {
+                console.error(`[RedisAuth] Error fetching key ${key}:`, err);
+                continue;
+              }
+              if (raw && !stale && !_purgedKeys.has(key)) {
+                const parsed = deserialize(raw, type);
+                l1Set(key, parsed);
+                data[id] = parsed;
+              }
+            }
           }
-          if (raw) {
-            const parsed = deserialize(raw, type);
-            l1Set(key, parsed);
-            data[id] = parsed;
-          }
+        } catch (err) {
+          console.error(`[RedisAuth] Pipeline error in keys.get:`, err.message);
         }
       }
       return data;
@@ -266,23 +309,41 @@ async function _buildAuthState() {
     set: async (data) => {
       if (stale) return;
       const pipeline = redis.pipeline();
+      const l1Updates = [];
+      const l1Deletes = [];
+
       for (const category of Object.keys(data)) {
         for (const id of Object.keys(data[category])) {
           const key = `${sessionId}:${category}-${id}`;
           const value = data[category][id];
           if (value) {
-            l1Set(key, normalizeForType(value, category));
+            l1Updates.push({ key, val: normalizeForType(value, category) });
             pipeline.set(key, serialize(value), 'EX', KEY_TTL_SECONDS);
           } else {
-            _l1Cache.delete(key);
+            l1Deletes.push(key);
             pipeline.del(key);
           }
         }
       }
-      const results = await trackWrite(pipeline.exec());
-      const errors = results.filter(([err]) => err);
-      if (errors.length > 0) {
-        console.error(`[RedisAuth] ${errors.length} errors during keys.set pipeline execution`, errors[0][0]);
+
+      if (l1Updates.length === 0 && l1Deletes.length === 0) return;
+
+      try {
+        const results = await trackWrite(pipeline.exec());
+        const errors = results ? results.filter(([err]) => err) : [];
+        if (errors.length > 0) {
+          console.error(`[RedisAuth] ${errors.length} errors during keys.set pipeline execution`, errors[0][0]);
+        }
+        for (const key of l1Deletes) {
+          _l1Cache.delete(key);
+        }
+        for (const { key, val } of l1Updates) {
+          if (!_purgedKeys.has(key)) {
+            l1Set(key, val);
+          }
+        }
+      } catch (err) {
+        console.error('[RedisAuth] Failed to execute keys.set pipeline:', err.message);
       }
     }
   };
@@ -328,6 +389,9 @@ async function _buildAuthState() {
 async function _wipeSessionKeys(redis, sessionId) {
   _l1Cache.clear();
   const keys = await scanKeys(redis, `${sessionId}:*`);
+  for (const k of keys) {
+    markKeyPurged(k);
+  }
   const BATCH = 500;
   for (let i = 0; i < keys.length; i += BATCH) {
     await redis.del(...keys.slice(i, i + BATCH));
@@ -361,6 +425,12 @@ export async function drainPendingDbWrites() {
 export async function closeRedisConnection() {
   if (!_redis) return;
 
+  // Capture the client reference before nulling the module-level variable.
+  // If quit() times out, the .catch() fallback calls disconnect() on the
+  // captured reference — without this, _redis would already be null.
+  const client = _redis;
+  _redis = null;
+
   // The cached auth instance closed over this client. Leaving it published
   // would hand later callers an instance whose writes go to a quit connection,
   // so retire it and let the next getAuthState() rebuild against a fresh one.
@@ -369,10 +439,9 @@ export async function closeRedisConnection() {
   previous?.invalidate();
 
   await Promise.race([
-    _redis.quit(),
+    client.quit(),
     new Promise((_, reject) => setTimeout(() => reject(new Error('quit timeout')), 3000))
-  ]).catch(() => _redis.disconnect());
-  _redis = null;
+  ]).catch(() => client.disconnect());
   console.log('[RedisAuth] Connection closed.');
 }
 
@@ -380,7 +449,7 @@ export async function purgeCorruptKey(type, id) {
   const redis = getRedis();
   const sessionId = getSessionId();
   const key = `${sessionId}:${type}-${id}`;
-  _l1Cache.delete(key);
+  markKeyPurged(key);
   await redis.del(key);
   console.log(`[RedisAuth] Purged corrupt key: ${key}`);
 }
@@ -391,8 +460,9 @@ export async function purgeAllKeysForJid(jid) {
 
   // A group jid must be kept whole — sender-key ids embed the full "<n>@g.us",
   // and splitting on '.' would truncate it to "<n>@g".
-  const isGroup = jid.includes('@');
-  const base = escapeGlob(isGroup ? jid : jid.split(':')[0].split('.')[0]);
+  const isGroup = jid.endsWith('@g.us');
+  const userJid = isGroup ? jid : jid.split('@')[0];
+  const base = escapeGlob(isGroup ? jid : userJid.split(':')[0].split('.')[0]);
 
   // Key id formats, verified against Baileys 6.7.21:
   //   session            "<user>.<device>"            (ProtocolAddress.toString)
@@ -420,7 +490,7 @@ export async function purgeAllKeysForJid(jid) {
 
   if (keysToDelete.length > 0) {
     for (const key of keysToDelete) {
-      _l1Cache.delete(key);
+      markKeyPurged(key);
     }
     const BATCH = 500;
     for (let i = 0; i < keysToDelete.length; i += BATCH) {

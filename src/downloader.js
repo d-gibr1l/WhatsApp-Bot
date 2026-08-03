@@ -1,8 +1,10 @@
 import { spawn, exec } from "child_process";
 import { promises as fsPromises, existsSync, readdirSync } from "fs";
-import { writeFileSync, unlinkSync, readFileSync } from "fs";
+import { writeFileSync, unlinkSync, readFileSync, createWriteStream } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
+import { pipeline } from "stream/promises";
+import { Readable } from "stream";
 import { getSetting } from "./db.js";
 import { heavyQueue } from "./queue.js";
 
@@ -220,9 +222,6 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
           finalPath = join(dir, files[0]);
         }
 
-        const buffer = await fsPromises.readFile(finalPath);
-        await fsPromises.unlink(finalPath).catch(() => {});
-
         const ext = finalPath.split(".").pop().toLowerCase();
         const mimeTypes = {
           mp3: "audio/mpeg",
@@ -232,7 +231,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
           webp: "image/webp",
         };
 
-        return resolve({ buffer, contentType: mimeTypes[ext] || "video/mp4", title });
+        return resolve({ filePath: finalPath, contentType: mimeTypes[ext] || "video/mp4", title });
       } catch (err) {
         reject(err);
       }
@@ -243,7 +242,12 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
 }
 
 // ─── Legacy YouTube buffer export (used by mp3.js, sticker.js etc) ───────────
-export const downloadYouTubeToBuffer = (url, audioOnly) => downloadWithYtDlp(url, audioOnly);
+export const downloadYouTubeToBuffer = async (url, audioOnly) => {
+  const { filePath } = await downloadWithYtDlp(url, audioOnly);
+  const buffer = await fsPromises.readFile(filePath);
+  await fsPromises.unlink(filePath).catch(() => {});
+  return buffer;
+};
 
 // ─── RapidAPI fallback ────────────────────────────────────────────────────────
 
@@ -292,8 +296,12 @@ export async function downloadWithApi(url) {
 
   const res = await fetch(info.videoUrl, { headers: { "User-Agent": "Mozilla/5.0" }, redirect: "follow" });
   if (!res.ok) throw new Error(`Failed to download: ${res.status}`);
-  const buffer = Buffer.from(await res.arrayBuffer());
-  return { buffer, contentType: "video/mp4", title: info.title, platform: info.platform };
+  
+  const tmpBase = join(tmpdir(), `api_dl_${Date.now()}_${Math.random().toString(36).slice(2)}.mp4`);
+  const fileStream = createWriteStream(tmpBase);
+  await pipeline(Readable.fromWeb(res.body), fileStream);
+  
+  return { filePath: tmpBase, contentType: "video/mp4", title: info.title, platform: info.platform };
 }
 
 // ─── Generic buffer download ──────────────────────────────────────────────────

@@ -90,7 +90,7 @@ async function askGroq(chatId, userMessage) {
   const reply = data.choices?.[0]?.message?.content?.trim();
   if (!reply) throw new Error("No response from Groq.");
 
-  await saveConversationTurn(chatId, userMessage, reply);
+  saveConversationTurn(chatId, userMessage, reply);
   return reply;
 }
 
