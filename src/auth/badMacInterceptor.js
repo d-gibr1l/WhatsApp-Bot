@@ -88,7 +88,51 @@ const SUPPRESS_PATTERNS = [
 ];
 
 function isSuppressible(...args) {
-  const text = args.map((a) => (typeof a === 'string' ? a : String(a))).join(' ');
+  if (args.length === 0) return false;
+
+  let hasKeyword = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (typeof arg === 'string') {
+      if (
+        arg.includes('MAC') ||
+        arg.includes('Session') ||
+        arg.includes('session') ||
+        arg.includes('prekey') ||
+        arg.includes('failed') ||
+        arg.includes('Failed') ||
+        arg.includes('Counter') ||
+        arg.includes('Key') ||
+        arg.includes('decrypt')
+      ) {
+        hasKeyword = true;
+        break;
+      }
+    } else if (arg && typeof arg === 'object') {
+      const texts = collectErrorTexts(arg);
+      const msg = texts.join(' ');
+      if (
+        msg.includes('MAC') ||
+        msg.includes('Session') ||
+        msg.includes('session') ||
+        msg.includes('prekey') ||
+        msg.includes('failed') ||
+        msg.includes('Failed') ||
+        msg.includes('Counter') ||
+        msg.includes('Key') ||
+        msg.includes('decrypt')
+      ) {
+        hasKeyword = true;
+        break;
+      }
+    }
+  }
+
+  if (!hasKeyword) return false;
+
+  const text = args
+    .map((a) => (typeof a === 'string' ? a : collectErrorTexts(a).join(' ')))
+    .join(' ');
   return SUPPRESS_PATTERNS.some((p) => text.includes(p));
 }
 
@@ -117,33 +161,54 @@ const SIGNAL_ADDRESS_RE = /^[\w-]+\.\d+$/;
  * @param {Error} err
  * @returns {{ type: string, id: string, exact: boolean } | null}
  */
+function collectErrorTexts(obj, visited = new Set(), depth = 0) {
+  if (!obj || depth > 5 || visited.has(obj)) return [];
+  if (typeof obj === 'string') return [obj];
+  if (typeof obj !== 'object') return [String(obj)];
+
+  visited.add(obj);
+  const parts = [];
+
+  if (obj.stack) parts.push(String(obj.stack));
+  if (obj.message) parts.push(String(obj.message));
+  if (obj.jid) parts.push(String(obj.jid));
+  if (obj.chatId) parts.push(String(obj.chatId));
+  if (obj.sender) parts.push(String(obj.sender));
+  if (obj.remoteJid) parts.push(String(obj.remoteJid));
+  if (obj.id && typeof obj.id === 'string') parts.push(obj.id);
+
+  const nestedKeys = ['cause', 'reason', 'err', 'error', 'originalError'];
+  for (const key of nestedKeys) {
+    if (obj[key]) {
+      parts.push(...collectErrorTexts(obj[key], visited, depth + 1));
+    }
+  }
+
+  return parts;
+}
+
+/**
+ * Attempt to extract a purgeable key reference from a libsignal error stack.
+ *
+ * libsignal embeds the sender address in the async call chain:
+ *   "at async 59335526904016.73 [as awaitable]"
+ *
+ * Two kinds of result come back, and they are NOT interchangeable:
+ *
+ *   exact: true  → `id` is a real key id in Baileys' keystore namespace, so
+ *                  purgeCorruptKey(type, id) will hit an existing key.
+ *   exact: false → all we recovered is a JID. The corresponding key id cannot
+ *                  be reconstructed from the stack (sender-key ids embed the
+ *                  sending user; lid→address encoding is version-dependent),
+ *                  so only a prefix wipe via purgeAllForJid() can act on it.
+ *
+ * @param {Error} err
+ * @returns {{ type: string, id: string, exact: boolean } | null}
+ */
 function extractKeyId(errOrObj) {
   if (!errOrObj) return null;
 
-  let stackParts = [];
-
-  if (typeof errOrObj === 'string') {
-    stackParts.push(errOrObj);
-  } else if (typeof errOrObj === 'object') {
-    if (errOrObj.stack) stackParts.push(String(errOrObj.stack));
-    if (errOrObj.message) stackParts.push(String(errOrObj.message));
-    if (errOrObj.jid) stackParts.push(String(errOrObj.jid));
-    if (errOrObj.chatId) stackParts.push(String(errOrObj.chatId));
-    if (errOrObj.sender) stackParts.push(String(errOrObj.sender));
-    if (errOrObj.remoteJid) stackParts.push(String(errOrObj.remoteJid));
-    if (errOrObj.id) stackParts.push(String(errOrObj.id));
-    if (errOrObj.err) {
-      if (errOrObj.err.stack) stackParts.push(String(errOrObj.err.stack));
-      if (errOrObj.err.message) stackParts.push(String(errOrObj.err.message));
-    }
-    if (errOrObj.cause) {
-      if (errOrObj.cause.stack) stackParts.push(String(errOrObj.cause.stack));
-      if (errOrObj.cause.message) stackParts.push(String(errOrObj.cause.message));
-    }
-  } else {
-    stackParts.push(String(errOrObj));
-  }
-
+  const stackParts = collectErrorTexts(errOrObj);
   const stack = stackParts.join('\n');
   if (!stack) return null;
 
@@ -271,7 +336,9 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
 
   function handleInterceptedLog(originalLogFn, args, isLog = false) {
     const sessionId = getSessionId();
-    const text = args.map((a) => (typeof a === 'string' ? a : String(a))).join(' ');
+    const text = args
+      .map((a) => (typeof a === 'string' ? a : collectErrorTexts(a).join(' ')))
+      .join(' ');
 
     if (text.includes('Bad MAC')) {
       let targetArg = args.find((a) => a instanceof Error);
@@ -314,14 +381,8 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
   // Catches Bad MAC / counter errors that escape Baileys' internal catch blocks.
   _unhandledHandler = async (reason) => {
     try {
-      const msg =
-        typeof reason === 'string'
-          ? reason
-          : reason instanceof Error
-          ? (reason.message ?? '') + '\n' + (reason.stack ?? '')
-          : reason
-          ? String(reason)
-          : '';
+      const errorTexts = collectErrorTexts(reason);
+      const msg = errorTexts.join('\n');
       const isCounter =
         (reason && reason.name === 'MessageCounterError') ||
         msg.includes('Key used already') ||
@@ -401,9 +462,23 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
       // atomically, so a concurrent caller must never observe a count that is
       // still over the threshold while the wipe is in flight.
       badMacCounts.delete(baseJid);
-      _recentlyPurged.delete(baseJid); // allow the next individual purge immediately
+      for (const id of _recentlyPurged.keys()) {
+        if (id === baseJid || getBaseJid(id) === baseJid) {
+          _recentlyPurged.delete(id);
+        }
+      }
 
       const wipe = Promise.resolve(purgeAllForJid(baseJid))
+        .catch((err) => {
+          _originalConsoleError(`[BadMAC] Circuit Breaker wipe failed for JID ${baseJid}:`, err.message);
+          const current = badMacCounts.get(baseJid);
+          if (!current) {
+            badMacCounts.set(baseJid, { count: 3, windowStart: Date.now() });
+          } else {
+            current.count = Math.max(current.count, 3);
+          }
+          throw err;
+        })
         .finally(() => _wipesInFlight.delete(baseJid));
       _wipesInFlight.set(baseJid, wipe);
       return wipe;

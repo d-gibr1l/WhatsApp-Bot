@@ -10,7 +10,7 @@
  */
 
 import Redis from 'ioredis';
-import { initAuthCreds, proto } from '@whiskeysockets/baileys';
+import { initAuthCreds, proto, BufferJSON } from '@whiskeysockets/baileys';
 import { botConfig } from '../config.js';
 
 let _redis = null;
@@ -70,6 +70,7 @@ function trackWrite(promise) {
 const escapeGlob = (s) => s.replace(/[*?[\]\\]/g, '\\$&');
 
 function l1Set(key, value) {
+  _l1Cache.delete(key);
   if (_l1Cache.size >= L1_MAX) {
     _l1Cache.delete(_l1Cache.keys().next().value);
   }
@@ -164,10 +165,9 @@ function getRedis() {
 }
 
 const bufferReviver = (keyName, value) => {
+  const revived = BufferJSON.reviver(keyName, value);
+  if (revived !== value) return revived;
   if (value && typeof value === 'object' && !Array.isArray(value)) {
-    if (value.type === 'Buffer' && Array.isArray(value.data)) {
-      return Buffer.from(value.data);
-    }
     const keys = Object.keys(value);
     if (
       keys.length > 0 &&
@@ -183,13 +183,7 @@ const bufferReviver = (keyName, value) => {
   return value;
 };
 
-const serialize = (value) =>
-  JSON.stringify(value, (key, val) => {
-    if (val instanceof Uint8Array && !Buffer.isBuffer(val)) {
-      return Buffer.from(val.buffer, val.byteOffset, val.byteLength);
-    }
-    return val;
-  });
+const serialize = (value) => JSON.stringify(value, BufferJSON.replacer);
 const deserialize = (raw, keyType) => {
   if (!raw) return null;
   const value = JSON.parse(raw, bufferReviver);
@@ -294,7 +288,10 @@ async function _buildAuthState() {
       for (const id of ids) {
         const key = `${sessionId}:${type}-${id}`;
         if (_l1Cache.has(key)) {
-          data[id] = _l1Cache.get(key);
+          const val = _l1Cache.get(key);
+          _l1Cache.delete(key);
+          _l1Cache.set(key, val);
+          data[id] = val;
         } else {
           pipeline.get(key);
           keysToFetch.push({ id, key });
@@ -313,9 +310,13 @@ async function _buildAuthState() {
                 continue;
               }
               if (raw && !stale && !_purgedKeys.has(key)) {
-                const parsed = deserialize(raw, type);
-                l1Set(key, parsed);
-                data[id] = parsed;
+                try {
+                  const parsed = deserialize(raw, type);
+                  l1Set(key, parsed);
+                  data[id] = parsed;
+                } catch (parseErr) {
+                  console.warn(`[RedisAuth] Corrupted data for key ${key}, skipping:`, parseErr.message);
+                }
               }
             }
           }
@@ -336,10 +337,14 @@ async function _buildAuthState() {
           const key = `${sessionId}:${category}-${id}`;
           const value = data[category][id];
           if (value) {
-            l1Updates.push({ key, val: normalizeForType(value, category) });
+            _purgedKeys.delete(key);
+            const val = normalizeForType(value, category);
+            l1Updates.push({ key, val });
+            l1Set(key, val);
             pipeline.set(key, serialize(value), 'EX', KEY_TTL_SECONDS);
           } else {
             l1Deletes.push(key);
+            _l1Cache.delete(key);
             pipeline.del(key);
           }
         }
@@ -352,14 +357,6 @@ async function _buildAuthState() {
         const errors = results ? results.filter(([err]) => err) : [];
         if (errors.length > 0) {
           console.error(`[RedisAuth] ${errors.length} errors during keys.set pipeline execution`, errors[0][0]);
-        }
-        for (const key of l1Deletes) {
-          _l1Cache.delete(key);
-        }
-        for (const { key, val } of l1Updates) {
-          if (!_purgedKeys.has(key)) {
-            l1Set(key, val);
-          }
         }
       } catch (err) {
         console.error('[RedisAuth] Failed to execute keys.set pipeline:', err.message);
@@ -423,6 +420,7 @@ export async function clearSession() {
   _authGeneration++;
   const previous = _authInstance;
   _authInstance = null;
+  _authPromise = null;
   previous?.invalidate();
   await _wipeSessionKeys(redis, sessionId);
   console.log(`[RedisAuth] Session '${sessionId}' cleared.`);
@@ -461,6 +459,7 @@ export async function closeRedisConnection() {
   // so retire it and let the next getAuthState() rebuild against a fresh one.
   const previous = _authInstance;
   _authInstance = null;
+  _authPromise = null;
   previous?.invalidate();
 
   await Promise.race([
