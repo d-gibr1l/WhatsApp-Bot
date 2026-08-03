@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y \
   && chmod a+rx /usr/local/bin/yt-dlp \
   && rm -rf /var/lib/apt/lists/*
 
+RUN pip install --break-system-packages bgutil-ytdlp-pot-provider
+
 WORKDIR /app
 
 COPY package*.json ./

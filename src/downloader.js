@@ -25,7 +25,7 @@ export async function updateYtDlp() {
   const url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
 
   return new Promise((resolve) => {
-    exec(`curl -L ${url} -o ${targetPath} && chmod a+rx ${targetPath} && pip install --break-system-packages bgutil-ytdlp-pot-provider`, (err) => {
+    exec(`curl -L ${url} -o ${targetPath} && chmod a+rx ${targetPath}`, (err) => {
       if (err) {
         console.warn("[Downloader] Failed to update yt-dlp dynamically or install PO plugin:", err.message);
       } else {
