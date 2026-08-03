@@ -479,6 +479,18 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
           <button class="input-btn" onclick="updateSettingText('yt_cookies')">Save Cookies</button>
         </div>
       </div>
+
+      <!-- YouTube Proxy -->
+      <div class="setting-card" style="grid-column: 1 / -1;">
+        <div class="setting-info">
+          <h3>YouTube Proxy URL (Cloudflare WARP)</h3>
+          <p>Provide a SOCKS5 proxy URL (e.g., socks5://127.0.0.1:1080) to route YouTube downloads through a local proxy tunnel to avoid IP bans.</p>
+        </div>
+        <div class="input-group" style="margin-top:12px;">
+          <input type="text" id="setting-yt_proxy" class="form-input" placeholder="socks5://127.0.0.1:1080" spellcheck="false"/>
+          <button class="input-btn" onclick="updateSettingText('yt_proxy')">Save Proxy</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -637,7 +649,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
     });
 
     // Process other text inputs
-    ['max_warnings', 'sticker_pack_name', 'sticker_pack_author', 'gemini_api_key', 'groq_api_key', 'tavily_api_key', 'rapidapi_key', 'tmdb_api_key', 'yt_cookies'].forEach(key => {
+    ['max_warnings', 'sticker_pack_name', 'sticker_pack_author', 'gemini_api_key', 'groq_api_key', 'tavily_api_key', 'rapidapi_key', 'tmdb_api_key', 'yt_cookies', 'yt_proxy'].forEach(key => {
       const el = document.getElementById('setting-' + key);
       if (el && map.has(key)) {
         let val = map.get(key);

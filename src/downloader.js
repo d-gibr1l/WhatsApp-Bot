@@ -25,11 +25,11 @@ export async function updateYtDlp() {
   const url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
 
   return new Promise((resolve) => {
-    exec(`curl -L ${url} -o ${targetPath} && chmod a+rx ${targetPath}`, (err) => {
+    exec(`curl -L ${url} -o ${targetPath} && chmod a+rx ${targetPath} && pip install bgutil-ytdlp-pot-provider`, (err) => {
       if (err) {
-        console.warn("[Downloader] Failed to update yt-dlp dynamically:", err.message);
+        console.warn("[Downloader] Failed to update yt-dlp dynamically or install PO plugin:", err.message);
       } else {
-        console.log("[Downloader] yt-dlp successfully updated to latest version at:", targetPath);
+        console.log("[Downloader] yt-dlp successfully updated and PO Token plugin installed.");
       }
       resolve();
     });
@@ -94,13 +94,15 @@ export async function getMediaInfo(url) {
   if (!platform) throw new Error("Unsupported platform.");
 
   const cookiePath = await getCookiesPath();
+  const proxyUrl = await getSetting("yt_proxy", null);
   const args = [
     url,
     "--dump-json",
     "--no-playlist",
-    "--extractor-args", "youtube:player_client=android_vr,web_embedded;skip=dash,hls"
+    "--extractor-args", "youtube:player_client=tv_downgraded,web,android_vr"
   ];
   if (cookiePath) args.push("--cookies", cookiePath);
+  if (proxyUrl && proxyUrl.trim() !== "") args.push("--proxy", proxyUrl.trim());
 
   return new Promise((resolve, reject) => {
     let output = "";
@@ -138,6 +140,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
   if (!platform) throw new Error("Unsupported platform.");
 
   const cookiePath = await getCookiesPath();
+  const proxyUrl = await getSetting("yt_proxy", null);
   const tmpBase    = join(tmpdir(), `dl_${Date.now()}_${Math.random().toString(36).slice(2)}`);
   const userAgent  = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
 
@@ -150,12 +153,13 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     "--concurrent-fragments", "10",
     "--downloader", "aria2c,native",
     "--downloader-args", "aria2c:\"-x 16 -k 1M\"",
-    "--extractor-args", "youtube:player_client=android_vr,web_embedded;skip=dash,hls",
+    "--extractor-args", "youtube:player_client=tv_downgraded,web,android_vr",
     "--print", "%(title)s",
     "--print", "after_move:filepath",
   ];
 
   if (cookiePath) args.push("--cookies", cookiePath);
+  if (proxyUrl && proxyUrl.trim() !== "") args.push("--proxy", proxyUrl.trim());
 
   if (audioOnly) {
     args.push("-x", "--audio-format", "mp3", "--audio-quality", "0", "-o", `${tmpBase}.mp3`);
