@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  # 1. The Proxy Container
+  warproxy:
+    image: ghcr.io/kingcc/warproxy:latest
+    restart: always
+    ports:
+      - "1080:1080"
+    # Privileged is required for WireGuard/WARP to create the TUN interface
+    privileged: true 
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv4.conf.all.src_valid_mark=1
+
+  # 2. Your WhatsApp Bot Container
+  whatsapp-bot:
+    build: . # Tells Koyeb to build your bot using your existing Dockerfile
+    restart: always
+    depends_on:
+      - warproxy
+    environment:
+      # Pass your existing env variables here if needed
+      - DATABASE_URL=${DATABASE_URL}

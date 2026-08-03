@@ -487,7 +487,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
           <p>Provide a SOCKS5 proxy URL (e.g., socks5://127.0.0.1:1080) to route YouTube downloads through a local proxy tunnel to avoid IP bans.</p>
         </div>
         <div class="input-group" style="margin-top:12px;">
-          <input type="text" id="setting-yt_proxy" class="form-input" placeholder="socks5://127.0.0.1:1080" spellcheck="false"/>
+          <input type="text" id="setting-yt_proxy" class="form-input" placeholder="socks5://warproxy:1080" spellcheck="false"/>
           <button class="input-btn" onclick="updateSettingText('yt_proxy')">Save Proxy</button>
         </div>
       </div>
