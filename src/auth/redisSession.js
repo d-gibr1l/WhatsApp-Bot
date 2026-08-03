@@ -27,12 +27,30 @@ const KEY_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
 // Redis writes that have been issued but not yet acknowledged, so
 // drainPendingDbWrites() can actually wait for them before shutdown.
 const _pendingWrites = new Set();
-const _purgedKeys = new Set();
+const _purgedKeys = new Map(); // Map<key, timestampMs>
+const PURGED_KEY_TTL_MS = 10_000;
+const PURGED_KEYS_MAX = 500;
 
 function markKeyPurged(key) {
   _l1Cache.delete(key);
-  _purgedKeys.add(key);
-  setTimeout(() => _purgedKeys.delete(key), 10000);
+  // Cap the purged-keys map to prevent unbounded growth during Bad MAC storms.
+  // Evict the oldest entry when at capacity.
+  if (_purgedKeys.size >= PURGED_KEYS_MAX) {
+    const oldest = _purgedKeys.keys().next().value;
+    _purgedKeys.delete(oldest);
+  }
+  _purgedKeys.set(key, Date.now());
+}
+
+// Periodic sweep of expired purged keys — called from a single setInterval
+// rather than spawning a setTimeout per key.
+function sweepPurgedKeys() {
+  const now = Date.now();
+  for (const [key, ts] of _purgedKeys.entries()) {
+    if (now - ts > PURGED_KEY_TTL_MS) {
+      _purgedKeys.delete(key);
+    }
+  }
 }
 
 function trackWrite(promise) {
@@ -127,12 +145,21 @@ export function getSessionId() {
   return _sessionId;
 }
 
+let _sweepTimer = null;
+
 function getRedis() {
   if (_redis) return _redis;
   const url = process.env.REDIS_URL || 'redis://localhost:6379';
   _redis = new Redis(url);
   _redis.on('error', err => console.error('[RedisAuth] Error:', err.message));
   _redis.on('ready', () => console.log('[RedisAuth] Connected'));
+
+  // Start a single periodic sweep for expired purged keys.
+  if (!_sweepTimer) {
+    _sweepTimer = setInterval(sweepPurgedKeys, 30_000);
+    _sweepTimer.unref?.();
+  }
+
   return _redis;
 }
 
@@ -198,14 +225,6 @@ async function _buildAuthState() {
   // True once creds have actually been read back from Redis. Only a persisted
   // blob can be corrupt — a freshly initialised one is complete by construction.
   let hadPersistedCreds = false;
-
-  const readCreds = async () => {
-    const raw = await redis.get(credsKey);
-    if (!raw) return initAuthCreds();
-    const parsed = deserialize(raw, 'creds');
-    hadPersistedCreds = true; // set only after a successful parse
-    return parsed;
-  };
 
   const writeCreds = async (creds) => {
     await trackWrite(redis.set(credsKey, serialize(creds), 'EX', KEY_TTL_SECONDS));
@@ -430,6 +449,12 @@ export async function closeRedisConnection() {
   // captured reference — without this, _redis would already be null.
   const client = _redis;
   _redis = null;
+
+  // Stop the purged-keys sweep timer.
+  if (_sweepTimer) {
+    clearInterval(_sweepTimer);
+    _sweepTimer = null;
+  }
 
   // The cached auth instance closed over this client. Leaving it published
   // would hand later callers an instance whose writes go to a quit connection,

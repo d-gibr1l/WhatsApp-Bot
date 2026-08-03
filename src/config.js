@@ -2,7 +2,7 @@ import { config } from "dotenv";
 config();
 
 // Supabase is used for settings, bans, admins, and reminders (db.js).
-// It is NOT required for the WhatsApp auth system — that uses MongoDB.
+// It is NOT required for the WhatsApp auth system — that uses Redis.
 // Warn if missing but don't crash: the bot will run without Supabase features.
 const OPTIONAL_SUPABASE_VARS = ["SUPABASE_URL", "SUPABASE_KEY"];
 for (const key of OPTIONAL_SUPABASE_VARS) {
