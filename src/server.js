@@ -657,7 +657,10 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
           const visible = Math.ceil(val.length / 3);
           val = val.substring(0, visible) + '•'.repeat(val.length - visible);
         }
-        el.value = val;
+        // Do not overwrite the value if the user is currently typing/editing it
+        if (document.activeElement !== el) {
+          el.value = val;
+        }
       }
     });
   }
