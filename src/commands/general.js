@@ -2,7 +2,6 @@ import { botConfig } from "../config.js";
 import { getSetting } from "../db.js";
 import { cachedGetSetting } from "../cache.js";
 import { replyMsg, isAdmin, alertOwner } from "./helpers.js";
-import { commands } from "./registry.js";
 
 export const generalCommands = {
 
@@ -49,6 +48,7 @@ export const generalCommands = {
       let adminMenu = `\n╭━━〔 👮 ADMIN CONTROLS 〕━━╮\n`;
 
       // Sort commands alphabetically for better UX
+      const { commands } = await import("./registry.js");
       const cmdList = Object.entries(commands).sort((a, b) => a[0].localeCompare(b[0]));
 
       for (const [cmdName, cmdInfo] of cmdList) {
