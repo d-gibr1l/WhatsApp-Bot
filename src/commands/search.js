@@ -50,7 +50,7 @@ Below are real-time search results retrieved from the web:
 
 ${contextText}
 
-Synthesize a clear, concise, direct answer based strictly on these search results. Format nicely using WhatsApp markdown (*bold*, bullet points •, emojis). Do NOT list raw web sources, links, or URL references at the end.`;
+Synthesize a clear, concise, direct answer based strictly on these search results. Format nicely using WhatsApp markdown (*bold*, bullet points •, emojis). You can use simple ASCII dividers (e.g., ──────────────) or basic ASCII formatting to make the layout look cool and readable. Do NOT include a title repeating the user's query or a preamble, just provide the answer directly. Do NOT list raw web sources, links, or URL references at the end.`;
 
   // 1. Try Gemini
   if (geminiKey) {
@@ -147,7 +147,7 @@ export const searchCommands = {
         const { answer: directAnswer, sources, imageUrl } = await braveSearch(query, apiKey);
 
         const summary = directAnswer || await summarizeWithAi(query, sources);
-        const caption = `🔍 *${query}*\n\n${summary}`;
+        const caption = summary;
 
         // Try to send with image, fall back to text-only if image fails
         if (imageUrl) {
