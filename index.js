@@ -17,7 +17,7 @@ import {
   purgeAllKeysForJid,
   getSessionId,
 } from "./src/auth/redisSession.js";
-import { installBadMacInterceptor } from "./src/auth/badMacInterceptor.js";
+import { installBadMacInterceptor, uninstallBadMacInterceptor } from "./src/auth/badMacInterceptor.js";
 import { handleMessage, startReminderPoller, extractText, markBotReady } from "./src/handler.js";
 import { loadWordFilter }   from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
@@ -73,13 +73,19 @@ async function shutdown(signal, exitCode = 0) {
     currentSock = null;
   }
 
-  // Drain the MongoDB Write-Ahead Log buffer before closing the connection.
-  // This ensures all pending Signal key writes are persisted to MongoDB.
-  // Without this, up to `flushIntervalMs` (100ms) of key updates can be lost.
+  // Restore the original console methods and remove the unhandledRejection
+  // listener that the Bad MAC interceptor installed.
+  try {
+    uninstallBadMacInterceptor();
+  } catch {}
+
+  // Drain pending Redis writes before closing the connection.
+  // keys.set and saveCreds write-through immediately, but "issued" is not
+  // "acknowledged" — anything still in-flight would be lost on close.
   try {
     await drainPendingDbWrites();
   } catch (err) {
-    console.error("⚠️  Final WAL flush failed:", err.message);
+    console.error("⚠️  Final Redis flush failed:", err.message);
   }
 
   // Close the Redis connection cleanly

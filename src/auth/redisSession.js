@@ -355,23 +355,24 @@ async function _buildAuthState() {
         const errors = results ? results.filter(([err]) => err) : [];
         if (errors.length > 0) {
           console.error(`[RedisAuth] ${errors.length} errors during keys.set pipeline execution`, errors[0][0]);
-          // Roll back L1 for any key whose Redis write failed, so L1 stays
-          // consistent with what Redis actually persisted.
+          // Roll back L1 for failed writes so L1 stays consistent with Redis.
+          // ioredis pipeline results are [err, result] pairs — the index into
+          // l1Updates corresponds to the position in results.
           const failedIndices = new Set(
-            errors.map(([, , idx]) => idx).filter((i) => i !== undefined)
+            results
+              .map(([err], i) => (err ? i : null))
+              .filter((i) => i !== null)
           );
           for (let i = 0; i < l1Updates.length; i++) {
-            if (failedIndices.size === 0 || failedIndices.has(i)) {
-              // Re-apply successful writes; evict failed ones.
-              if (failedIndices.has(i)) {
-                _l1Cache.delete(l1Updates[i].key);
-              } else {
-                l1Set(l1Updates[i].key, l1Updates[i].val);
-              }
+            if (failedIndices.has(i)) {
+              // Redis rejected this write — keep L1 clean.
+              _l1Cache.delete(l1Updates[i].key);
             } else {
               l1Set(l1Updates[i].key, l1Updates[i].val);
             }
           }
+          // Deletes are pipeline entries after all the sets; always safe to apply.
+          for (const key of l1Deletes) _l1Cache.delete(key);
         } else {
           // All writes confirmed — commit L1 updates now.
           for (const { key, val } of l1Updates) l1Set(key, val);
@@ -540,9 +541,12 @@ export async function purgeAllKeysForJid(jid) {
     for (const key of keysToDelete) {
       markKeyPurged(key);
     }
+    // Use a pipeline to avoid Node's argument-count limit on spread-del.
     const BATCH = 500;
     for (let i = 0; i < keysToDelete.length; i += BATCH) {
-      await redis.del(...keysToDelete.slice(i, i + BATCH));
+      const pipeline = redis.pipeline();
+      for (const k of keysToDelete.slice(i, i + BATCH)) pipeline.del(k);
+      await pipeline.exec();
     }
     console.log(`[RedisAuth] Circuit Breaker: Purged ${keysToDelete.length} keys for JID ${base}`);
   }

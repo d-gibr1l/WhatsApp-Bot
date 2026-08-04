@@ -30,11 +30,26 @@
 
 // Map<key, lastLogTimestampMs>
 const lastLogTime = new Map();
-const RATE_LIMIT_MS = 10_000; // max 1 log per key per 10s
-const PURGE_DEDUP_MS = 2_000; // collapse duplicate purges of the same key within 2s
+const RATE_LIMIT_MS = 10_000;          // max 1 log per key per 10s
+const PURGE_DEDUP_MS = 2_000;          // collapse duplicate purges of the same key within 2s
+
+// ─── Circuit Breaker ──────────────────────────────────────────────────────────
+const CIRCUIT_BREAKER_THRESHOLD = 3;   // bad MACs per JID before a full wipe is triggered
+const CIRCUIT_BREAKER_WINDOW_MS = 60_000; // sliding window for the threshold count
+
+// ─── Shared module-level state ────────────────────────────────────────────────
 
 // Map<jid, {count: number, windowStart: number}>
 const badMacCounts = new Map();
+
+// Map<id, timestampMs> — recently purged key IDs, for dedup.
+// Declared at top so startPruneTimer() can reference it without a TDZ hazard.
+const _recentlyPurged = new Map();
+
+// Map<jid, Promise> — full wipes currently running. Concurrent Bad MACs for a
+// JID join the in-flight wipe instead of starting a competing one. Entries
+// remove themselves when the wipe settles, so this needs no pruning.
+const _wipesInFlight = new Map();
 
 // Periodically prune the maps so they don't grow unbounded. The timer is tied
 // to the interceptor's lifetime rather than to module load: uninstall clears
@@ -52,7 +67,7 @@ function startPruneTimer() {
       }
     }
     for (const [jid, data] of badMacCounts.entries()) {
-      if (now - data.windowStart > 60_000) {
+      if (now - data.windowStart > CIRCUIT_BREAKER_WINDOW_MS) {
         badMacCounts.delete(jid);
       }
     }
@@ -90,49 +105,24 @@ const SUPPRESS_PATTERNS = [
 function isSuppressible(...args) {
   if (args.length === 0) return false;
 
-  let hasKeyword = false;
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (typeof arg === 'string') {
-      if (
-        arg.includes('MAC') ||
-        arg.includes('Session') ||
-        arg.includes('session') ||
-        arg.includes('prekey') ||
-        arg.includes('failed') ||
-        arg.includes('Failed') ||
-        arg.includes('Counter') ||
-        arg.includes('Key used already') ||
-        arg.includes('decrypt')
-      ) {
-        hasKeyword = true;
-        break;
-      }
-    } else if (arg && typeof arg === 'object') {
-      const texts = collectErrorTexts(arg);
-      const msg = texts.join(' ');
-      if (
-        msg.includes('MAC') ||
-        msg.includes('Session') ||
-        msg.includes('session') ||
-        msg.includes('prekey') ||
-        msg.includes('failed') ||
-        msg.includes('Failed') ||
-        msg.includes('Counter') ||
-        msg.includes('Key used already') ||
-        msg.includes('decrypt')
-      ) {
-        hasKeyword = true;
-        break;
-      }
-    }
-  }
-
-  if (!hasKeyword) return false;
-
+  // Build a single flat text blob from all arguments — calling
+  // collectErrorTexts once per object rather than twice.
   const text = args
     .map((a) => (typeof a === 'string' ? a : collectErrorTexts(a).join(' ')))
     .join(' ');
+
+  const hasKeyword =
+    text.includes('MAC') ||
+    text.includes('Session') ||
+    text.includes('session') ||
+    text.includes('prekey') ||
+    text.includes('failed') ||
+    text.includes('Failed') ||
+    text.includes('Counter') ||
+    text.includes('Key used already') ||
+    text.includes('decrypt');
+
+  if (!hasKeyword) return false;
   return SUPPRESS_PATTERNS.some((p) => text.includes(p));
 }
 
@@ -271,12 +261,7 @@ let _installed = false;
 let _originalConsoleError = null;
 let _originalConsoleLog = null;
 let _unhandledHandler = null;
-const _recentlyPurged = new Map();
-
-// Map<jid, Promise> — full wipes currently running. Concurrent Bad MACs for a
-// JID join the in-flight wipe instead of starting a competing one. Entries
-// remove themselves when the wipe settles, so this needs no pruning.
-const _wipesInFlight = new Map();
+// (_recentlyPurged and _wipesInFlight are declared at the top of the file)
 
 export function uninstallBadMacInterceptor() {
   if (!_installed) return;
@@ -442,7 +427,7 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
 
     // Always count the failure toward the circuit breaker by base JID
     let stats = badMacCounts.get(baseJid) || { count: 0, windowStart: now };
-    if (now - stats.windowStart > 60_000) {
+    if (now - stats.windowStart > CIRCUIT_BREAKER_WINDOW_MS) {
       stats = { count: 0, windowStart: now }; // reset expired window
     }
     stats.count++;
@@ -450,8 +435,8 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
 
     // Circuit Breaker: too many failures for one JID → wipe all its keys.
     // This runs regardless of the dedup window.
-    if (purgeAllForJid && stats.count >= 3) {
-      _originalConsoleError(`[BadMAC] Circuit Breaker: JID ${baseJid} hit ${stats.count} bad MACs in 60s. Wiping all session keys.`);
+    if (purgeAllForJid && stats.count >= CIRCUIT_BREAKER_THRESHOLD) {
+      _originalConsoleError(`[BadMAC] Circuit Breaker: JID ${baseJid} hit ${stats.count} bad MACs in ${CIRCUIT_BREAKER_WINDOW_MS / 1000}s. Wiping all session keys.`);
 
       // Reset *before* awaiting. Everything up to the first await runs
       // atomically, so a concurrent caller must never observe a count that is
