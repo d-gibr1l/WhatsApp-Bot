@@ -432,15 +432,15 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- Tavily API Key -->
+      <!-- Brave Search API Key -->
       <div class="setting-card">
         <div class="setting-info">
-          <h3>Tavily Search API Key</h3>
+          <h3>Brave Search API Key</h3>
           <p>Used by the AI search command to search the web.</p>
         </div>
         <div class="input-group" style="margin-top:12px;">
-          <input type="text" id="setting-tavily_api_key" class="form-input" placeholder="Paste Tavily Key here" autocomplete="new-password" spellcheck="false"/>
-          <button class="input-btn" onclick="updateSettingText('tavily_api_key')">Save</button>
+          <input type="text" id="setting-brave_api_key" class="form-input" placeholder="Paste Brave Key here" autocomplete="new-password" spellcheck="false"/>
+          <button class="input-btn" onclick="updateSettingText('brave_api_key')">Save</button>
         </div>
       </div>
 
@@ -637,7 +637,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
     });
 
     // Process other text inputs
-    ['max_warnings', 'sticker_pack_name', 'sticker_pack_author', 'gemini_api_key', 'groq_api_key', 'tavily_api_key', 'rapidapi_key', 'tmdb_api_key', 'yt_cookies'].forEach(key => {
+    ['max_warnings', 'sticker_pack_name', 'sticker_pack_author', 'gemini_api_key', 'groq_api_key', 'brave_api_key', 'rapidapi_key', 'tmdb_api_key', 'yt_cookies'].forEach(key => {
       const el = document.getElementById('setting-' + key);
       if (el && map.has(key)) {
         let val = map.get(key);
