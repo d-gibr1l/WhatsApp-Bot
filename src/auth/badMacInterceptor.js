@@ -102,7 +102,7 @@ function isSuppressible(...args) {
         arg.includes('failed') ||
         arg.includes('Failed') ||
         arg.includes('Counter') ||
-        arg.includes('Key') ||
+        arg.includes('Key used already') ||
         arg.includes('decrypt')
       ) {
         hasKeyword = true;
@@ -119,7 +119,7 @@ function isSuppressible(...args) {
         msg.includes('failed') ||
         msg.includes('Failed') ||
         msg.includes('Counter') ||
-        msg.includes('Key') ||
+        msg.includes('Key used already') ||
         msg.includes('decrypt')
       ) {
         hasKeyword = true;
@@ -257,8 +257,9 @@ function extractKeyId(errOrObj) {
 // anything it does not recognise back to that default, or this module silently
 // swallows every unhandled rejection in the process.
 function escalateRejection(reason) {
-  // Someone else registered a listener too — it owns the default behaviour,
-  // so escalating here would double-report.
+  // The interceptor's own listener is already counted, so > 1 means at least
+  // one other listener exists — it owns the default behaviour, so escalating
+  // here would double-report.
   if (process.listenerCount('unhandledRejection') > 1) return;
 
   // Rethrowing outside the handler surfaces the value as an uncaughtException,
