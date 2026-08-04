@@ -340,11 +340,9 @@ async function _buildAuthState() {
             _purgedKeys.delete(key);
             const val = normalizeForType(value, category);
             l1Updates.push({ key, val });
-            l1Set(key, val);
             pipeline.set(key, serialize(value), 'EX', KEY_TTL_SECONDS);
           } else {
             l1Deletes.push(key);
-            _l1Cache.delete(key);
             pipeline.del(key);
           }
         }
@@ -357,9 +355,31 @@ async function _buildAuthState() {
         const errors = results ? results.filter(([err]) => err) : [];
         if (errors.length > 0) {
           console.error(`[RedisAuth] ${errors.length} errors during keys.set pipeline execution`, errors[0][0]);
+          // Roll back L1 for any key whose Redis write failed, so L1 stays
+          // consistent with what Redis actually persisted.
+          const failedIndices = new Set(
+            errors.map(([, , idx]) => idx).filter((i) => i !== undefined)
+          );
+          for (let i = 0; i < l1Updates.length; i++) {
+            if (failedIndices.size === 0 || failedIndices.has(i)) {
+              // Re-apply successful writes; evict failed ones.
+              if (failedIndices.has(i)) {
+                _l1Cache.delete(l1Updates[i].key);
+              } else {
+                l1Set(l1Updates[i].key, l1Updates[i].val);
+              }
+            } else {
+              l1Set(l1Updates[i].key, l1Updates[i].val);
+            }
+          }
+        } else {
+          // All writes confirmed — commit L1 updates now.
+          for (const { key, val } of l1Updates) l1Set(key, val);
+          for (const key of l1Deletes) _l1Cache.delete(key);
         }
       } catch (err) {
         console.error('[RedisAuth] Failed to execute keys.set pipeline:', err.message);
+        // Pipeline threw — don't commit L1; treat the batch as a no-op.
       }
     }
   };
@@ -408,9 +428,13 @@ async function _wipeSessionKeys(redis, sessionId) {
   for (const k of keys) {
     markKeyPurged(k);
   }
+  // Use a pipeline instead of spread-del so we never hit Node's argument-count
+  // limit or Redis's max inline-command size, regardless of how many keys exist.
   const BATCH = 500;
   for (let i = 0; i < keys.length; i += BATCH) {
-    await redis.del(...keys.slice(i, i + BATCH));
+    const pipeline = redis.pipeline();
+    for (const k of keys.slice(i, i + BATCH)) pipeline.del(k);
+    await pipeline.exec();
   }
 }
 
@@ -532,4 +556,7 @@ export async function loadSession() {
   return true;
 }
 
+// saveSession is a no-op stub kept for interface compatibility with index.js.
+// All persistence happens eagerly inside keys.set and saveCreds — there is no
+// deferred flush step to trigger here.
 export async function saveSession() {}

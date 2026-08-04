@@ -144,22 +144,16 @@ function isSuppressible(...args) {
 const SIGNAL_ADDRESS_RE = /^[\w-]+\.\d+$/;
 
 /**
- * Attempt to extract a purgeable key reference from a libsignal error stack.
+ * Recursively collect all text strings from an error or plain object tree.
  *
- * libsignal embeds the sender address in the async call chain:
- *   "at async 59335526904016.73 [as awaitable]"
+ * Walks known error properties (stack, message, jid, cause, etc.) up to a
+ * depth of 5 to prevent infinite cycles. Returns a flat array of strings that
+ * callers join together to build a searchable error text blob.
  *
- * Two kinds of result come back, and they are NOT interchangeable:
- *
- *   exact: true  → `id` is a real key id in Baileys' keystore namespace, so
- *                  purgeCorruptKey(type, id) will hit an existing key.
- *   exact: false → all we recovered is a JID. The corresponding key id cannot
- *                  be reconstructed from the stack (sender-key ids embed the
- *                  sending user; lid→address encoding is version-dependent),
- *                  so only a prefix wipe via purgeAllForJid() can act on it.
- *
- * @param {Error} err
- * @returns {{ type: string, id: string, exact: boolean } | null}
+ * @param {*}      obj     - Any value; non-objects are coerced to string.
+ * @param {Set}    visited - Cycle guard (default: new Set()).
+ * @param {number} depth   - Current recursion depth (default: 0).
+ * @returns {string[]}
  */
 function collectErrorTexts(obj, visited = new Set(), depth = 0) {
   if (!obj || depth > 5 || visited.has(obj)) return [];
