@@ -332,6 +332,12 @@ async function _buildAuthState() {
       const l1Updates = [];
       const l1Deletes = [];
 
+      // Maps a pipeline results index back to the l1Updates entry it
+      // corresponds to.  DEL entries get -1 so we can skip them during
+      // rollback.  Without this, interleaved SETs and DELs shift the
+      // indices and the wrong L1 entries get evicted on partial failure.
+      const resultsToL1 = [];
+
       for (const category of Object.keys(data)) {
         for (const id of Object.keys(data[category])) {
           const key = `${sessionId}:${category}-${id}`;
@@ -339,9 +345,11 @@ async function _buildAuthState() {
           if (value) {
             _purgedKeys.delete(key);
             const val = normalizeForType(value, category);
+            resultsToL1.push(l1Updates.length);
             l1Updates.push({ key, val });
             pipeline.set(key, serialize(value), 'EX', KEY_TTL_SECONDS);
           } else {
+            resultsToL1.push(-1);
             l1Deletes.push(key);
             pipeline.del(key);
           }
@@ -355,23 +363,24 @@ async function _buildAuthState() {
         const errors = results ? results.filter(([err]) => err) : [];
         if (errors.length > 0) {
           console.error(`[RedisAuth] ${errors.length} errors during keys.set pipeline execution`, errors[0][0]);
-          // Roll back L1 for failed writes so L1 stays consistent with Redis.
-          // ioredis pipeline results are [err, result] pairs — the index into
-          // l1Updates corresponds to the position in results.
-          const failedIndices = new Set(
-            results
-              .map(([err], i) => (err ? i : null))
-              .filter((i) => i !== null)
-          );
+          // Identify which l1Updates entries failed by mapping through
+          // resultsToL1 so interleaved DELs don't shift the indices.
+          const failedL1 = new Set();
+          for (let ri = 0; ri < results.length; ri++) {
+            if (results[ri][0] && resultsToL1[ri] >= 0) {
+              failedL1.add(resultsToL1[ri]);
+            }
+          }
           for (let i = 0; i < l1Updates.length; i++) {
-            if (failedIndices.has(i)) {
+            if (failedL1.has(i)) {
               // Redis rejected this write — keep L1 clean.
               _l1Cache.delete(l1Updates[i].key);
             } else {
               l1Set(l1Updates[i].key, l1Updates[i].val);
             }
           }
-          // Deletes are pipeline entries after all the sets; always safe to apply.
+          // DEL failures are harmless — the key stays in Redis and will be
+          // picked up on the next read.  Always evict from L1 regardless.
           for (const key of l1Deletes) _l1Cache.delete(key);
         } else {
           // All writes confirmed — commit L1 updates now.

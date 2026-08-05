@@ -57,7 +57,7 @@ let lastConnectedAt = 0;
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
 // Single exit path for all signals and error codes.
-// Order matters: stop poller → close socket → drain WAL → close MongoDB → exit.
+// Order matters: stop poller → close socket → uninstall interceptor → drain Redis → close Redis → exit.
 
 async function shutdown(signal, exitCode = 0) {
   console.log(`Shutting down (${signal}, exit ${exitCode})`);

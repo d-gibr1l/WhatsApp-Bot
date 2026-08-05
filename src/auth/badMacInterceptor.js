@@ -453,9 +453,9 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
           _originalConsoleError(`[BadMAC] Circuit Breaker wipe failed for JID ${baseJid}:`, err.message);
           const current = badMacCounts.get(baseJid);
           if (!current) {
-            badMacCounts.set(baseJid, { count: 3, windowStart: Date.now() });
+            badMacCounts.set(baseJid, { count: CIRCUIT_BREAKER_THRESHOLD, windowStart: Date.now() });
           } else {
-            current.count = Math.max(current.count, 3);
+            current.count = Math.max(current.count, CIRCUIT_BREAKER_THRESHOLD);
           }
           throw err;
         })
