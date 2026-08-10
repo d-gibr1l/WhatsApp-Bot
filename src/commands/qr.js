@@ -1,5 +1,8 @@
-import { execSync } from "child_process";
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import { promises as fsPromises, existsSync } from "fs";
+
+const execFileAsync = promisify(execFile);
 import { tmpdir } from "os";
 import { join } from "path";
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
@@ -33,13 +36,20 @@ export const qrCommands = {
 
           const tmpImg = join(tmpdir(), `qr_in_${Date.now()}.png`);
           const pngBuf = await sharp(buffer).png().toBuffer();
-          writeFileSync(tmpImg, pngBuf);
+          await fsPromises.writeFile(tmpImg, pngBuf);
 
-          const result = execSync(`zbarimg --quiet --raw "${tmpImg}" 2>/dev/null || echo ""`, {
-            timeout: 10000, encoding: "utf8"
-          }).trim();
+          try {
+            const { stdout } = await execFileAsync("zbarimg", ["--quiet", "--raw", tmpImg], {
+              timeout: 10000, encoding: "utf8"
+            });
+            result = stdout.trim();
+          } catch (err) {
+            // zbarimg exits with code 4 if no barcodes are found, ignore it and handle as empty result
+            if (err.code !== 4) console.error("zbarimg error:", err);
+            result = "";
+          }
 
-          try { unlinkSync(tmpImg); } catch {}
+          await fsPromises.unlink(tmpImg).catch(()=>{});
 
           if (!result) {
             return replyMsg(sock, from, msg, "❌ No QR code found in image. Make sure the QR is clear and well-lit.");
@@ -65,12 +75,13 @@ export const qrCommands = {
       await reactMsg(sock, from, msg, "⏳");
       try {
         const tmpOut = join(tmpdir(), `qr_out_${Date.now()}.png`);
-        execSync(`qrencode -o "${tmpOut}" -s 10 "${text.replace(/"/g, '\\"')}"`, { timeout: 10000 });
+        
+        await execFileAsync("qrencode", ["-o", tmpOut, "-s", "10", text], { timeout: 10000 });
 
         if (!existsSync(tmpOut)) throw new Error("qrencode failed to produce output.");
 
-        const buffer = readFileSync(tmpOut);
-        try { unlinkSync(tmpOut); } catch {}
+        const buffer = await fsPromises.readFile(tmpOut);
+        await fsPromises.unlink(tmpOut).catch(()=>{});
 
         await reactMsg(sock, from, msg, "✅");
         await sock.sendMessage(from, {

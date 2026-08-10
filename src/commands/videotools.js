@@ -1,9 +1,12 @@
-import { execSync } from "child_process";
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { existsSync, promises as fsPromises } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
+
+const execPromise = promisify(exec);
 
 const MAX_MB = 64;
 function sizeMB(buf) { return buf.length / (1024 * 1024); }
@@ -62,17 +65,17 @@ export const videoToolsCommands = {
 
       const tmpIn  = join(tmpdir(), `comp_in_${Date.now()}.mp4`);
       const tmpOut = join(tmpdir(), `comp_out_${Date.now()}.mp4`);
-      writeFileSync(tmpIn, media.buffer);
+      await fsPromises.writeFile(tmpIn, media.buffer);
 
       try {
-        execSync(
+        await execPromise(
           `ffmpeg -i "${tmpIn}" -vcodec libx264 -crf ${q} -preset fast -acodec aac -b:a 128k "${tmpOut}" -y`,
           { timeout: 180000 }
         );
 
         if (!existsSync(tmpOut)) throw new Error("ffmpeg produced no output.");
 
-        const outBuf = readFileSync(tmpOut);
+        const outBuf = await fsPromises.readFile(tmpOut);
         const origMB = sizeMB(media.buffer).toFixed(1);
         const newMB  = sizeMB(outBuf).toFixed(1);
 
@@ -87,8 +90,8 @@ export const videoToolsCommands = {
           caption: `📦 Compressed: ${origMB}MB → ${newMB}MB`,
         }, { quoted: msg });
       } finally {
-        try { unlinkSync(tmpIn); } catch {}
-        try { unlinkSync(tmpOut); } catch {}
+        await fsPromises.unlink(tmpIn).catch(()=>{});
+        await fsPromises.unlink(tmpOut).catch(()=>{});
       }
     },
   },
@@ -117,18 +120,18 @@ export const videoToolsCommands = {
       const ext    = media.type === "video" ? "mp4" : "mp3";
       const tmpIn  = join(tmpdir(), `rev_in_${ts}.${ext}`);
       const tmpOut = join(tmpdir(), `rev_out_${ts}.${ext}`);
-      writeFileSync(tmpIn, media.buffer);
+      await fsPromises.writeFile(tmpIn, media.buffer);
 
       try {
         if (media.type === "video") {
           // Get video duration first
           let duration = 30; // default cap
           try {
-            const probe = execSync(
+            const { stdout } = await execPromise(
               `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${tmpIn}"`,
               { encoding: "utf8", timeout: 10000 }
-            ).trim();
-            duration = parseFloat(probe) || 30;
+            );
+            duration = parseFloat(stdout.trim()) || 30;
           } catch {}
 
           if (duration > 60) {
@@ -137,7 +140,7 @@ export const videoToolsCommands = {
 
           // Segment-based reverse: split into 2s chunks, reverse each, concat reversed
           const segDir  = join(tmpdir(), `rev_segs_${ts}`);
-          execSync(`mkdir -p "${segDir}"`);
+          await execPromise(`mkdir -p "${segDir}"`);
 
           const segDuration = 2;
           const numSegs = Math.ceil(duration / segDuration);
@@ -149,13 +152,13 @@ export const videoToolsCommands = {
             const segOut = join(segDir, `segr_${i}.mp4`);
 
             // Extract segment
-            execSync(
+            await execPromise(
               `ffmpeg -ss ${startTime} -i "${tmpIn}" -t ${segDuration} -c:v libx264 -c:a aac -y "${segIn}"`,
               { timeout: 30000 }
             );
 
             // Reverse segment
-            execSync(
+            await execPromise(
               `ffmpeg -i "${segIn}" -vf reverse -af areverse -y "${segOut}"`,
               { timeout: 30000 }
             );
@@ -165,27 +168,27 @@ export const videoToolsCommands = {
 
           // Write concat list
           const listPath = join(segDir, "list.txt");
-          writeFileSync(listPath, reversedSegs.map(f => `file '${f}'`).join("\n"));
+          await fsPromises.writeFile(listPath, reversedSegs.map(f => `file '${f}'`).join("\n"));
 
           // Concat all reversed segments
-          execSync(
+          await execPromise(
             `ffmpeg -f concat -safe 0 -i "${listPath}" -c:v libx264 -c:a aac -movflags +faststart -y "${tmpOut}"`,
             { timeout: 120000 }
           );
 
           // Cleanup segments
-          try { execSync(`rm -rf "${segDir}"`); } catch {}
+          try { await execPromise(`rm -rf "${segDir}"`); } catch {}
 
         } else {
           // Audio reverse — areverse handles audio fine
-          execSync(
+          await execPromise(
             `ffmpeg -i "${tmpIn}" -af areverse -y "${tmpOut}"`,
             { timeout: 60000 }
           );
         }
 
         if (!existsSync(tmpOut)) throw new Error("ffmpeg produced no output.");
-        const outBuf = readFileSync(tmpOut);
+        const outBuf = await fsPromises.readFile(tmpOut);
 
         if (sizeMB(outBuf) > MAX_MB) {
           return replyMsg(sock, from, msg, `❌ Output too large (${sizeMB(outBuf).toFixed(1)}MB).`);
@@ -199,8 +202,8 @@ export const videoToolsCommands = {
           await sock.sendMessage(from, { audio: outBuf, mimetype: "audio/mpeg", ptt: false }, { quoted: msg });
         }
       } finally {
-        try { unlinkSync(tmpIn); } catch {}
-        try { unlinkSync(tmpOut); } catch {}
+        await fsPromises.unlink(tmpIn).catch(()=>{});
+        await fsPromises.unlink(tmpOut).catch(()=>{});
       }
     },
   },

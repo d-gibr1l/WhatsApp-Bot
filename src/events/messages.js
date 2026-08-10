@@ -69,7 +69,7 @@ export function bindMessagesEvents(sock) {
       if (item.keys)          keys = item.keys;
       else if (item.key)      keys = [item.key];
       else if (item.messages) keys = item.messages.map(m => m.key).filter(Boolean);
-      for (const key of keys) await safeHandleDelete(sock, key);
+      await Promise.all(keys.map(key => safeHandleDelete(sock, key)));
     } catch (err) {
       console.error("Anti-delete (bulk) error:", err.message);
     }

@@ -45,7 +45,8 @@ export const imageCommands = {
       // Fix: Append 'site:pinterest.com' to force all images to come from Pinterest.
       let imageUrls;
       try {
-        imageUrls = await searchImages(query, count + 4);
+        const pinterestQuery = `${query} site:pinterest.com`;
+        imageUrls = await searchImages(pinterestQuery, count + 4);
       } catch (err) {
         console.error(`Image search failed for "${query}":`, err.message);
         return replyMsg(sock, from, msg,
@@ -61,34 +62,33 @@ export const imageCommands = {
 
       await reactMsg(sock, from, msg, "⬇️");
 
-      // ── Download & Send ───────────────────────────────────────────────────
-      let sent   = 0;
-      let failed = 0;
-
-      for (const url of imageUrls) {
-        if (sent >= count) break;
-
-        try {
-          const { buffer, contentType } = await downloadImageUrl(url);
-
-          await sock.sendMessage(from, {
-            image:    buffer,
-            mimetype: contentType,
-            // Only caption the first image to avoid spam
-            caption:  sent === 0 ? `🖼️ *${query}*` : "",
-          }, { quoted: msg });
-
-          sent++;
-
-          // Stagger sends to avoid WhatsApp rate limiting
-          if (sent < count) {
-            await new Promise(r => setTimeout(r, SEND_DELAY_MS));
-          }
-
-        } catch (err) {
-          failed++;
+      // ── Download Concurrently ─────────────────────────────────────────────
+      const downloadPromises = imageUrls.map(url =>
+        downloadImageUrl(url).then(res => res).catch(err => {
           console.error(`Image download failed [${url.slice(0, 60)}]:`, err.message);
-          // Continue to next URL — don't abort the whole batch on one failure
+          return null;
+        })
+      );
+      
+      const downloadedImages = (await Promise.all(downloadPromises))
+        .filter(Boolean)
+        .slice(0, count);
+
+      let sent = 0;
+
+      // ── Send Sequentially (to avoid rate limits) ──────────────────────────
+      for (let i = 0; i < downloadedImages.length; i++) {
+        const { buffer, contentType } = downloadedImages[i];
+        
+        await sock.sendMessage(from, {
+          image:    buffer,
+          mimetype: contentType,
+          caption:  i === 0 ? `🖼️ *${query}*` : "",
+        }, { quoted: msg });
+        
+        sent++;
+        if (i < downloadedImages.length - 1) {
+          await new Promise(r => setTimeout(r, SEND_DELAY_MS));
         }
       }
 

@@ -10,6 +10,7 @@ import { cachedGetSetting, refreshSettings } from "../cache.js";
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 import { getYtDlpPath, getCookiesPath } from "../downloader.js";
+import { heavyQueue } from "../queue.js";
 
 const execAsync = promisify(exec);
 
@@ -532,12 +533,9 @@ export const bulkStickerCommands = {
       stickerSessions.delete(from);
       await reactMsg(sock, from, msg, "⏳");
 
-      // Process in chunks of 3 to prevent memory overload on Koyeb
-      const concurrencyLimit = 3;
-      for (let i = 0; i < session.messages.length; i += concurrencyLimit) {
-        const chunk = session.messages.slice(i, i + concurrencyLimit);
-        
-        await Promise.all(chunk.map(async (imgMsg) => {
+      // Use heavyQueue to limit concurrency to 3 and process efficiently without stalls
+      await Promise.all(session.messages.map((imgMsg) => 
+        heavyQueue.execute(async () => {
           try {
             const buffer = await downloadMediaMessage(imgMsg, "buffer", {});
             
@@ -557,8 +555,8 @@ export const bulkStickerCommands = {
           } catch (err) {
             console.error("Bulk conversion failed for a message", err.message);
           }
-        }));
-      }
+        })
+      ));
 
       await reactMsg(sock, from, msg, "✅");
     },

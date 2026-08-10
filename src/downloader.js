@@ -71,8 +71,9 @@ export function detectPlatform(url) {
 
 export function extractUrl(text) {
   if (!text) return null;
-  const match = text.match(/https?:\/\/[^\s()<>]*(?=[.,;:?!]?(?:\s|$))/);
-  return match ? match[0] : null;
+  const match = text.match(/(https?:\/\/[^\s()<>]+)/);
+  if (!match) return null;
+  return match[0].replace(/[.,;:?!]+$/, '');
 }
 
 // ─── Cookies Helper ───────────────────────────────────────────────────────────

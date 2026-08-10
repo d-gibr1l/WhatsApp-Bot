@@ -1,5 +1,8 @@
-import { execSync } from "child_process";
-import { writeFileSync, readFileSync, unlinkSync, existsSync, mkdirSync } from "fs";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { existsSync, promises as fsPromises } from "fs";
+
+const execPromise = promisify(exec);
 import { tmpdir } from "os";
 import { join } from "path";
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
@@ -62,23 +65,23 @@ export const mediaToolsCommands = {
       const tmpOut = join(tmpdir(), `avm_out_${Date.now()}.mp4`);
 
       try {
-        writeFileSync(tmpVid, await downloadBuffer(vidMsg));
-        writeFileSync(tmpAud, await downloadBuffer(audMsg));
+        await fsPromises.writeFile(tmpVid, await downloadBuffer(vidMsg));
+        await fsPromises.writeFile(tmpAud, await downloadBuffer(audMsg));
 
-        execSync(
+        await execPromise(
           `ffmpeg -i "${tmpVid}" -i "${tmpAud}" -map 0:v -map 1:a -c:v copy -shortest "${tmpOut}" -y`,
           { timeout: 120000 }
         );
 
         if (!existsSync(tmpOut)) throw new Error("ffmpeg produced no output.");
-        const buf = readFileSync(tmpOut);
+        const buf = await fsPromises.readFile(tmpOut);
 
         if (sizeMB(buf) > MAX_MB) return replyMsg(sock, from, msg, `❌ Output too large (${sizeMB(buf).toFixed(1)}MB).`);
 
         await reactMsg(sock, from, msg, "✅");
         await sock.sendMessage(from, { video: buf, mimetype: "video/mp4" }, { quoted: msg });
       } finally {
-        for (const f of [tmpVid, tmpAud, tmpOut]) try { unlinkSync(f); } catch {}
+        for (const f of [tmpVid, tmpAud, tmpOut]) await fsPromises.unlink(f).catch(()=>{});
       }
     },
   },
@@ -104,22 +107,22 @@ export const mediaToolsCommands = {
       const tmpOut = join(tmpdir(), `avec_out_${Date.now()}.mp4`);
 
       try {
-        writeFileSync(tmpAud, await downloadBuffer(media.msgObj));
+        await fsPromises.writeFile(tmpAud, await downloadBuffer(media.msgObj));
 
-        execSync(
+        await execPromise(
           `ffmpeg -f lavfi -i color=c=black:s=640x360:r=30 -i "${tmpAud}" -map 0:v -map 1:a -c:v libx264 -tune stillimage -c:a aac -b:a 192k -shortest "${tmpOut}" -y`,
           { timeout: 120000 }
         );
 
         if (!existsSync(tmpOut)) throw new Error("ffmpeg produced no output.");
-        const buf = readFileSync(tmpOut);
+        const buf = await fsPromises.readFile(tmpOut);
 
         if (sizeMB(buf) > MAX_MB) return replyMsg(sock, from, msg, `❌ Output too large (${sizeMB(buf).toFixed(1)}MB).`);
 
         await reactMsg(sock, from, msg, "✅");
         await sock.sendMessage(from, { video: buf, mimetype: "video/mp4" }, { quoted: msg });
       } finally {
-        for (const f of [tmpAud, tmpOut]) try { unlinkSync(f); } catch {}
+        for (const f of [tmpAud, tmpOut]) await fsPromises.unlink(f).catch(()=>{});
       }
     },
   },
@@ -148,34 +151,34 @@ export const mediaToolsCommands = {
       await reactMsg(sock, from, msg, "⏳");
 
       const tmpDir  = join(tmpdir(), `merge_${Date.now()}`);
-      mkdirSync(tmpDir, { recursive: true });
+      await fsPromises.mkdir(tmpDir, { recursive: true });
       const tmp1    = join(tmpDir, "v1.mp4");
       const tmp2    = join(tmpDir, "v2.mp4");
       const tmpList = join(tmpDir, "list.txt");
       const tmpOut  = join(tmpDir, "out.mp4");
 
       try {
-        writeFileSync(tmp1, await downloadBuffer(msg));
-        writeFileSync(tmp2, await downloadBuffer({ key: msg.key, message: quoted }));
+        await fsPromises.writeFile(tmp1, await downloadBuffer(msg));
+        await fsPromises.writeFile(tmp2, await downloadBuffer({ key: msg.key, message: quoted }));
 
         // Re-encode both to same format before concat
         const tmp1r = join(tmpDir, "v1r.mp4");
         const tmp2r = join(tmpDir, "v2r.mp4");
-        execSync(`ffmpeg -i "${tmp1}" -c:v libx264 -c:a aac "${tmp1r}" -y`, { timeout: 60000 });
-        execSync(`ffmpeg -i "${tmp2}" -c:v libx264 -c:a aac "${tmp2r}" -y`, { timeout: 60000 });
+        await execPromise(`ffmpeg -i "${tmp1}" -c:v libx264 -c:a aac "${tmp1r}" -y`, { timeout: 60000 });
+        await execPromise(`ffmpeg -i "${tmp2}" -c:v libx264 -c:a aac "${tmp2r}" -y`, { timeout: 60000 });
 
-        writeFileSync(tmpList, `file '${tmp1r}'\nfile '${tmp2r}'\n`);
-        execSync(`ffmpeg -f concat -safe 0 -i "${tmpList}" -c copy "${tmpOut}" -y`, { timeout: 120000 });
+        await fsPromises.writeFile(tmpList, `file '${tmp1r}'\nfile '${tmp2r}'\n`);
+        await execPromise(`ffmpeg -f concat -safe 0 -i "${tmpList}" -c copy "${tmpOut}" -y`, { timeout: 120000 });
 
         if (!existsSync(tmpOut)) throw new Error("ffmpeg produced no output.");
-        const buf = readFileSync(tmpOut);
+        const buf = await fsPromises.readFile(tmpOut);
 
         if (sizeMB(buf) > MAX_MB) return replyMsg(sock, from, msg, `❌ Merged file too large (${sizeMB(buf).toFixed(1)}MB).`);
 
         await reactMsg(sock, from, msg, "✅");
         await sock.sendMessage(from, { video: buf, mimetype: "video/mp4" }, { quoted: msg });
       } finally {
-        try { execSync(`rm -rf "${tmpDir}"`); } catch {}
+        try { await execPromise(`rm -rf "${tmpDir}"`); } catch {}
       }
     },
   },

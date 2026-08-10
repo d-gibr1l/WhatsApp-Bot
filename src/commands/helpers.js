@@ -133,12 +133,14 @@ export function getTargetNumber(msg, args) {
  * Converts strings like "10m" or "2h" into milliseconds
  */
 export function parseTime(str) {
-  const match = str.match(/^(\d+)(s|m|h|d)$/);
+  if (typeof str !== 'string') return null;
+  const match = str.trim().toLowerCase().match(/^(\d*\.?\d+)\s*(s|m|h|d)$/);
   if (!match) return null;
-  const val = parseInt(match[1]);
+  const val = parseFloat(match[1]);
+  if (isNaN(val) || val < 0) return null;
   const unit = match[2];
   const multipliers = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
-  return val * multipliers[unit];
+  return Math.floor(val * multipliers[unit]);
 }
 
 /**

@@ -42,6 +42,16 @@ export function setConnecting()   { botStatus = "connecting";                 pu
 const app = express();
 app.use(express.json());
 
+// Global Authentication Middleware
+app.use((req, res, next) => {
+  const pass = process.env.WEB_PASSWORD;
+  if (!pass) return next();
+  const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
+  const [_, reqPass] = Buffer.from(b64auth, 'base64').toString().split(':');
+  if (reqPass === pass) return next();
+  res.set('WWW-Authenticate', 'Basic realm="Web Control Panel"');
+  res.status(401).send('Authentication required.');
+});
 const HTML = (status, hasQR) => `<!DOCTYPE html>
 <html lang="en">
 <head>

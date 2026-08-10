@@ -34,14 +34,14 @@ function normalizeNumber(num) {
 
 // ─── Trie for Auto-Replies (Word-Based) ───────────────────
 
-class TrieNode {
+export class TrieNode {
   constructor() {
     this.children = new Map();
     this.response = null;
   }
 }
 
-class Trie {
+export class Trie {
   constructor() {
     this.root = new TrieNode();
   }
@@ -247,7 +247,10 @@ export function cachedHasAllowedGroups() {
 }
 
 export function cachedGetSetting(key, fallback = null) {
-  return cache.settings.get(key) ?? fallback;
+  if (cache.settings && cache.settings.has(key)) {
+    return cache.settings.get(key);
+  }
+  return fallback;
 }
 
 export function cachedGetAutoReply(text) {

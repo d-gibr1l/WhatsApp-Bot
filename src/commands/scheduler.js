@@ -1,4 +1,4 @@
-import { replyMsg, alertOwner, normalizeNumber } from "./helpers.js";
+import { replyMsg, normalizeNumber } from "./helpers.js";
 
 // ─── Active Jobs Store ────────────────────────────────────────────────────────
 

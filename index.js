@@ -4,7 +4,6 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import { Boom }      from "@hapi/boom";
 import pino          from "pino";
-import { LRUCache }  from "lru-cache";
 
 import { MAX_RECONNECTS, BASE_DELAY_MS, botConfig } from "./src/config.js";
 import {
@@ -18,7 +17,7 @@ import {
   getSessionId,
 } from "./src/auth/redisSession.js";
 import { installBadMacInterceptor, uninstallBadMacInterceptor } from "./src/auth/badMacInterceptor.js";
-import { handleMessage, startReminderPoller, extractText, markBotReady } from "./src/handler.js";
+import { handleMessage, startReminderPoller, markBotReady } from "./src/handler.js";
 import { loadWordFilter }   from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
 import { loadAliases }      from "./src/commands/aliases.js";
@@ -63,13 +62,13 @@ async function shutdown(signal, exitCode = 0) {
   console.log(`Shutting down (${signal}, exit ${exitCode})`);
 
   if (stopPoller) {
-    try { stopPoller(); } catch {}
+    try { stopPoller(); } catch (err) { console.error("Error stopping poller:", err.message); }
     stopPoller = null;
   }
 
   if (currentSock) {
-    try { currentSock.ev.removeAllListeners(); } catch {}
-    try { currentSock.ws?.close(); } catch {}
+    try { currentSock.ev.removeAllListeners(); } catch (err) { console.error("Error removing listeners:", err.message); }
+    try { currentSock.ws?.close(); } catch (err) { console.error("Error closing socket:", err.message); }
     currentSock = null;
   }
 
@@ -77,7 +76,7 @@ async function shutdown(signal, exitCode = 0) {
   // listener that the Bad MAC interceptor installed.
   try {
     uninstallBadMacInterceptor();
-  } catch {}
+  } catch (err) { console.error("Error uninstalling interceptor:", err.message); }
 
   // Drain pending Redis writes before closing the connection.
   // keys.set and saveCreds write-through immediately, but "issued" is not
