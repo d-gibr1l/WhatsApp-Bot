@@ -1,5 +1,8 @@
-import { execSync } from "child_process";
-import { writeFileSync, readFileSync, unlinkSync } from "fs";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { promises as fsPromises } from "fs";
+
+const execPromise = promisify(exec);
 import { tmpdir } from "os";
 import { join } from "path";
 import sharp from "sharp";
@@ -111,16 +114,16 @@ export const imageFxCommands = {
           .png()
           .toBuffer();
 
-        writeFileSync(tmpIn, processedBuffer);
+        await fsPromises.writeFile(tmpIn, processedBuffer);
 
         // Use ffmpeg to apply red tint, loop it, and add violent shake (crop with sine/cosine)
         // Crop box is slightly smaller than image to allow room for shaking
-        execSync(
+        await execPromise(
           `ffmpeg -loop 1 -i "${tmpIn}" -vf "drawbox=x=0:y=0:w=iw:h=ih:color=red@0.3:t=fill,crop=iw-40:ih-40:20+20*sin(t*30):20+20*cos(t*40)" -t 2 -r 15 -c:v libx264 -pix_fmt yuv420p "${tmpOut}" -y`,
           { timeout: 30000 }
         );
 
-        const outBuffer = readFileSync(tmpOut);
+        const outBuffer = await fsPromises.readFile(tmpOut);
 
         await reactMsg(sock, from, msg, "✅");
         await sock.sendMessage(from, {
@@ -133,8 +136,8 @@ export const imageFxCommands = {
         console.error("❌ triggered error:", err.message);
         await failMsg(sock, from, msg, err, "triggered");
       } finally {
-        try { unlinkSync(tmpIn); } catch {}
-        try { unlinkSync(tmpOut); } catch {}
+        await fsPromises.unlink(tmpIn).catch(()=>{});
+        await fsPromises.unlink(tmpOut).catch(()=>{});
       }
     },
   },

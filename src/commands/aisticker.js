@@ -1,4 +1,3 @@
-import { readFileSync, unlinkSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import sharp from "sharp";
@@ -42,26 +41,20 @@ export const aistickerCommands = {
 
       await reactMsg(sock, from, msg, "🎨");
 
-      const tmpOut = join(tmpdir(), `aisticker_${Date.now()}.webp`);
-
       try {
         // Generate image
         const imageBuffer = await generateImage(prompt);
 
         // Convert to sticker WebP
-        await sharp(imageBuffer)
+        const webpBuffer = await sharp(imageBuffer)
           .resize(512, 512, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
           .webp({ quality: 80 })
-          .toFile(tmpOut);
-
-        const webpBuffer = readFileSync(tmpOut);
-        try { unlinkSync(tmpOut); } catch {}
+          .toBuffer();
 
         await reactMsg(sock, from, msg, "✅");
         await sock.sendMessage(from, { sticker: webpBuffer }, { quoted: msg });
 
       } catch (err) {
-        try { if (existsSync(tmpOut)) unlinkSync(tmpOut); } catch {}
         console.error("❌ AI sticker error:", err.message);
         await reactMsg(sock, from, msg, "❌");
         await replyMsg(sock, from, msg, `❌ Failed to generate sticker: ${err.message}`);

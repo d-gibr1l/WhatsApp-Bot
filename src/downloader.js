@@ -1,6 +1,5 @@
 import { spawn, exec } from "child_process";
-import { promises as fsPromises, existsSync, readdirSync } from "fs";
-import { writeFileSync, unlinkSync, readFileSync, createWriteStream } from "fs";
+import { promises as fsPromises, existsSync, createWriteStream } from "fs";
 import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
 import { pipeline } from "stream/promises";

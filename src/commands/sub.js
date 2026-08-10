@@ -1,5 +1,8 @@
-import { execSync } from "child_process";
-import { readFileSync, unlinkSync, existsSync } from "fs";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { promises as fsPromises, existsSync } from "fs";
+
+const execPromise = promisify(exec);
 import { tmpdir } from "os";
 import { join } from "path";
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
@@ -35,12 +38,12 @@ export const subCommands = {
 
       try {
         // Create temp dir
-        execSync(`mkdir -p "${tmpDir}"`);
+        await fsPromises.mkdir(tmpDir, { recursive: true });
 
         // Try manual subs first, fall back to auto-generated
         let subFile = null;
         try {
-          execSync(
+          await execPromise(
             `"${ytDlpPath}" --write-subs --sub-lang ${lang} --skip-download --convert-subs srt ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${tmpBase}" "${url}"`,
             { timeout: 30000 }
           );
@@ -49,7 +52,7 @@ export const subCommands = {
         } catch {}
 
         if (!subFile) {
-          execSync(
+          await execPromise(
             `"${ytDlpPath}" --write-auto-subs --sub-lang ${lang} --skip-download --convert-subs srt ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${tmpBase}" "${url}"`,
             { timeout: 30000 }
           );
@@ -61,7 +64,7 @@ export const subCommands = {
         }
 
         // Parse SRT — strip timestamps, deduplicate lines
-        const raw = readFileSync(subFile, "utf8");
+        const raw = await fsPromises.readFile(subFile, "utf8");
         const lines = raw.split("\n");
         const textLines = [];
         let prev = "";
@@ -105,9 +108,9 @@ export const subCommands = {
           await failMsg(sock, from, msg, err, "sub");
         }
       } finally {
-        try { execSync(`rm -rf "${tmpDir}"`); } catch {}
+        await fsPromises.rm(tmpDir, { recursive: true, force: true }).catch(()=>{});
         if (cookiePath && existsSync(cookiePath)) {
-          try { unlinkSync(cookiePath); } catch {}
+          await fsPromises.unlink(cookiePath).catch(()=>{});
         }
       }
     },

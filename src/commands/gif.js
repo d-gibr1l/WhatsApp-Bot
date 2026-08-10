@@ -1,5 +1,8 @@
-import { execSync } from "child_process";
-import { readFileSync, unlinkSync, existsSync } from "fs";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { promises as fsPromises, existsSync } from "fs";
+
+const execPromise = promisify(exec);
 import { tmpdir } from "os";
 import { join } from "path";
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
@@ -51,21 +54,21 @@ export const gifCommands = {
         const ytDlpPath = getYtDlpPath();
 
         try {
-          execSync(
+          await execPromise(
             `"${ytDlpPath}" -f "bestvideo[height<=480][ext=mp4]+bestaudio/best[height<=480]" --merge-output-format mp4 ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${tmpVid}" "${url}"`,
             { timeout: 120000 }
           );
 
           if (!existsSync(tmpVid)) throw new Error("yt-dlp produced no file.");
 
-          execSync(
+          await execPromise(
             `ffmpeg -ss ${startSec} -i "${tmpVid}" -t ${durationSec} -vf "fps=15,scale=320:-2:flags=lanczos" -an -movflags +faststart -loop 0 "${tmpGif}" -y`,
             { timeout: 60000 }
           );
 
           if (!existsSync(tmpGif)) throw new Error("ffmpeg produced no output.");
 
-          const buffer = readFileSync(tmpGif);
+          const buffer = await fsPromises.readFile(tmpGif);
           const mb = buffer.length / (1024 * 1024);
 
           if (mb > 64) {
@@ -86,10 +89,10 @@ export const gifCommands = {
           console.error("❌ gif error:", err.message);
           await failMsg(sock, from, msg, err, "gif");
         } finally {
-          try { unlinkSync(tmpVid); } catch {}
-          try { unlinkSync(tmpGif); } catch {}
+          await fsPromises.unlink(tmpVid).catch(()=>{});
+          await fsPromises.unlink(tmpGif).catch(()=>{});
           if (cookiePath && existsSync(cookiePath)) {
-            try { unlinkSync(cookiePath); } catch {}
+            await fsPromises.unlink(cookiePath).catch(()=>{});
           }
         }
       } else {

@@ -1,6 +1,8 @@
-import { spawnSync }                    from "child_process";
-import { writeFileSync, readFileSync,
-         unlinkSync, existsSync }       from "fs";
+import { execFile }                     from "child_process";
+import { promisify }                    from "util";
+import { promises as fsPromises }       from "fs";
+
+const execFilePromise = promisify(execFile);
 import { tmpdir }                       from "os";
 import { join }                         from "path";
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
@@ -67,15 +69,15 @@ async function textToSpeech(text, lang = "en") {
  * @param {string} [inputExt]    - File extension hint for ffmpeg demuxer, e.g. "mp3"
  * @returns {Buffer} OGG/Opus buffer ready for WhatsApp PTT
  */
-function convertToWhatsAppAudio(inputBuffer, inputExt = "mp3") {
+async function convertToWhatsAppAudio(inputBuffer, inputExt = "mp3") {
   const ts      = Date.now();
   const inPath  = join(tmpdir(), `tts_in_${ts}.${inputExt}`);
   const outPath = join(tmpdir(), `tts_out_${ts}.ogg`);
 
-  writeFileSync(inPath, inputBuffer);
+  await fsPromises.writeFile(inPath, inputBuffer);
 
   try {
-    const result = spawnSync("ffmpeg", [
+    await execFilePromise("ffmpeg", [
       "-y",                          // overwrite output without prompting
       "-i",         inPath,          // input file
       "-c:a",       "libopus",       // Opus codec — mandatory for WA Android PTT
@@ -87,20 +89,14 @@ function convertToWhatsAppAudio(inputBuffer, inputExt = "mp3") {
       outPath,
     ], { timeout: 30_000 });
 
-    if (result.status !== 0) {
-      const stderr = result.stderr?.toString()?.slice(0, 300) ?? "ffmpeg failed";
-      throw new Error(`ffmpeg conversion failed: ${stderr}`);
-    }
+    return await fsPromises.readFile(outPath);
 
-    if (!existsSync(outPath)) {
-      throw new Error("ffmpeg produced no output file.");
-    }
-
-    return readFileSync(outPath);
-
+  } catch (err) {
+    const stderr = err.stderr?.toString()?.slice(0, 300) ?? "ffmpeg failed";
+    throw new Error(`ffmpeg conversion failed: ${stderr}`);
   } finally {
-    try { if (existsSync(inPath))  unlinkSync(inPath);  } catch {}
-    try { if (existsSync(outPath)) unlinkSync(outPath); } catch {}
+    await fsPromises.unlink(inPath).catch(()=>{});
+    await fsPromises.unlink(outPath).catch(()=>{});
   }
 }
 
@@ -162,7 +158,7 @@ async function sendVoiceNote(sock, from, msg, text, lang = "en") {
   const mp3Buffer = await textToSpeech(text, lang);
 
   // Step 2: Re-encode to OGG/Opus (Android-compatible PTT format)
-  const oggBuffer = convertToWhatsAppAudio(mp3Buffer, "mp3");
+  const oggBuffer = await convertToWhatsAppAudio(mp3Buffer, "mp3");
 
   // Step 3: Send as voice note
   //

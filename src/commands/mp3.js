@@ -1,5 +1,9 @@
-import { execSync, spawnSync } from "child_process";
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
+import { exec, execFile } from "child_process";
+import { promisify } from "util";
+import { promises as fsPromises, existsSync } from "fs";
+
+const execPromise = promisify(exec);
+const execFilePromise = promisify(execFile);
 import { tmpdir } from "os";
 import { join } from "path";
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
@@ -15,21 +19,21 @@ async function extractFromUrl(url, outPath) {
   // Get title if possible
   let title = "audio";
   try {
-    const info = execSync(
+    const { stdout } = await execPromise(
       `"${ytDlpPath}" --dump-json --no-playlist ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" "${url}"`,
       { timeout: 30000, encoding: "utf8" }
     );
-    title = JSON.parse(info).title ?? "audio";
+    title = JSON.parse(stdout).title ?? "audio";
   } catch {}
 
   try {
-    execSync(
+    await execPromise(
       `"${ytDlpPath}" -x --audio-format mp3 --audio-quality 0 ${cookiesFlag} --extractor-args "youtube:player_client=android_vr,web_embedded;skip=dash,hls" -o "${outPath}" "${url}"`,
       { timeout: 120000 }
     );
   } finally {
     if (cookiePath && existsSync(cookiePath)) {
-      try { unlinkSync(cookiePath); } catch {}
+      await fsPromises.unlink(cookiePath).catch(()=>{});
     }
   }
 
@@ -39,22 +43,20 @@ async function extractFromUrl(url, outPath) {
 // Extract audio from a raw video buffer using ffmpeg
 async function extractFromBuffer(videoBuffer, outPath) {
   const inPath = join(tmpdir(), `vid_${Date.now()}.mp4`);
-  writeFileSync(inPath, videoBuffer);
+  await fsPromises.writeFile(inPath, videoBuffer);
 
   try {
-    const result = spawnSync("ffmpeg", [
+    await execFilePromise("ffmpeg", [
       "-y", "-i", inPath,
       "-vn",                    // no video
       "-acodec", "libmp3lame",
       "-q:a", "2",              // high quality VBR
       outPath
     ], { timeout: 60000 });
-
-    if (result.status !== 0) {
-      throw new Error(result.stderr?.toString()?.slice(0, 200) ?? "ffmpeg failed");
-    }
+  } catch (err) {
+    throw new Error(err.stderr?.toString()?.slice(0, 200) ?? "ffmpeg failed");
   } finally {
-    try { unlinkSync(inPath); } catch {}
+    await fsPromises.unlink(inPath).catch(()=>{});
   }
 }
 
@@ -111,8 +113,8 @@ export const mp3Commands = {
 
         if (!existsSync(outPath)) throw new Error("No output file produced.");
 
-        const buffer = readFileSync(outPath);
-        try { unlinkSync(outPath); } catch {}
+        const buffer = await fsPromises.readFile(outPath);
+        await fsPromises.unlink(outPath).catch(()=>{});
 
         if (buffer.length > 64 * 1024 * 1024) {
           return replyMsg(sock, from, msg, "❌ File too large to send (max 64MB).");
@@ -126,7 +128,7 @@ export const mp3Commands = {
         }, { quoted: msg });
 
       } catch (err) {
-        try { if (existsSync(outPath)) unlinkSync(outPath); } catch {}
+        await fsPromises.unlink(outPath).catch(()=>{});
         console.error("❌ mp3 error:", err.message);
         await reactMsg(sock, from, msg, "❌");
         await replyMsg(sock, from, msg, `❌ Failed to extract audio: ${err.message.slice(0, 200)}`);
