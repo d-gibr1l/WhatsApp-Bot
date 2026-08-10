@@ -36,11 +36,11 @@ function isAllowedLink(url) {
 // ─── Anti-link Handler (called from handler.js) ───────────────────────────────
 
 export async function handleAntiLink(sock, msg, text, sender, from) {
-  const active = cachedGetSetting("antilink_active", "false");
-  if (active !== "true") return false;
-
   // Only enforce in groups
   if (!from.endsWith("@g.us")) return false;
+
+  const active = cachedGetSetting(`antilink_active_${from}`, "false");
+  if (active !== "true") return false;
 
   const links = extractLinks(text);
   if (!links.length) return false;
@@ -87,22 +87,22 @@ export const antilinkCommands = {
   antilinkon: {
     adminOnly: true,
     requiresArgs: false,
-    description: "Enable anti-link protection in groups",
+    description: "Enable anti-link protection in this group",
     handler: async (sock, msg, _args, from) => {
-      await setSetting("antilink_active", "true");
+      await setSetting(`antilink_active_${from}`, "true");
       await refreshSettings();
-      await replyMsg(sock, from, msg, "✅ Anti-link enabled. Links will be deleted and senders warned.");
+      await replyMsg(sock, from, msg, "✅ Anti-link enabled for this group. Links will be deleted and senders warned.");
     },
   },
 
   antilinkoff: {
     adminOnly: true,
     requiresArgs: false,
-    description: "Disable anti-link protection",
+    description: "Disable anti-link protection in this group",
     handler: async (sock, msg, _args, from) => {
-      await setSetting("antilink_active", "false");
+      await setSetting(`antilink_active_${from}`, "false");
       await refreshSettings();
-      await replyMsg(sock, from, msg, "🔴 Anti-link disabled.");
+      await replyMsg(sock, from, msg, "🔴 Anti-link disabled for this group.");
     },
   },
 
