@@ -44,6 +44,9 @@ app.use(express.json());
 
 // Global Authentication Middleware
 app.use((req, res, next) => {
+  // Allow health checks to pass without authentication
+  if (req.path === "/health") return next();
+
   const pass = process.env.WEB_PASSWORD;
   if (!pass) return next();
   const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
