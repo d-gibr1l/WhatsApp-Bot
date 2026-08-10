@@ -13,22 +13,10 @@
  *   Some Bad MAC errors escape Baileys' internal catch blocks and surface as
  *   unhandled rejections. The listener calls purgeCorruptKey() to remove the
  *   offending key from the L1 cache + Redis so the next decrypt gets a fresh key.
- *
- * Both layers share the same rate limiter and key-ID extractor.
- *
- * Error types handled:
- *  - "Bad MAC"                        → purge key + rate-limited log
- *  - "MessageCounterError"            → drop silently (replay protection)
- *  - "Key used already"               → drop silently (replay protection)
- *  - "Failed to decrypt message"      → drop (Baileys wrapper, not actionable)
- *  - "Session error:"                 → drop (Baileys wrapper, not actionable)
- *  - "Closing session: SessionEntry"  → drop (Baileys self-heal log)
- *  - "Closing open session"           → drop (Baileys self-heal log)
  */
 
 // ─── Rate limiter ─────────────────────────────────────────────────────────────
 
-// Map<key, lastLogTimestampMs>
 const lastLogTime = new Map();
 const RATE_LIMIT_MS = 10_000;          // max 1 log per key per 10s
 const PURGE_DEDUP_MS = 2_000;          // collapse duplicate purges of the same key within 2s
@@ -39,22 +27,10 @@ const CIRCUIT_BREAKER_WINDOW_MS = 60_000; // sliding window for the threshold co
 
 // ─── Shared module-level state ────────────────────────────────────────────────
 
-// Map<jid, {count: number, windowStart: number}>
 const badMacCounts = new Map();
-
-// Map<id, timestampMs> — recently purged key IDs, for dedup.
-// Declared at top so startPruneTimer() can reference it without a TDZ hazard.
 const _recentlyPurged = new Map();
-
-// Map<jid, Promise> — full wipes currently running. Concurrent Bad MACs for a
-// JID join the in-flight wipe instead of starting a competing one. Entries
-// remove themselves when the wipe settles, so this needs no pruning.
 const _wipesInFlight = new Map();
 
-// Periodically prune the maps so they don't grow unbounded. The timer is tied
-// to the interceptor's lifetime rather than to module load: uninstall clears
-// it, so install has to be able to start it again — otherwise an
-// uninstall/reinstall cycle leaves the maps growing with nothing to prune them.
 let _pruneTimer = null;
 
 function startPruneTimer() {
@@ -77,7 +53,6 @@ function startPruneTimer() {
       }
     }
   }, 5 * 60_000);
-  // Keeps the timer from holding the process open on its own.
   _pruneTimer.unref?.();
 }
 
@@ -90,8 +65,6 @@ function isRateLimited(key) {
 
 // ─── Suppressible message patterns ───────────────────────────────────────────
 
-// These are console.error calls emitted by Baileys / libsignal internals.
-// They are NOT crashes — Baileys handles them and we handle them here.
 const SUPPRESS_PATTERNS = [
   'Bad MAC',
   'Key used already',
@@ -105,46 +78,50 @@ const SUPPRESS_PATTERNS = [
 function isSuppressible(...args) {
   if (args.length === 0) return false;
 
-  // Build a single flat text blob from all arguments — calling
-  // collectErrorTexts once per object rather than twice.
+  // Fast check: inspect plain string args first before doing deep object walks
+  const hasQuickKeyword = args.some(a => {
+    if (typeof a === 'string') {
+      return (
+        a.includes('MAC') ||
+        a.includes('Session') ||
+        a.includes('session') ||
+        a.includes('prekey') ||
+        a.includes('failed') ||
+        a.includes('Failed') ||
+        a.includes('Counter') ||
+        a.includes('Key used already') ||
+        a.includes('decrypt')
+      );
+    }
+    return false;
+  });
+
   const text = args
     .map((a) => (typeof a === 'string' ? a : collectErrorTexts(a).join(' ')))
     .join(' ');
 
-  const hasKeyword =
-    text.includes('MAC') ||
-    text.includes('Session') ||
-    text.includes('session') ||
-    text.includes('prekey') ||
-    text.includes('failed') ||
-    text.includes('Failed') ||
-    text.includes('Counter') ||
-    text.includes('Key used already') ||
-    text.includes('decrypt');
+  if (!hasQuickKeyword) {
+    const hasKeyword =
+      text.includes('MAC') ||
+      text.includes('Session') ||
+      text.includes('session') ||
+      text.includes('prekey') ||
+      text.includes('failed') ||
+      text.includes('Failed') ||
+      text.includes('Counter') ||
+      text.includes('Key used already') ||
+      text.includes('decrypt');
 
-  if (!hasKeyword) return false;
+    if (!hasKeyword) return false;
+  }
+
   return SUPPRESS_PATTERNS.some((p) => text.includes(p));
 }
 
 // ─── Key ID extraction ────────────────────────────────────────────────────────
 
-// A libsignal ProtocolAddress renders as `<id>.<deviceId>`, and that exact
-// string is what Baileys uses as the `session` key id. Anything handed to
-// purgeCorruptKey() must be in this shape or it will delete nothing.
 const SIGNAL_ADDRESS_RE = /^[\w-]+\.\d+$/;
 
-/**
- * Recursively collect all text strings from an error or plain object tree.
- *
- * Walks known error properties (stack, message, jid, cause, etc.) up to a
- * depth of 5 to prevent infinite cycles. Returns a flat array of strings that
- * callers join together to build a searchable error text blob.
- *
- * @param {*}      obj     - Any value; non-objects are coerced to string.
- * @param {Set}    visited - Cycle guard (default: new Set()).
- * @param {number} depth   - Current recursion depth (default: 0).
- * @returns {string[]}
- */
 function collectErrorTexts(obj, visited = new Set(), depth = 0) {
   if (!obj || depth > 5 || visited.has(obj)) return [];
   if (typeof obj === 'string') return [obj];
@@ -171,24 +148,6 @@ function collectErrorTexts(obj, visited = new Set(), depth = 0) {
   return parts;
 }
 
-/**
- * Attempt to extract a purgeable key reference from a libsignal error stack.
- *
- * libsignal embeds the sender address in the async call chain:
- *   "at async 59335526904016.73 [as awaitable]"
- *
- * Two kinds of result come back, and they are NOT interchangeable:
- *
- *   exact: true  → `id` is a real key id in Baileys' keystore namespace, so
- *                  purgeCorruptKey(type, id) will hit an existing key.
- *   exact: false → all we recovered is a JID. The corresponding key id cannot
- *                  be reconstructed from the stack (sender-key ids embed the
- *                  sending user; lid→address encoding is version-dependent),
- *                  so only a prefix wipe via purgeAllForJid() can act on it.
- *
- * @param {Error} err
- * @returns {{ type: string, id: string, exact: boolean } | null}
- */
 function extractKeyId(errOrObj) {
   if (!errOrObj) return null;
 
@@ -196,7 +155,7 @@ function extractKeyId(errOrObj) {
   const stack = stackParts.join('\n');
   if (!stack) return null;
 
-  // Pattern 1: "at async <address> [as awaitable]"  ← most reliable
+  // Pattern 1: "at async <address> [as awaitable]"
   const queueMatch = stack.match(/at async ([\w.@:+-]+)\s+\[as awaitable\]/);
   if (queueMatch && SIGNAL_ADDRESS_RE.test(queueMatch[1])) {
     return { type: 'session', id: queueMatch[1], exact: true };
@@ -208,48 +167,22 @@ function extractKeyId(errOrObj) {
     return { type: 'session', id: addrMatch[1], exact: true };
   }
 
-  // Pattern 3: a full user JID, phone-number or linked-device. Normalise it
-  // into the signal address form the keystore actually uses — a raw JID is not
-  // a key id:
-  //   "594…@s.whatsapp.net"     → "594….0"
-  //   "594…:73@s.whatsapp.net"  → "594….73"
-  //   "594…@s.whatsapp.net.73"  → "594….73"
-  //
-  // @lid is folded in here deliberately. jidDecode() strips any "_agent" and
-  // keeps the bare user, and jidToSignalProtocolAddress() then builds
-  // ProtocolAddress(user, device) — so a lid address is encoded identically to
-  // a phone-number one. The two are distinguished only by `domainType`, which
-  // is not part of the signal address. (Verified against Baileys 6.7.21.)
+  // Pattern 3: user JID
   const userJid = stack.match(/(\d+)(?::(\d+))?@(?:s\.whatsapp\.net|lid)(?:\.(\d+))?/);
   if (userJid) {
     const device = userJid[2] ?? userJid[3] ?? '0';
     return { type: 'session', id: `${userJid[1]}.${device}`, exact: true };
   }
 
-  // Pattern 4: group JID. sender-key ids are "<group>::<user>::<device>" and
-  // the sending user is not recoverable here, so this is prefix-only.
-  const groupMatch = stack.match(/(\d+@g\.us)/);
+  // Pattern 4: group JID (Updated regex supports legacy hyphenated group JIDs)
+  const groupMatch = stack.match(/([\w-]+@g\.us)/);
   if (groupMatch) return { type: 'sender-key', id: groupMatch[1], exact: false };
 
   return null;
 }
 
-// ─── Unhandled rejection escalation ──────────────────────────────────────────
-
-// Node disables its default crash-on-unhandled-rejection behaviour as soon as
-// an 'unhandledRejection' listener exists. Our listener therefore has to hand
-// anything it does not recognise back to that default, or this module silently
-// swallows every unhandled rejection in the process.
 function escalateRejection(reason) {
-  // The interceptor's own listener is already counted, so > 1 means at least
-  // one other listener exists — it owns the default behaviour, so escalating
-  // here would double-report.
   if (process.listenerCount('unhandledRejection') > 1) return;
-
-  // Rethrowing outside the handler surfaces the value as an uncaughtException,
-  // which is exactly what --unhandled-rejections=throw (the Node default) does:
-  // the app's own uncaughtException handler sees it, or the process prints the
-  // stack and exits non-zero.
   setImmediate(() => {
     throw reason;
   });
@@ -261,7 +194,6 @@ let _installed = false;
 let _originalConsoleError = null;
 let _originalConsoleLog = null;
 let _unhandledHandler = null;
-// (_recentlyPurged and _wipesInFlight are declared at the top of the file)
 
 export function uninstallBadMacInterceptor() {
   if (!_installed) return;
@@ -277,23 +209,11 @@ export function uninstallBadMacInterceptor() {
   _wipesInFlight.clear();
 }
 
-/**
- * Install the Bad MAC interceptor.
- *
- * Safe to call multiple times — only installs once.
- *
- * @param {Function} purgeCorruptKey - async (type: string, id: string) => void
- * @param {Function} getSessionId    - () => string
- * @param {Function} [purgeAllForJid] - async (jid: string) => void
- */
 export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAllForJid) {
   if (_installed) return;
   _installed = true;
   startPruneTimer();
 
-  // ── Layer 1: console.error / console.log shim ──────────────────────────────
-  // Silences Bad MAC / decrypt error messages that Baileys and libsignal print
-  // directly to console.error or console.log (bypassing our pino "silent" logger).
   _originalConsoleError = console.error.bind(console);
   _originalConsoleLog = console.log.bind(console);
 
@@ -310,7 +230,6 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
       _originalConsoleLog(...args);
       return;
     }
-    // For console.log, we just suppress it completely unless it's a Bad MAC that needs purging
     handleInterceptedLog(_originalConsoleLog, args, true);
   };
 
@@ -352,13 +271,8 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
       }
       return;
     }
-
-    // "Failed to decrypt", "Session error:", "Closing session/open session" —
-    // completely suppressed.
   }
 
-  // ── Layer 2: unhandledRejection listener ───────────────────────────────────
-  // Catches Bad MAC / counter errors that escape Baileys' internal catch blocks.
   _unhandledHandler = async (reason) => {
     try {
       const errorTexts = collectErrorTexts(reason);
@@ -369,8 +283,6 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
         msg.includes('MessageCounterError');
       const isBadMac = msg.includes('Bad MAC');
 
-      // Not ours — hand it back to Node's default behaviour rather than
-      // swallowing an unrelated failure.
       if (!isCounter && !isBadMac) {
         escalateRejection(reason);
         return;
@@ -378,7 +290,6 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
 
       const sessionId = getSessionId();
 
-      // Replay protection — drop silently
       if (isCounter) {
         if (!isRateLimited(`unhandled:counter:${sessionId}`)) {
           _originalConsoleError(
@@ -388,7 +299,6 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
         return;
       }
 
-      // Bad MAC — purge the offending key
       if (!isRateLimited(`unhandled:mac:${sessionId}`)) {
         _originalConsoleError(
           `[BadMAC] Unhandled Bad MAC for session '${sessionId}'. Purging key.`
@@ -396,7 +306,7 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
       }
 
       const keyInfo = extractKeyId(reason);
-      if (!keyInfo) return; // No key ID — Baileys will self-heal via prekey bundle
+      if (!keyInfo) return;
 
       try {
         await purgeForBadMac(keyInfo);
@@ -419,28 +329,19 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
     const now = Date.now();
     const baseJid = getBaseJid(keyInfo.id);
 
-    // A full wipe for this JID is already running. Join it rather than queueing
-    // a competing one, and don't count the failure — the wipe about to finish
-    // already covers it.
     const inFlight = _wipesInFlight.get(baseJid);
     if (inFlight) return inFlight;
 
-    // Always count the failure toward the circuit breaker by base JID
     let stats = badMacCounts.get(baseJid) || { count: 0, windowStart: now };
     if (now - stats.windowStart > CIRCUIT_BREAKER_WINDOW_MS) {
-      stats = { count: 0, windowStart: now }; // reset expired window
+      stats = { count: 0, windowStart: now };
     }
     stats.count++;
     badMacCounts.set(baseJid, stats);
 
-    // Circuit Breaker: too many failures for one JID → wipe all its keys.
-    // This runs regardless of the dedup window.
     if (purgeAllForJid && stats.count >= CIRCUIT_BREAKER_THRESHOLD) {
       _originalConsoleError(`[BadMAC] Circuit Breaker: JID ${baseJid} hit ${stats.count} bad MACs in ${CIRCUIT_BREAKER_WINDOW_MS / 1000}s. Wiping all session keys.`);
 
-      // Reset *before* awaiting. Everything up to the first await runs
-      // atomically, so a concurrent caller must never observe a count that is
-      // still over the threshold while the wipe is in flight.
       badMacCounts.delete(baseJid);
       for (const id of _recentlyPurged.keys()) {
         if (id === baseJid || getBaseJid(id) === baseJid) {
@@ -464,13 +365,6 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
       return wipe;
     }
 
-    // Below the breaker threshold: purge just the offending key, but collapse
-    // duplicate single-key purges of the same JID within the dedup window.
-
-    // Only an exact key id can be purged individually. For a JID-only match,
-    // purgeCorruptKey() would build a key name that matches nothing and report
-    // a successful purge, so leave it to the breaker's prefix wipe (the failure
-    // has already been counted above) and to Baileys' own prekey self-heal.
     if (!keyInfo.exact) return;
 
     const last = _recentlyPurged.get(keyInfo.id) ?? 0;
