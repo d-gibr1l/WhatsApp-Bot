@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
+import fs from "fs/promises";
+import path from "path";
 
 function createMockClient() {
   const errorObj = { data: null, error: new Error("Supabase is not configured. Please set SUPABASE_URL and SUPABASE_KEY in the environment.") };
@@ -330,5 +332,78 @@ export async function getStats() {
   } catch (err) {
     console.error("❌ getStats:", err.message);
     return [];
+  }
+}
+
+// ─── Release Radar Store ──────────────────────────────────────────────────────
+
+const RADAR_JSON_PATH = path.join(process.cwd(), "radar.json");
+
+async function getRadarFallback() {
+  try {
+    const data = await fs.readFile(RADAR_JSON_PATH, "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
+}
+
+async function saveRadarFallback(data) {
+  await fs.writeFile(RADAR_JSON_PATH, JSON.stringify(data, null, 2), "utf-8");
+}
+
+export async function getRadars() {
+  if (SUPABASE_URL && SUPABASE_KEY) {
+    try {
+      const { data, error } = await supabase.from("radar_subs").select("*");
+      if (error) throw error;
+      return data ?? [];
+    } catch (err) {
+      console.error("❌ getRadars Supabase error:", err.message);
+      return [];
+    }
+  } else {
+    return getRadarFallback();
+  }
+}
+
+export async function addRadar(id, type, target, chatId, meta = {}) {
+  if (SUPABASE_URL && SUPABASE_KEY) {
+    const { error } = await supabase
+      .from("radar_subs")
+      .upsert({ id, type, target, chat_id: chatId, meta, last_seen: "" }, { onConflict: "id" });
+    if (error) throw error;
+  } else {
+    const radars = await getRadarFallback();
+    const index = radars.findIndex(r => r.id === id);
+    const newRadar = { id, type, target, chat_id: chatId, meta, last_seen: "" };
+    if (index >= 0) radars[index] = newRadar;
+    else radars.push(newRadar);
+    await saveRadarFallback(radars);
+  }
+}
+
+export async function removeRadar(id) {
+  if (SUPABASE_URL && SUPABASE_KEY) {
+    const { error } = await supabase.from("radar_subs").delete().eq("id", id);
+    if (error) throw error;
+  } else {
+    let radars = await getRadarFallback();
+    radars = radars.filter(r => r.id !== id);
+    await saveRadarFallback(radars);
+  }
+}
+
+export async function updateRadarLastSeen(id, lastSeen) {
+  if (SUPABASE_URL && SUPABASE_KEY) {
+    const { error } = await supabase.from("radar_subs").update({ last_seen: lastSeen }).eq("id", id);
+    if (error) throw error;
+  } else {
+    const radars = await getRadarFallback();
+    const index = radars.findIndex(r => r.id === id);
+    if (index >= 0) {
+      radars[index].last_seen = lastSeen;
+      await saveRadarFallback(radars);
+    }
   }
 }

@@ -18,6 +18,7 @@ import {
 } from "./src/auth/redisSession.js";
 import { installBadMacInterceptor, uninstallBadMacInterceptor } from "./src/auth/badMacInterceptor.js";
 import { handleMessage, startReminderPoller, markBotReady } from "./src/handler.js";
+import { startRadarEngine } from "./src/commands/radar.js";
 import { loadWordFilter }   from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
 import { loadAliases }      from "./src/commands/aliases.js";
@@ -263,6 +264,7 @@ async function runBot() {
               await loadAliases();
               if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
+              startRadarEngine(sock);
               console.log("✅ Bot ready! Loading seen messages and waiting 3s for sync...");
               // Load previously processed message IDs from Redis
               await loadSeenMessages();
@@ -278,6 +280,7 @@ async function runBot() {
               await loadAliases();
               if (stopPoller) stopPoller();
               stopPoller = startReminderPoller(sock);
+              startRadarEngine(sock);
               console.log("🔄 Reconnected — caches refreshed. Waiting 3s for sync...");
               await loadSeenMessages();
               setTimeout(() => markBotReady(), 3000);
