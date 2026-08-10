@@ -297,8 +297,10 @@ export async function cleanupAntiDeleteStore() {
 
 let logBuffer = [];
 let isFlushingLogs = false;
+const MAX_BUFFER_SIZE = 2000;
 
 export function logMessage(number, chatId, isGroup) {
+  if (logBuffer.length >= MAX_BUFFER_SIZE) return;
   logBuffer.push({
     number,
     chat_id:  chatId,
@@ -317,10 +319,20 @@ setInterval(async () => {
     if (error) throw error;
   } catch (err) {
     console.error(`❌ Failed to flush ${batch.length} message logs:`, err.message);
+    logBuffer = [...batch, ...logBuffer].slice(0, MAX_BUFFER_SIZE);
   } finally {
     isFlushingLogs = false;
   }
 }, 5000);
+
+export async function cleanupMessageLogs() {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { error } = await supabase
+    .from("message_logs")
+    .delete()
+    .lt("sent_at", thirtyDaysAgo);
+  if (error) console.error("❌ cleanupMessageLogs error:", error.message);
+}
 
 export async function getStats() {
   try {

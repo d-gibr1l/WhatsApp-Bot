@@ -11,7 +11,7 @@ import {
   supabase,
 } from "./db.js";
 import { LRUCache } from "lru-cache";
-import Redis from "ioredis";
+import { getRedis } from "./auth/redisSession.js";
 
 // ─── Redis for message deduplication ──────────────────────
 let _dedupRedis = null;
@@ -19,11 +19,7 @@ const DEDUP_KEY = "bot:seen_msgs";
 const DEDUP_TTL = 3600; // 1 hour
 
 function getDedupRedis() {
-  if (_dedupRedis) return _dedupRedis;
-  const url = process.env.REDIS_URL || 'redis://localhost:6379';
-  _dedupRedis = new Redis(url);
-  _dedupRedis.on('error', err => console.error('[DedupRedis] Error:', err.message));
-  return _dedupRedis;
+  return getRedis();
 }
 
 // ─── Helpers ──────────────────────────────────────────────

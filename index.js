@@ -4,6 +4,9 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import { Boom }      from "@hapi/boom";
 import pino          from "pino";
+import fs            from "fs/promises";
+import os            from "os";
+import path          from "path";
 
 import { MAX_RECONNECTS, BASE_DELAY_MS, botConfig } from "./src/config.js";
 import {
@@ -44,6 +47,31 @@ startServer();
 // Install Bad MAC interceptor immediately — before any socket is created.
 // This ensures even the very first connection's decryption errors are caught.
 installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAllKeysForJid);
+
+async function cleanupTmpDir() {
+  try {
+    const tmpDir = os.tmpdir();
+    const files = await fs.readdir(tmpDir);
+    const now = Date.now();
+    let deleted = 0;
+    
+    for (const file of files) {
+      if (file.startsWith("dl_")) {
+        const filePath = path.join(tmpDir, file);
+        const stats = await fs.stat(filePath);
+        if (now - stats.mtimeMs > 60 * 60 * 1000) { // older than 1 hour
+          await fs.unlink(filePath).catch(() => {});
+          deleted++;
+        }
+      }
+    }
+    if (deleted > 0) console.log(`[System] Swept ${deleted} orphaned temp file(s).`);
+  } catch (err) {
+    console.error("[System] Error sweeping tmp dir:", err.message);
+  }
+}
+cleanupTmpDir();
+setInterval(cleanupTmpDir, 60 * 60 * 1000); // Run every hour
 
 // ─── State ────────────────────────────────────────────────────────────────────
 

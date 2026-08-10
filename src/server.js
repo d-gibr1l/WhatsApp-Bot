@@ -10,6 +10,7 @@ import {
   addAutoReply,
   removeAutoReply,
   cleanupAntiDeleteStore,
+  cleanupMessageLogs,
   supabase
 } from "./db.js";
 import {
@@ -1115,7 +1116,8 @@ app.get("/", (_, res) => {
 app.get("/api/stats", async (_, res) => {
   try {
     const [logs, admins, banned, autoReplies, settings] = await Promise.all([
-      supabase.from("message_logs").select("number, is_group, sent_at"),
+      // Limit recent log inspection to 5000 rows to safeguard RAM
+      supabase.from("message_logs").select("number, is_group, sent_at").order("sent_at", { ascending: false }).limit(5000),
       supabase.from("admins").select("number"),
       supabase.from("banned_numbers").select("number, reason"),
       supabase.from("auto_replies").select("keyword, response"),
@@ -1365,7 +1367,8 @@ setInterval(broadcastStats, 1000);
 
 // ─── Database Cleanup Tasks ───────────────────────────────────────────────────
 setInterval(() => {
-  cleanupAntiDeleteStore().catch(err => console.error("Cleanup error:", err));
+  cleanupAntiDeleteStore().catch(err => console.error("AntiDelete cleanup error:", err));
+  cleanupMessageLogs().catch(err => console.error("MessageLogs cleanup error:", err));
 }, 12 * 60 * 60 * 1000); // Run every 12 hours
 
 // ─── QR Image ─────────────────────────────────────────────────────────────────

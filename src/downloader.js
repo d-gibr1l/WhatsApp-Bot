@@ -151,7 +151,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     "--force-ipv4",
     "--concurrent-fragments", "10",
     "--downloader", "aria2c,native",
-    "--downloader-args", "aria2c:\"-x 16 -k 1M\"",
+    "--downloader-args", "aria2c:-x 16 -k 1M",
     "--extractor-args", "youtube:player_client=android_vr,web_embedded;skip=dash,hls",
     "--print", "%(title)s",
     "--print", "after_move:filepath",
