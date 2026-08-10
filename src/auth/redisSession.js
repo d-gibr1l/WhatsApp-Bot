@@ -347,10 +347,16 @@ async function _buildAuthState() {
             const val = normalizeForType(value, category);
             resultsToL1.push(l1Updates.length);
             l1Updates.push({ key, val });
+            
+            // Apply synchronously so immediate subsequent reads hit L1 cache.
+            l1Set(key, val);
             pipeline.set(key, serialize(value), 'EX', KEY_TTL_SECONDS);
           } else {
             resultsToL1.push(-1);
             l1Deletes.push(key);
+            
+            // Apply synchronously
+            _l1Cache.delete(key);
             pipeline.del(key);
           }
         }
@@ -373,23 +379,20 @@ async function _buildAuthState() {
           }
           for (let i = 0; i < l1Updates.length; i++) {
             if (failedL1.has(i)) {
-              // Redis rejected this write — keep L1 clean.
+              // Redis rejected this write — roll back L1 so we read the 
+              // true state from Redis on the next fetch.
               _l1Cache.delete(l1Updates[i].key);
-            } else {
-              l1Set(l1Updates[i].key, l1Updates[i].val);
             }
           }
           // DEL failures are harmless — the key stays in Redis and will be
-          // picked up on the next read.  Always evict from L1 regardless.
-          for (const key of l1Deletes) _l1Cache.delete(key);
-        } else {
-          // All writes confirmed — commit L1 updates now.
-          for (const { key, val } of l1Updates) l1Set(key, val);
-          for (const key of l1Deletes) _l1Cache.delete(key);
+          // picked up on the next read.  L1 was already synchronously evicted.
         }
       } catch (err) {
         console.error('[RedisAuth] Failed to execute keys.set pipeline:', err.message);
-        // Pipeline threw — don't commit L1; treat the batch as a no-op.
+        // Pipeline threw — rollback L1 updates; treat the batch as a no-op.
+        for (let i = 0; i < l1Updates.length; i++) {
+          _l1Cache.delete(l1Updates[i].key);
+        }
       }
     }
   };
