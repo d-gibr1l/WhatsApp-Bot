@@ -43,25 +43,136 @@ export const generalCommands = {
       const p = prefix;
       const adminUser = isAdmin(msg);
 
-      let userMenu = `╭━━〔 🤖 BOT CORE 〕━━╮\n`;
-      let adminMenu = `\n╭━━〔 👮 ADMIN CONTROLS 〕━━╮\n`;
+      let userMenu = `╭━━〔 🧠 AI & CREATION 〕━━╮
+│ ${p}ai
+│ ${p}aiimage
+│ ${p}aisticker
+│ ${p}voice
+└ ${p}tts
 
-      // Sort commands alphabetically for better UX
-      const { commands } = await import("./registry.js");
-      const cmdList = Object.entries(commands).sort((a, b) => a[0].localeCompare(b[0]));
+╭━━〔 📥 MEDIA CENTER 〕━━╮
+----🌍 Download Tools
+│ ${p}dl
+│ ${p}dlapi
+│ ${p}mp3
+│ ${p}gif
+│ ${p}image
+└ ${p}sub
 
-      for (const [cmdName, cmdInfo] of cmdList) {
-        if (cmdInfo.adminOnly) {
-          adminMenu += `│ ${p}${cmdName}\n`;
-        } else {
-          userMenu += `│ ${p}${cmdName}\n`;
-        }
-      }
+╭━━〔 🎨 STICKER STUDIO 〕━━╮
+----🖼 Creative Tools
+│ ${p}sticker
+│ ${p}stickercrop
+│ ${p}stickers
+│ ${p}stickertext
+└ ${p}toimage
 
-      userMenu += `╰━━━━━━━━━━━━━━━━━━━━╯\n`;
-      adminMenu += `╰━━━━━━━━━━━━━━━━━━━━╯\n`;
-      
-      userMenu += `\n╭━━〔 💡 QUICK GUIDE 〕━━╮\nSend any command alone to view usage!`;
+╭━━〔 🎬 VIDEO ENGINE 〕━━╮
+----🎞 Processing Tools
+│ ${p}avec
+│ ${p}avm
+│ ${p}compress
+│ ${p}merge
+└ ${p}reverse
+
+╭━━〔 🛠 UTILITY HUB 〕━━╮
+----⚙ Everyday Tools
+│ ${p}google
+│ ${p}search
+│ ${p}qr
+│ ${p}poll
+│ ${p}remind
+└ ${p}translate
+
+╭━━〔 🎮 FUN & ENGAGEMENT 〕━━╮
+----🎲 Entertainment
+│ ${p}8ball
+│ ${p}fact
+│ ${p}joke
+│ ${p}quote
+└ ${p}numberfact
+
+╭━━〔 📊 SYSTEM MONITOR 〕━━╮
+----🖥 Diagnostics
+│ ${p}botstatus
+│ ${p}ping
+│ ${p}info
+│ ${p}aliases
+└ ${p}warnings
+
+╭━━〔 🔄 SESSION CONTROL 〕━━╮
+----🔐 Session Tools
+│ ${p}cancel
+│ ${p}done
+│ ${p}getvar
+│ ${p}help
+└ ${p}menu
+
+╭━━〔 ⚡ ACTIVE MACROS 〕━━╮
+----🚀 Shortcuts
+
+│ ${p}admins
+└──→ ${p}listadmins
+
+│ ${p}antidelete
+└──→ ${p}antideleteon
+
+│ ${p}ask
+└──→ ${p}ai
+
+│ ${p}botoff
+└──→ ${p}all
+
+│ ${p}img
+└──→ ${p}image
+
+│ ${p}movie
+└──→ ${p}imdb
+
+│ ${p}st
+└──→ ${p}sticker
+
+│ ${p}vo
+└──→ ${p}viewonce
+
+╭━━〔 🔒 RESTRICTED AREA 〕━━╮
+----⚠ Hidden Modules
+
+│ 👑 Owner Commands
+│ 🛡 Admin Controls
+│ 🔐 Security System
+│ ⚙ Developer Tools
+
+╭━━〔 💡 QUICK GUIDE 〕━━╮
+Send any command alone to view:
+✓ Usage
+✓ Examples
+✓ Parameters
+✓ Aliases
+
+╰━━━〔 🤖 BOT CORE 〕━━━╯`;
+
+      const adminMenu = `\n\n╭━━〔 👮 ADMIN CONTROLS 〕━━╮
+│ ${p}addadmin
+│ ${p}removeadmin
+│ ${p}ban
+│ ${p}unban
+│ ${p}warn
+│ ${p}clearwarn
+│ ${p}setmaxwarns
+│ ${p}settings
+│ ${p}setprefix
+│ ${p}setapikey
+│ ${p}setgroqkey
+└ ${p}setpackname
+
+╭━━〔 🛡️ SECURITY SHIELDS 〕━━╮
+│ ${p}antilinkon
+│ ${p}antilinkoff
+│ ${p}antideleteon
+│ ${p}antideleteoff
+│ ${p}wfilteron
+└ ${p}wfilteroff`;
 
       if (adminUser) {
         await replyMsg(sock, from, msg, userMenu + adminMenu);
