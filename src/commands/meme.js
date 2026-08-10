@@ -1,4 +1,4 @@
-import { replyMsg, reactMsg, failMsg } from "./helpers.js";
+import { replyMsg, reactMsg } from "./helpers.js";
 
 export const memeCommands = {
   meme: {
@@ -12,7 +12,7 @@ export const memeCommands = {
       "!meme programmerhumor"
     ],
     notes: "Defaults to popular meme subreddits if no subreddit is provided.",
-    handler: async (sock, msg, args, from, prefix) => {
+    handler: async (sock, msg, args, from, _prefix) => {
       await reactMsg(sock, from, msg, "😂");
 
       const subreddit = args[0] ? args[0].replace(/r\//i, "") : "";

@@ -1,4 +1,4 @@
-import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
+import { replyMsg, reactMsg } from "./helpers.js";
 import { getRadars, addRadar, removeRadar, updateRadarLastSeen } from "../db.js";
 import Parser from "rss-parser";
 

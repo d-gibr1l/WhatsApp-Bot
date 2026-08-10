@@ -20,16 +20,15 @@ import {
   getSessionId,
 } from "./src/auth/redisSession.js";
 import { installBadMacInterceptor, uninstallBadMacInterceptor } from "./src/auth/badMacInterceptor.js";
-import { handleMessage, startReminderPoller, markBotReady } from "./src/handler.js";
+import { startReminderPoller, markBotReady } from "./src/handler.js";
 import { startRadarEngine } from "./src/commands/radar.js";
 import { loadWordFilter }   from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
 import { loadAliases }      from "./src/commands/aliases.js";
-import { handleAntiDelete, storeMessage } from "./src/commands/antidelete.js";
 import { bindMessagesEvents } from "./src/events/messages.js";
 import { bindGroupEvents }    from "./src/events/groups.js";
 import { bindCallEvents }     from "./src/events/calls.js";
-import { loadCache, startCacheAutoRefresh, cachedGetSetting, loadSeenMessages } from "./src/cache.js";
+import { loadCache, startCacheAutoRefresh, loadSeenMessages } from "./src/cache.js";
 import {
   startServer,
   setQR,
@@ -40,7 +39,7 @@ import {
 } from "./src/server.js";
 import { updateYtDlp } from "./src/downloader.js";
 
-const logger = pino({ level: "silent" });
+const logger = pino({ level: process.env.LOG_LEVEL || "warn" });
 
 startServer();
 
@@ -135,17 +134,7 @@ process.on("uncaughtException", (err) => {
   console.error("Uncaught Exception:", err.message, err.stack);
 });
 
-process.on("unhandledRejection", (reason) => {
-  // Bad MAC and MessageCounterError are handled by installBadMacInterceptor.
-  // Skip them here to avoid duplicate logging.
-  if (reason instanceof Error) {
-    const msg = reason.message ?? '';
-    if (msg.includes('Bad MAC') || msg.includes('Key used already') || reason.name === 'MessageCounterError') {
-      return;
-    }
-  }
-  console.error("Unhandled Rejection:", reason);
-});
+// Note: unhandledRejection listener is managed uniformly by installBadMacInterceptor.
 
 // ─── Socket factory ───────────────────────────────────────────────────────────
 
@@ -327,7 +316,9 @@ async function runBot() {
               Object.entries(DisconnectReason).find(([, v]) => v === statusCode)?.[0]
               ?? "Unknown";
 
-            console.warn(`Disconnected: ${reason} (${statusCode})`);
+            const errorMsg = lastDisconnect?.error?.message ?? (lastDisconnect?.error ? String(lastDisconnect.error) : "No error details");
+            const stackMsg = lastDisconnect?.error?.stack ? `\n${lastDisconnect.error.stack}` : "";
+            console.warn(`Disconnected: ${reason} (${statusCode}) - Error: ${errorMsg}${stackMsg}`);
 
             // ── 440: connectionReplaced ──────────────────────────────────
             // Another instance connected with the same session (Koyeb rolling

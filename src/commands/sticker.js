@@ -172,7 +172,7 @@ async function urlToSticker(url, startSec = 0, durationSec = 6) {
   }
 }
 
-async function addTextToWebp(webpBuffer, text, position = "bottom") {
+async function _addTextToWebp(webpBuffer, text, position = "bottom") {
   const tmpIn = join(tmpdir(), `st_in_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
   const tmpOut = join(tmpdir(), `st_out_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
   
@@ -567,7 +567,7 @@ export const bulkStickerCommands = {
     requiresArgs: false,
     description: "Cancel an active bulk sticker session",
     usage: "!cancel",
-    handler: async (sock, msg, _args, from, prefix) => {
+    handler: async (sock, msg, _args, from, _prefix) => {
       const session = stickerSessions.get(from);
       const sender  = msg.key.participant ?? msg.key.remoteJid;
 

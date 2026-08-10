@@ -5,7 +5,7 @@ import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
 const BLACKLIST = "nsfw,racist,sexist,explicit";
 
 // JokeAPI categories (programming removed)
-const JOKEAPI_CATEGORIES = ["misc", "dark", "pun", "spooky", "christmas"];
+const _JOKEAPI_CATEGORIES = ["misc", "dark", "pun", "spooky", "christmas"];
 
 async function fetchJokeAPI(category = "Any") {
   const res  = await fetch(

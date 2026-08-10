@@ -750,7 +750,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
     tbody.innerHTML = replies.map(r => 
       '<tr><td><span class="chip">' + r.keyword + '</span></td>' +
       '<td>' + r.response + '</td>' +
-      '<td style="text-align:right; padding-right:24px;"><button class="del-btn" onclick="deleteAR(\\'' + r.keyword.replace(/'/g, "\\\\'") + '\\\')">Delete</button></td></tr>'
+      '<td style="text-align:right; padding-right:24px;"><button class="del-btn" data-kw="' + r.keyword + '" onclick="deleteAR(this.dataset.kw)">Delete</button></td></tr>'
     ).join('');
   }
 
@@ -801,7 +801,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
     }
     tbody.innerHTML = admins.map(num => 
       '<tr><td>+' + num + '</td>' +
-      '<td style="text-align:right; padding-right:24px;"><button class="del-btn" onclick="deleteAdmin(\\'' + num + '\\\')">Remove</button></td></tr>'
+      '<td style="text-align:right; padding-right:24px;"><button class="del-btn" data-num="' + num + '" onclick="deleteAdmin(this.dataset.num)">Remove</button></td></tr>'
     ).join('');
   }
 
@@ -855,7 +855,7 @@ const HTML = (status, hasQR) => `<!DOCTYPE html>
     tbody.innerHTML = bannedList.map(b => 
       '<tr><td>+' + b.number + '</td>' +
       '<td>' + b.reason + '</td>' +
-      '<td style="text-align:right; padding-right:24px;"><button class="del-btn" onclick="deleteBan(\\'' + b.number + '\\\')">Unban</button></td></tr>'
+      '<td style="text-align:right; padding-right:24px;"><button class="del-btn" data-num="' + b.number + '" onclick="deleteBan(this.dataset.num)">Unban</button></td></tr>'
     ).join('');
   }
 

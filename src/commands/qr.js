@@ -38,6 +38,7 @@ export const qrCommands = {
           const pngBuf = await sharp(buffer).png().toBuffer();
           await fsPromises.writeFile(tmpImg, pngBuf);
 
+          let result = "";
           try {
             const { stdout } = await execFileAsync("zbarimg", ["--quiet", "--raw", tmpImg], {
               timeout: 10000, encoding: "utf8"
@@ -88,7 +89,7 @@ export const qrCommands = {
           image: buffer,
           caption: `🔳 *QR Code*\n${text.length > 60 ? text.slice(0, 60) + "..." : text}`,
         }, { quoted: msg });
-      } catch (err) {
+      } catch (_err) {
         // qrencode not installed — use online API as fallback
         try {
           const encoded = encodeURIComponent(text);

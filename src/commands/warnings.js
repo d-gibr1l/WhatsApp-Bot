@@ -1,6 +1,6 @@
-import { warnUser, getWarnings, clearWarnings, banNumber, getSetting } from "../db.js";
+import { warnUser, getWarnings, clearWarnings, banNumber } from "../db.js";
 import { cachedGetSetting, refreshBanned } from "../cache.js";
-import { replyMsg, alertOwner, getTargetNumber } from "./helpers.js";
+import { replyMsg, alertOwner } from "./helpers.js";
 
 export const warningCommands = {
 

@@ -107,7 +107,7 @@ export function getSessionId() {
 
 let _sweepTimer = null;
 
-function getRedis() {
+export function getRedis() {
   if (_redis) return _redis;
   const url = process.env.REDIS_URL || 'redis://localhost:6379';
   _redis = new Redis(url);
@@ -179,17 +179,22 @@ async function _buildAuthState() {
 
   let creds;
   let rawCredsExisted = false;
-  try {
-    const raw = await redis.get(credsKey);
-    if (raw) {
-      rawCredsExisted = true;
+  
+  // 1. Fetch raw creds. If this fails due to a network error, it will throw
+  // and safely abort the boot process, preserving the session.
+  const raw = await redis.get(credsKey);
+  
+  // 2. Parse the creds. We only catch JSON parsing errors here.
+  if (raw) {
+    rawCredsExisted = true;
+    try {
       creds = deserialize(raw, 'creds');
       hadPersistedCreds = true;
-    } else {
+    } catch (err) {
+      console.warn('[RedisAuth] Could not parse creds from Redis, starting fresh:', err.message);
       creds = initAuthCreds();
     }
-  } catch (err) {
-    console.warn('[RedisAuth] Could not read or parse creds from Redis, starting fresh:', err.message);
+  } else {
     creds = initAuthCreds();
   }
 
@@ -238,8 +243,7 @@ async function _buildAuthState() {
         const key = `${sessionId}:${type}-${id}`;
         if (_l1Cache.has(key)) {
           const val = _l1Cache.get(key);
-          _l1Cache.delete(key);
-          _l1Cache.set(key, val);
+          l1Set(key, val);
           data[id] = val;
         } else {
           pipeline.get(key);
@@ -250,27 +254,29 @@ async function _buildAuthState() {
       if (keysToFetch.length > 0) {
         try {
           const results = await pipeline.exec();
-          if (results) {
-            for (let i = 0; i < keysToFetch.length; i++) {
-              const { id, key } = keysToFetch[i];
-              const [err, raw] = results[i];
-              if (err) {
-                console.error(`[RedisAuth] Error fetching key ${key}:`, err);
-                continue;
-              }
-              if (raw && !stale && !_purgedKeys.has(key)) {
-                try {
-                  const parsed = deserialize(raw, type);
-                  l1Set(key, parsed);
-                  data[id] = parsed;
-                } catch (parseErr) {
-                  console.warn(`[RedisAuth] Corrupted data for key ${key}, skipping:`, parseErr.message);
-                }
+          if (!results) {
+            throw new Error(`[RedisAuth] Pipeline exec returned null or undefined for ${type}`);
+          }
+          for (let i = 0; i < keysToFetch.length; i++) {
+            const { id, key } = keysToFetch[i];
+            const [err, raw] = results[i];
+            if (err) {
+              console.error(`[RedisAuth] Error fetching key ${key}:`, err);
+              throw err; 
+            }
+            if (raw && !stale && !_purgedKeys.has(key)) {
+              try {
+                const parsed = deserialize(raw, type);
+                l1Set(key, parsed);
+                data[id] = parsed;
+              } catch (parseErr) {
+                console.warn(`[RedisAuth] Corrupted data for key ${key}, skipping:`, parseErr.message);
               }
             }
           }
         } catch (err) {
           console.error(`[RedisAuth] Pipeline error in keys.get:`, err.message);
+          throw err;
         }
       }
       return data;
@@ -280,7 +286,6 @@ async function _buildAuthState() {
       const pipeline = redis.pipeline();
       const l1Updates = [];
       const l1Deletes = [];
-      const resultsToL1 = [];
 
       for (const category of Object.keys(data)) {
         for (const id of Object.keys(data[category])) {
@@ -289,13 +294,12 @@ async function _buildAuthState() {
           if (value) {
             _purgedKeys.delete(key);
             const val = normalizeForType(value, category);
-            resultsToL1.push(l1Updates.length);
             l1Updates.push({ key, val });
             
             l1Set(key, val);
             pipeline.set(key, serialize(value), 'EX', KEY_TTL_SECONDS);
           } else {
-            resultsToL1.push(-1);
+            _purgedKeys.delete(key);
             l1Deletes.push(key);
             
             _l1Cache.delete(key);
@@ -308,26 +312,25 @@ async function _buildAuthState() {
 
       try {
         const results = await trackWrite(pipeline.exec());
-        const errors = results ? results.filter(([err]) => err) : [];
+        if (!results) {
+          throw new Error('[RedisAuth] Pipeline exec returned null or undefined during keys.set');
+        }
+        const errors = results.filter(([err]) => err);
         if (errors.length > 0) {
           console.error(`[RedisAuth] ${errors.length} errors during keys.set pipeline execution`, errors[0][0]);
-          const failedL1 = new Set();
           for (let ri = 0; ri < results.length; ri++) {
-            if (results[ri][0] && resultsToL1[ri] >= 0) {
-              failedL1.add(resultsToL1[ri]);
+            if (results[ri][0] && ri < l1Updates.length) {
+              _l1Cache.delete(l1Updates[ri].key);
             }
           }
-          for (let i = 0; i < l1Updates.length; i++) {
-            if (failedL1.has(i)) {
-              _l1Cache.delete(l1Updates[i].key);
-            }
-          }
+          throw errors[0][0] instanceof Error ? errors[0][0] : new Error(String(errors[0][0]));
         }
       } catch (err) {
         console.error('[RedisAuth] Failed to execute keys.set pipeline:', err.message);
         for (let i = 0; i < l1Updates.length; i++) {
           _l1Cache.delete(l1Updates[i].key);
         }
+        throw err;
       }
     }
   };
@@ -369,7 +372,14 @@ async function _wipeSessionKeys(redis, sessionId) {
   for (let i = 0; i < keys.length; i += BATCH) {
     const pipeline = redis.pipeline();
     for (const k of keys.slice(i, i + BATCH)) pipeline.del(k);
-    await pipeline.exec();
+    const results = await pipeline.exec();
+    if (!results) {
+      throw new Error('[RedisAuth] Pipeline exec returned null or undefined during _wipeSessionKeys');
+    }
+    const errors = results.filter(([err]) => err);
+    if (errors.length > 0) {
+      throw errors[0][0] instanceof Error ? errors[0][0] : new Error(String(errors[0][0]));
+    }
   }
 }
 
@@ -428,12 +438,25 @@ export async function purgeCorruptKey(type, id) {
 }
 
 export async function purgeAllKeysForJid(jid) {
+  if (!jid || typeof jid !== 'string' || !jid.trim()) {
+    return 0;
+  }
+
   const redis = getRedis();
   const sessionId = getSessionId();
 
-  const isGroup = jid.endsWith('@g.us');
-  const userJid = isGroup ? jid : jid.split('@')[0];
-  const base = escapeGlob(isGroup ? jid : userJid.split(':')[0].split('.')[0]);
+  const trimmedJid = jid.trim();
+  const isGroup = trimmedJid.endsWith('@g.us');
+  const userJid = isGroup ? trimmedJid : trimmedJid.split('@')[0];
+  const rawBase = isGroup ? trimmedJid : userJid.split(':')[0].split('.')[0];
+  if (!rawBase || !rawBase.trim()) {
+    return 0;
+  }
+
+  const base = escapeGlob(rawBase.trim());
+  if (!base) {
+    return 0;
+  }
 
   const patterns = isGroup
     ? [
@@ -456,10 +479,19 @@ export async function purgeAllKeysForJid(jid) {
     for (let i = 0; i < keysToDelete.length; i += BATCH) {
       const pipeline = redis.pipeline();
       for (const k of keysToDelete.slice(i, i + BATCH)) pipeline.del(k);
-      await pipeline.exec();
+      const results = await pipeline.exec();
+      if (!results) {
+        throw new Error('[RedisAuth] Pipeline exec returned null or undefined during purgeAllKeysForJid');
+      }
+      const errors = results.filter(([err]) => err);
+      if (errors.length > 0) {
+        throw errors[0][0] instanceof Error ? errors[0][0] : new Error(String(errors[0][0]));
+      }
     }
     console.log(`[RedisAuth] Circuit Breaker: Purged ${keysToDelete.length} keys for JID ${base}`);
+    return keysToDelete.length;
   }
+  return 0;
 }
 
 export async function loadSession() {

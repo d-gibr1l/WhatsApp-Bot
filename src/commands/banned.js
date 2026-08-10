@@ -1,6 +1,6 @@
 import { banNumber, unbanNumber, getBannedList } from "../db.js";
 import { refreshBanned } from "../cache.js";
-import { replyMsg, alertOwner, getTargetNumber } from "./helpers.js";
+import { replyMsg, alertOwner } from "./helpers.js";
 
 export const bannedCommands = {
 

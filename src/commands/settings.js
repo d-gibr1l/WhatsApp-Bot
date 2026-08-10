@@ -1,5 +1,5 @@
 import { setSetting, getAllSettings } from "../db.js";
-import { cachedGetSetting, refreshSettings } from "../cache.js";
+import { refreshSettings } from "../cache.js";
 import { replyMsg, alertOwner } from "./helpers.js";
 
 export const settingsCommands = {

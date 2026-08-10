@@ -124,6 +124,8 @@ export async function getSetting(key, fallback = null) {
   }
 }
 
+export const db = { getSetting };
+
 export async function isBanned(number) {
   try {
     const { data, error } = await supabase
@@ -309,7 +311,7 @@ export function logMessage(number, chatId, isGroup) {
   });
 }
 
-setInterval(async () => {
+const flushTimer = setInterval(async () => {
   if (logBuffer.length === 0 || isFlushingLogs) return;
   isFlushingLogs = true;
   const batch = [...logBuffer];
@@ -324,6 +326,7 @@ setInterval(async () => {
     isFlushingLogs = false;
   }
 }, 5000);
+flushTimer.unref?.();
 
 export async function cleanupMessageLogs() {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -385,7 +388,7 @@ export async function addRadar(id, type, target, chatId, meta = {}) {
         .from("radar_subs")
         .upsert({ id, type, target, chat_id: chatId, meta, last_seen: "" }, { onConflict: "id" });
       if (!error) return;
-    } catch (err) {
+    } catch (_err) {
       // ignore, fall through to fallback
     }
   }
@@ -403,7 +406,7 @@ export async function removeRadar(id) {
     try {
       const { error } = await supabase.from("radar_subs").delete().eq("id", id);
       if (!error) return;
-    } catch (err) {}
+    } catch {}
   }
   
   let radars = await getRadarFallback();
@@ -416,7 +419,7 @@ export async function updateRadarLastSeen(id, lastSeen) {
     try {
       const { error } = await supabase.from("radar_subs").update({ last_seen: lastSeen }).eq("id", id);
       if (!error) return;
-    } catch (err) {}
+    } catch {}
   }
   
   const radars = await getRadarFallback();

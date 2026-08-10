@@ -1,5 +1,5 @@
 import { botConfig } from "./config.js";
-import { commands, replyMsg, isAdmin } from "./commands/registry.js";
+import { commands, replyMsg } from "./commands/registry.js";
 import { reactMsg } from "./commands/helpers.js";
 import { logMessage, getPendingReminders, markReminderDone } from "./db.js";
 import {
@@ -57,6 +57,17 @@ const alertRateLimit = new LRUCache({ max: 50, ttl: 60000 });
 
 export async function alertOwner(sock, context, err, extra = {}) {
   try {
+    const msgText = err?.message ?? String(err);
+    if (
+      msgText.includes("Bad MAC") ||
+      msgText.includes("Key used already") ||
+      msgText.includes("MessageCounterError") ||
+      msgText.includes("Failed to decrypt message") ||
+      msgText.includes("Session error:")
+    ) {
+      return;
+    }
+
     const errorKey = `${context}:${err.message}`;
     if (alertRateLimit.has(errorKey)) return;
     alertRateLimit.set(errorKey, true);
@@ -128,8 +139,7 @@ export function startReminderPoller(sock) {
 
 // ─── Message Handler ──────────────────────────────────────────────────────────
 
-let connectedAt = Infinity; 
-const messageSignatures = new Map();
+let connectedAt = Infinity;
 
 export function markBotReady() {
   connectedAt = Date.now();

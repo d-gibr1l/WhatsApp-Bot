@@ -1,6 +1,6 @@
 import { setSetting, warnUser, banNumber, supabase } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
-import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
+import { replyMsg, alertOwner } from "./helpers.js";
 
 // ─── Cache: per-chat words only ───────────────────────────────────────────────
 // chatWords: Map of chat_id -> Set of words

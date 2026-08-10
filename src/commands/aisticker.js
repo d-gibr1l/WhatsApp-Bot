@@ -1,5 +1,3 @@
-import { tmpdir } from "os";
-import { join } from "path";
 import sharp from "sharp";
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
 

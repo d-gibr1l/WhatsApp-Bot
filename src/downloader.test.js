@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { extractUrl, detectPlatform, getYtDlpPath, getCookiesPath } from './downloader.js';
 import { promises as fsPromises } from 'fs';
-import * as db from './db.js';
+import { db } from './db.js';
 
 test('extractUrl extracts valid URLs', () => {
   assert.strictEqual(extractUrl('Check this out: https://google.com'), 'https://google.com');

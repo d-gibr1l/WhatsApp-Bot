@@ -1,4 +1,4 @@
-import { replyMsg, reactMsg, failMsg } from "./helpers.js";
+import { reactMsg, failMsg } from "./helpers.js";
 import { getYtDlpPath, getCookiesPath } from "../downloader.js";
 import { heavyQueue } from "../queue.js";
 import NodeID3 from "node-id3";
@@ -55,7 +55,7 @@ async function downloadAudioDirect(query) {
         await fs.unlink(tmpFile).catch(() => {});
         const title = stdout.trim().split("\n")[0] || "Audio";
         resolve({ buffer, title });
-      } catch (err) {
+      } catch (_err) {
         reject(new Error("yt-dlp produced no output file."));
       }
     });

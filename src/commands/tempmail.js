@@ -1,5 +1,4 @@
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
-import { botConfig } from "../config.js";
 
 // ─── mail.tm API Wrapper ──────────────────────────────────────────────────────
 
@@ -114,7 +113,7 @@ async function pollInbox(sock, from, jid) {
                 mimetype: att.contentType || "application/octet-stream",
                 fileName: att.name || "attachment"
               });
-            } catch (err) {
+            } catch (_err) {
               await sock.sendMessage(from, { text: `❌ Failed to download attachment: ${att.name}` });
             }
           }

@@ -1,7 +1,6 @@
 import { botConfig } from "../config.js";
-import { getSetting } from "../db.js";
 import { cachedGetSetting } from "../cache.js";
-import { replyMsg, isAdmin, alertOwner } from "./helpers.js";
+import { replyMsg, isAdmin } from "./helpers.js";
 
 export const generalCommands = {
 
@@ -11,7 +10,7 @@ export const generalCommands = {
     description: "Check bot latency and server uptime",
     handler: async (sock, msg, _args, from) => {
       const start = Date.now();
-      const sent = await replyMsg(sock, from, msg, "🏓 Pinging...");
+      await replyMsg(sock, from, msg, "🏓 Pinging...");
       const latency = Date.now() - start;
 
       const uptimeSecs = Math.floor(process.uptime());

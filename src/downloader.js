@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
-import { getSetting } from "./db.js";
+import { db } from "./db.js";
 import { heavyQueue } from "./queue.js";
 
 // ─── yt-dlp Path & Auto-Updater ──────────────────────────────────────────────
@@ -79,7 +79,7 @@ export function extractUrl(text) {
 
 export async function getCookiesPath() {
   try {
-    const cookies = await getSetting("yt_cookies", null);
+    const cookies = await db.getSetting("yt_cookies", null);
     if (!cookies?.trim()) return null;
     const cookiePath = join(tmpdir(), `cookies_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`);
     await fsPromises.writeFile(cookiePath, cookies);
@@ -252,7 +252,7 @@ export const downloadYouTubeToBuffer = async (url, audioOnly) => {
 // ─── RapidAPI fallback ────────────────────────────────────────────────────────
 
 async function getApiKey() {
-  const key = await getSetting("rapidapi_key", null);
+  const key = await db.getSetting("rapidapi_key", null);
   if (!key?.trim()) throw new Error("RapidAPI key not set. Use !setapikey <key> to set it.");
   return key.trim();
 }

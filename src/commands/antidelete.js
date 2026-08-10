@@ -43,16 +43,13 @@ export function storeMessage(msg, text) {
 // groupMetadata() makes a live network request to WhatsApp — doing this on
 // every delete event adds 500–3000ms of latency per alert. Cache it for 5 min.
 
-const groupMetaCache = new Map(); // chatId → { meta, fetchedAt }
-const GROUP_META_TTL = 5 * 60 * 1000; // 5 minutes
+const groupMetaCache = new LRUCache({ max: 500, ttl: 5 * 60 * 1000 });
 
 async function getCachedGroupMeta(sock, chatId) {
   const cached = groupMetaCache.get(chatId);
-  if (cached && Date.now() - cached.fetchedAt < GROUP_META_TTL) {
-    return cached.meta;
-  }
+  if (cached) return cached;
   const meta = await sock.groupMetadata(chatId).catch(() => null);
-  if (meta) groupMetaCache.set(chatId, { meta, fetchedAt: Date.now() });
+  if (meta) groupMetaCache.set(chatId, meta);
   return meta;
 }
 

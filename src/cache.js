@@ -118,13 +118,24 @@ export async function loadCache() {
     const settings = getValue(results[3], []);
     const autoReplies = getValue(results[4], []);
 
-    cache = {
-      admins:        new Set((admins   || []).map(normalizeNumber)),
-      banned:        new Set((banned   || []).map((b) => normalizeNumber(b.number))),
-      allowedGroups: new Set((groups   || []).map((g) => g.group_id)),
-      settings:      new Map((settings || []).map((s) => [s.key, s.value])),
-      autoReplyTrie: buildAutoReplyTrie(autoReplies),
-    };
+    if (!cache.admins) cache.admins = new Set();
+    cache.admins.clear();
+    (admins || []).forEach((a) => cache.admins.add(normalizeNumber(a)));
+
+    if (!cache.banned) cache.banned = new Set();
+    cache.banned.clear();
+    (banned || []).forEach((b) => cache.banned.add(normalizeNumber(b.number)));
+
+    if (!cache.allowedGroups) cache.allowedGroups = new Set();
+    cache.allowedGroups.clear();
+    (groups || []).forEach((g) => cache.allowedGroups.add(g.group_id));
+
+    if (!cache.settings) cache.settings = new Map();
+    cache.settings.clear();
+    (settings || []).forEach((s) => cache.settings.set(s.key, s.value));
+
+    if (!cache.autoReplyTrie) cache.autoReplyTrie = new Trie();
+    cache.autoReplyTrie.root = buildAutoReplyTrie(autoReplies).root;
 
     stats.cacheLoads++;
     console.log(
@@ -174,6 +185,7 @@ export function startCacheAutoRefresh() {
           console.log("✅ Supabase Realtime active — instant DB updates enabled");
         } else if (status === 'CHANNEL_ERROR') {
           console.warn("⚠️ Realtime channel error. Falling back to polling.");
+          if (!fallbackInterval) fallbackInterval = setInterval(loadCache, 5 * 60 * 1000);
         }
       });
       
@@ -186,37 +198,55 @@ export function startCacheAutoRefresh() {
 
 // ─── Selective Refresh Helpers ────────────────────────────
 
-async function refreshKey(key, fetcher, transform) {
+export async function refreshAdmins() {
   try {
-    const data = await fetcher();
-    cache[key] = transform(data || []);
+    const data = await getAdmins();
+    if (!cache.admins) cache.admins = new Set();
+    cache.admins.clear();
+    (data || []).forEach((a) => cache.admins.add(normalizeNumber(a)));
   } catch (err) {
-    console.error(`❌ refresh ${key} failed:`, err.message);
+    console.error("❌ refresh admins failed:", err.message);
   }
 }
 
-export const refreshAdmins = () =>
-  refreshKey("admins", getAdmins, (data) => new Set(data.map(normalizeNumber)));
+export async function refreshBanned() {
+  try {
+    const data = await getBannedList();
+    if (!cache.banned) cache.banned = new Set();
+    cache.banned.clear();
+    (data || []).forEach((b) => cache.banned.add(normalizeNumber(b.number)));
+  } catch (err) {
+    console.error("❌ refresh banned failed:", err.message);
+  }
+}
 
-export const refreshBanned = () =>
-  refreshKey("banned", getBannedList, (data) =>
-    new Set(data.map((b) => normalizeNumber(b.number)))
-  );
+export async function refreshGroups() {
+  try {
+    const data = await getAllowedGroups();
+    if (!cache.allowedGroups) cache.allowedGroups = new Set();
+    cache.allowedGroups.clear();
+    (data || []).forEach((g) => cache.allowedGroups.add(g.group_id));
+  } catch (err) {
+    console.error("❌ refresh groups failed:", err.message);
+  }
+}
 
-export const refreshGroups = () =>
-  refreshKey("allowedGroups", getAllowedGroups, (data) =>
-    new Set(data.map((g) => g.group_id))
-  );
-
-export const refreshSettings = () =>
-  refreshKey("settings", getAllSettings, (data) =>
-    new Map(data.map((s) => [s.key, s.value]))
-  );
+export async function refreshSettings() {
+  try {
+    const data = await getAllSettings();
+    if (!cache.settings) cache.settings = new Map();
+    cache.settings.clear();
+    (data || []).forEach((s) => cache.settings.set(s.key, s.value));
+  } catch (err) {
+    console.error("❌ refresh settings failed:", err.message);
+  }
+}
 
 export async function refreshAutoReplies() {
   try {
     const data = await getAllAutoReplies();
-    cache.autoReplyTrie = buildAutoReplyTrie(data);
+    if (!cache.autoReplyTrie) cache.autoReplyTrie = new Trie();
+    cache.autoReplyTrie.root = buildAutoReplyTrie(data).root;
   } catch (err) {
     console.error("❌ refreshAutoReplies failed:", err.message);
   }

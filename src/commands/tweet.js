@@ -35,7 +35,7 @@ export const tweetCommands = {
       try {
         const ppUrl = await sock.profilePictureUrl(sender, "image");
         if (ppUrl) avatarUrl = ppUrl;
-      } catch (err) {
+      } catch (_err) {
         // User might not have a profile picture set or it's hidden, use fallback
       }
 

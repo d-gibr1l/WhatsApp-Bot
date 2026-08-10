@@ -5,7 +5,7 @@ import { existsSync, promises as fsPromises } from "fs";
 const execPromise = promisify(exec);
 import { tmpdir } from "os";
 import { join } from "path";
-import { replyMsg, reactMsg, failMsg } from "./helpers.js";
+import { replyMsg, reactMsg } from "./helpers.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 
 const MAX_MB = 64;

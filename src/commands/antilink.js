@@ -1,6 +1,6 @@
 import { setSetting, warnUser, banNumber, supabase } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
-import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
+import { replyMsg, alertOwner } from "./helpers.js";
 
 // ─── Allowed Links Cache ──────────────────────────────────────────────────────
 

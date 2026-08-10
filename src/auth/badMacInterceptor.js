@@ -130,18 +130,36 @@ function collectErrorTexts(obj, visited = new Set(), depth = 0) {
   visited.add(obj);
   const parts = [];
 
-  if (obj.stack) parts.push(String(obj.stack));
-  if (obj.message) parts.push(String(obj.message));
-  if (obj.jid) parts.push(String(obj.jid));
-  if (obj.chatId) parts.push(String(obj.chatId));
-  if (obj.sender) parts.push(String(obj.sender));
-  if (obj.remoteJid) parts.push(String(obj.remoteJid));
-  if (obj.id && typeof obj.id === 'string') parts.push(obj.id);
+  const safeAccess = (fn) => {
+    try { return fn(); } catch { return undefined; }
+  };
+
+  const stack = safeAccess(() => obj.stack);
+  if (stack) parts.push(String(stack));
+
+  const message = safeAccess(() => obj.message);
+  if (message) parts.push(String(message));
+
+  const jid = safeAccess(() => obj.jid);
+  if (jid) parts.push(String(jid));
+
+  const chatId = safeAccess(() => obj.chatId);
+  if (chatId) parts.push(String(chatId));
+
+  const sender = safeAccess(() => obj.sender);
+  if (sender) parts.push(String(sender));
+
+  const remoteJid = safeAccess(() => obj.remoteJid);
+  if (remoteJid) parts.push(String(remoteJid));
+
+  const id = safeAccess(() => obj.id);
+  if (id && typeof id === 'string') parts.push(id);
 
   const nestedKeys = ['cause', 'reason', 'err', 'error', 'originalError'];
   for (const key of nestedKeys) {
-    if (obj[key]) {
-      parts.push(...collectErrorTexts(obj[key], visited, depth + 1));
+    const val = safeAccess(() => obj[key]);
+    if (val) {
+      parts.push(...collectErrorTexts(val, visited, depth + 1));
     }
   }
 
@@ -239,18 +257,21 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
       .map((a) => (typeof a === 'string' ? a : collectErrorTexts(a).join(' ')))
       .join(' ');
 
-    if (text.includes('Bad MAC')) {
-      let targetArg = args.find((a) => a instanceof Error);
-      if (!targetArg) {
-        targetArg = args.find((a) => a && typeof a === 'object' && !Array.isArray(a));
-      }
-      if (!targetArg) {
-        targetArg = text;
-      }
-      const keyInfo = targetArg ? extractKeyId(targetArg) : null;
+    let targetArg = args.find((a) => a instanceof Error);
+    if (!targetArg) {
+      targetArg = args.find((a) => a && typeof a === 'object' && !Array.isArray(a));
+    }
+    if (!targetArg) {
+      targetArg = text;
+    }
+    const keyInfo = targetArg ? extractKeyId(targetArg) : null;
+    const keySuffix = keyInfo?.id ? keyInfo.id : 'unknown_jid';
+    const keyStr = keyInfo?.id ? ` (key: ${keyInfo.id})` : '';
 
-      if (!isLog && !isRateLimited(`console:mac:${sessionId}`)) {
-        const keyStr = keyInfo ? ` (key: ${keyInfo.id})` : '';
+    if (text.includes('Bad MAC')) {
+      const rateLimitKey = `console:mac:${sessionId}:${keySuffix}`;
+
+      if (!isLog && !isRateLimited(rateLimitKey)) {
         originalLogFn(
           `[BadMAC] Decryption failure for session '${sessionId}'${keyStr}. ` +
           `Baileys is self-healing — message dropped gracefully.`
@@ -264,12 +285,23 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
     }
 
     if (text.includes('Key used already') || text.includes('MessageCounterError')) {
-      if (!isLog && !isRateLimited(`console:counter:${sessionId}`)) {
+      const rateLimitKey = `console:counter:${sessionId}:${keySuffix}`;
+
+      if (!isLog && !isRateLimited(rateLimitKey)) {
         originalLogFn(
-          `[BadMAC] Replay protection for session '${sessionId}' — message dropped.`
+          `[BadMAC] Replay protection for session '${sessionId}'${keyStr} — message dropped.`
         );
       }
       return;
+    }
+
+    const matchedPattern = SUPPRESS_PATTERNS.find((p) => text.includes(p)) || 'Session error';
+    const rateLimitKey = `console:suppressed:${sessionId}:${matchedPattern}:${keySuffix}`;
+
+    if (!isLog && !isRateLimited(rateLimitKey)) {
+      originalLogFn(
+        `[BadMAC] Suppressed session log (${matchedPattern}) for session '${sessionId}'${keyStr}.`
+      );
     }
   }
 
@@ -284,14 +316,19 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
       const isBadMac = msg.includes('Bad MAC');
 
       if (!isCounter && !isBadMac) {
+        _originalConsoleError('Unhandled Rejection:', reason);
         escalateRejection(reason);
         return;
       }
 
       const sessionId = getSessionId();
+      const keyInfo = extractKeyId(reason);
+      const keySuffix = keyInfo?.id ? keyInfo.id : 'unknown_jid';
+      const counterKey = `unhandled:counter:${sessionId}:${keySuffix}`;
+      const macKey = `unhandled:mac:${sessionId}:${keySuffix}`;
 
       if (isCounter) {
-        if (!isRateLimited(`unhandled:counter:${sessionId}`)) {
+        if (!isRateLimited(counterKey)) {
           _originalConsoleError(
             `[BadMAC] MessageCounterError (unhandled rejection) for session '${sessionId}' — dropped.`
           );
@@ -299,13 +336,12 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
         return;
       }
 
-      if (!isRateLimited(`unhandled:mac:${sessionId}`)) {
+      if (!isRateLimited(macKey)) {
         _originalConsoleError(
           `[BadMAC] Unhandled Bad MAC for session '${sessionId}'. Purging key.`
         );
       }
 
-      const keyInfo = extractKeyId(reason);
       if (!keyInfo) return;
 
       try {
@@ -320,14 +356,20 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
   process.on('unhandledRejection', _unhandledHandler);
 
   function getBaseJid(id) {
-    if (!id) return '';
-    if (id.endsWith('@g.us')) return id;
-    return id.split('@')[0].split(':')[0].split('.')[0];
+    if (!id || typeof id !== 'string') return '';
+    const trimmed = id.trim();
+    if (!trimmed) return '';
+    if (trimmed.endsWith('@g.us')) return trimmed;
+    const base = trimmed.split('@')[0].split(':')[0].split('.')[0];
+    return base || '';
   }
 
   async function purgeForBadMac(keyInfo) {
-    const now = Date.now();
+    if (!keyInfo || !keyInfo.id) return;
     const baseJid = getBaseJid(keyInfo.id);
+    if (!baseJid) return;
+
+    const now = Date.now();
 
     const inFlight = _wipesInFlight.get(baseJid);
     if (inFlight) return inFlight;

@@ -1,4 +1,4 @@
-import { searchImages, searchGifs, downloadImageUrl } from "../downloader.js";
+import { searchImages, downloadImageUrl } from "../downloader.js";
 import { replyMsg, reactMsg } from "./helpers.js";
 
 const MAX_IMAGES     = 10; // hard cap — prevent abuse
@@ -101,6 +101,7 @@ export const imageCommands = {
       }
 
       if (sent < count) {
+        const failed = count - sent;
         await reactMsg(sock, from, msg, "⚠️");
         await replyMsg(sock, from, msg,
           `⚠️ Only found ${sent} downloadable image${sent !== 1 ? "s" : ""} for *${query}* (${failed} failed).`

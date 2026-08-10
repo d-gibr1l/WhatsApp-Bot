@@ -1,5 +1,5 @@
 import { getWarnings, isBanned, getAdmins, supabase } from "../db.js";
-import { replyMsg, alertOwner, getTargetNumber, normalizeNumber } from "./helpers.js";
+import { replyMsg, alertOwner, getTargetNumber } from "./helpers.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

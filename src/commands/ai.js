@@ -1,6 +1,6 @@
 import { replyMsg, reactMsg, alertOwner } from "./helpers.js";
 import { setSetting, supabase } from "../db.js";
-import { cachedGetSetting, refreshSettings, isBotSentMessage, isAiSentMessage, rememberAiSent } from "../cache.js";
+import { cachedGetSetting, refreshSettings, isAiSentMessage, rememberAiSent } from "../cache.js";
 import { botConfig } from "../config.js";
 
 const MAX_HISTORY = 20;
@@ -142,7 +142,7 @@ export const aiCommands = {
       try {
         await clearHistory(from);
         await replyMsg(sock, from, msg, "🗑️ AI conversation history cleared for this chat.");
-      } catch (err) {
+      } catch (_err) {
         await replyMsg(sock, from, msg, "❌ Failed to clear history.");
       }
     },
@@ -236,8 +236,6 @@ export async function handleAiReply(sock, msg, from) {
 
   const text = msg.message?.extendedTextMessage?.text?.trim();
   if (!text) return false;
-
-  const senderJid = msg.key.participant ?? msg.key.remoteJid;
 
   try {
     await reactMsg(sock, from, msg, "🤖");

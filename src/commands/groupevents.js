@@ -1,6 +1,6 @@
 import { replyMsg, reactMsg, failMsg } from "./helpers.js";
 import { setSetting, getSetting } from "../db.js";
-import { cachedGetSetting, refreshSettings } from "../cache.js";
+import { refreshSettings } from "../cache.js";
 
 // ─── Poll ─────────────────────────────────────────────────────────────────────
 

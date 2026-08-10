@@ -3,7 +3,7 @@ import { promisify } from "util";
 import { existsSync, promises as fsPromises } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { replyMsg, reactMsg, failMsg } from "./helpers.js";
+import { replyMsg, reactMsg } from "./helpers.js";
 import { downloadMediaMessage } from "@whiskeysockets/baileys";
 
 const execPromise = promisify(exec);
@@ -11,7 +11,7 @@ const execPromise = promisify(exec);
 const MAX_MB = 64;
 function sizeMB(buf) { return buf.length / (1024 * 1024); }
 
-function parseTimestamp(str) {
+function _parseTimestamp(str) {
   if (!str) return 0;
   const parts = str.split(":").map(Number);
   if (parts.length === 2) return parts[0] * 60 + parts[1];

@@ -1,12 +1,12 @@
 import { promises as fsPromises } from "fs";
-import { getSetting, setSetting } from "../db.js";
+import { setSetting } from "../db.js";
 import { cachedGetSetting, refreshSettings } from "../cache.js";
-import { getMediaInfo, downloadWithYtDlp, downloadWithApi, detectPlatform, extractUrl } from "../downloader.js";
+import { downloadWithYtDlp, downloadWithApi, extractUrl } from "../downloader.js";
 import { replyMsg, reactMsg, alertOwner, failMsg } from "./helpers.js";
 
 const MAX_MB = 64;
 
-function sizeMB(buf) { return buf.length / (1024 * 1024); }
+
 
 function getUrlFromMsg(msg, args) {
   if (args[0]?.startsWith("http")) return args[0];
@@ -135,7 +135,7 @@ export const downloaderCommands = {
 
       let downloadedFilePath = null;
       try {
-        const { filePath, title, platform } = await downloadWithApi(url);
+        const { filePath, title } = await downloadWithApi(url);
         downloadedFilePath = filePath;
         const stats = await fsPromises.stat(filePath);
         const mb = stats.size / (1024 * 1024);
