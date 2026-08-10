@@ -14,7 +14,7 @@ import { resolveAlias } from "./commands/aliases.js";
 import { hasStickerSession, handleStickerSessionImage } from "./commands/sticker.js";
 import { LRUCache } from "lru-cache";
 
-// ─── extractText (fix #5 — simplified, removed poll noise) ───────────────────
+// ─── extractText ─────────────────────────────────────────────────────────────
 
 export function extractText(msg) {
   const m = msg.message || {};
@@ -30,7 +30,7 @@ export function extractText(msg) {
   );
 }
 
-// ─── getMessageType helper (fix #10) ─────────────────────────────────────────
+// ─── getMessageType helper ───────────────────────────────────────────────────
 
 export function getMessageType(msg) {
   return Object.keys(msg.message || {})[0] ?? "unknown";
@@ -51,9 +51,9 @@ export function getSenderNumber(msg) {
   return (participant ?? remoteJid).split("@")[0];
 }
 
-// ─── Error Alert (fix #9 — more context) ─────────────────────────────────────
+// ─── Error Alert ─────────────────────────────────────────────────────────────
 
-const alertRateLimit = new LRUCache({ max: 50, ttl: 60000 }); // Max 1 alert per min per error
+const alertRateLimit = new LRUCache({ max: 50, ttl: 60000 }); 
 
 export async function alertOwner(sock, context, err, extra = {}) {
   try {
@@ -94,13 +94,13 @@ function buildUsageMessage(cmdName, command, prefix) {
   return lines.join("\n");
 }
 
-// ─── Reminder Poller (fix #8 — overlap protection) ───────────────────────────
+// ─── Reminder Poller ─────────────────────────────────────────────────────────
 
 export function startReminderPoller(sock) {
   let running = false;
 
   const intervalId = setInterval(async () => {
-    if (running) return; // prevent overlap if DB is slow
+    if (running) return; 
     running = true;
     try {
       const due = await getPendingReminders();
@@ -123,22 +123,12 @@ export function startReminderPoller(sock) {
     }
   }, 30_000);
 
-  // Return cleanup function so caller can stop this poller before starting a new one
   return () => clearInterval(intervalId);
 }
 
 // ─── Message Handler ──────────────────────────────────────────────────────────
-// ─── Connected timestamp ──────────────────────────────────────────────────────
-// This is set by index.js AFTER the socket opens and caches load.
-// Any message with a timestamp before this value is silently dropped.
-// This prevents the bot from replying to historical messages that WhatsApp
-// flushes on every reconnect.
-let connectedAt = Infinity; // Block everything until explicitly set
 
-// ─── Retry Storm Deduplication ────────────────────────────────────────────────
-// WhatsApp occasionally resends identical messages (with different IDs) if it
-// doesn't receive an ACK fast enough. We drop identical text from the same
-// sender if received within 10 seconds.
+let connectedAt = Infinity; 
 const messageSignatures = new Map();
 
 export function markBotReady() {
@@ -160,16 +150,12 @@ export async function handleMessage(sock, msg) {
 }
 
 async function processMessage(sock, msg) {
-
-  // ── Fix #1: Fast early exits — skip invalid/system messages ─────────────
   if (!msg.message) return;
   const from = msg.key.remoteJid;
   if (!from)                          return;
   if (from === "status@broadcast")    return;
 
-  // ── Bulk sticker session — must be before deduplication so no images are missed
   if (hasStickerSession(from)) {
-    // Check if the message contains an image (directly or nested)
     const msgContent = msg.message?.ephemeralMessage?.message ||
                        msg.message?.viewOnceMessageV2?.message ||
                        msg.message?.viewOnceMessage?.message ||
@@ -180,20 +166,18 @@ async function processMessage(sock, msg) {
     }
   }
 
-  // Fix #7: Deduplication — skip if already processed
   const msgId = msg.key.id;
   if (msgId && seenMessage(msgId)) return;
   if (msgId) rememberMessage(msgId);
 
-  // Fix #2: Drop messages older than the bot's connection timestamp
   let tsRaw = msg.messageTimestamp;
   if (typeof tsRaw === "object" && tsRaw !== null && "low" in tsRaw) tsRaw = tsRaw.low;
   let msgTs = (Number(tsRaw) || 0) * 1000;
   if (msgTs > 100000000000000) msgTs = Math.floor(msgTs / 1000);
   
-  // If we couldn't parse a timestamp, or it's older than 2 minutes,
-  // drop it to avoid answering historical commands on restart.
-  // This avoids clock drift issues compared to checking against connectedAt.
+  // FIXED: Explicitly drop messages older than the connection time to prevent race conditions during DB loading
+  if (msgTs < connectedAt) return;
+  
   if (!msgTs || isNaN(msgTs) || Date.now() - msgTs > 120_000) {
     return;
   }
@@ -206,7 +190,6 @@ async function processMessage(sock, msg) {
 
   if (msg.key.fromMe && !text) return;
 
-  // ── Guardrails — fast RAM checks, no DB ─────────────────────────────────
   if (cachedIsBanned(sender)) return;
   if (isGrp && cachedHasAllowedGroups() && !cachedIsGroupAllowed(from)) return;
 
@@ -214,11 +197,10 @@ async function processMessage(sock, msg) {
   const botActiveLocal = cachedGetSetting(`bot_active_${from}`, "true");
 
   if (!userIsAdmin) {
-    if (botActiveGlobal !== "true") return; // Master switch kills it globally
-    if (botActiveLocal === "false") return; // Local switch kills it for this chat
+    if (botActiveGlobal !== "true") return; 
+    if (botActiveLocal === "false") return; 
   }
 
-  // Fix #3: Only run word filter + anti-link on non-command messages
   if (!text.startsWith(prefix)) {
     if (!userIsAdmin && text) {
       const filtered = await handleWordFilter(sock, msg, text, sender, from);
@@ -228,26 +210,20 @@ async function processMessage(sock, msg) {
     }
   }
 
-  // Activity logging — buffered, non-blocking
   logMessage(sender, from, isGrp);
 
-  // ── Auto-replies and AI ──────────────────────────────────────────────────
   if (!text.startsWith(prefix)) {
     if (msg.message?.extendedTextMessage?.contextInfo) {
       const handled = await handleAiReply(sock, msg, from);
       if (handled) return;
     }
     if (text) {
-      // Check specific keyword match first, then wildcard fallback
       const autoResponse = cachedGetAutoReply(text) ?? cachedGetAutoReply("*");
       if (autoResponse) await replyMsg(sock, from, msg, autoResponse);
     }
     return;
   }
 
-  // ── Command routing ──────────────────────────────────────────────────────
-
-  // Fix #6: Support quoted arguments gracefully handling unmatched quotes
   const args = [];
   const strippedText = text.slice(prefix.length).trim();
   let currentArg = '';
@@ -272,18 +248,16 @@ async function processMessage(sock, msg) {
   if (!rawCmd) return;
 
   const resolved = resolveAlias(rawCmd);
-  const resolvedParts = resolved.split(" ");
+  const resolvedParts = (resolved || rawCmd).split(" ");
   const cmdName = resolvedParts[0];
   const command = commands[cmdName];
   
-  // If the alias expands to multiple words, prepend the extra words to args
   if (resolvedParts.length > 1) {
     args.unshift(...resolvedParts.slice(1));
   }
 
   if (!command) return;
 
-  // React to all valid commands before processing
   await reactMsg(sock, from, msg, "⏳").catch(() => {});
 
   const argsLog = args.length > 0 ? ` ${args.join(" ")}` : "";

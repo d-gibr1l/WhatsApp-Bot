@@ -15,7 +15,7 @@ import { getRedis } from "./auth/redisSession.js";
 
 // ─── Redis for message deduplication ──────────────────────
 let _dedupRedis = null;
-const DEDUP_KEY = "bot:seen_msgs";
+const DEDUP_PREFIX = "seen_msg:";
 const DEDUP_TTL = 3600; // 1 hour
 
 function getDedupRedis() {
@@ -144,7 +144,6 @@ let fallbackInterval = null;
 let subscription = null;
 
 export function startCacheAutoRefresh() {
-  // Clean up existing connections to prevent memory leaks on reconnect
   if (safetyInterval)  clearInterval(safetyInterval);
   if (fallbackInterval) clearInterval(fallbackInterval);
   if (subscription) {
@@ -178,7 +177,6 @@ export function startCacheAutoRefresh() {
         }
       });
       
-    // Safety net full refresh every 10 minutes
     safetyInterval = setInterval(loadCache, 10 * 60 * 1000);
   } catch (err) {
     console.warn(`⚠️ Supabase Realtime unavailable (${err.message}) — falling back to 5m polling`);
@@ -258,15 +256,24 @@ export function cachedGetAutoReply(text) {
 
 // ─── LRU Message Trackers (Redis-backed for restart persistence) ──
 
-// Pre-populate the in-memory LRU from Redis on startup.
-// This ensures that messages processed in a previous session
-// are still recognized as "seen" after a restart.
 export async function loadSeenMessages() {
   try {
     const redis = getDedupRedis();
-    const ids = await redis.smembers(DEDUP_KEY);
-    for (const id of ids) messageCache.set(id, true);
-    console.log(`✅ Loaded ${ids.length} seen message IDs from Redis`);
+    let cursor = '0';
+    let count = 0;
+    
+    // Safely paginate through the keys instead of pulling a massive array at once
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `${DEDUP_PREFIX}*`, 'COUNT', 200);
+      cursor = nextCursor;
+      for (const k of keys) {
+        const id = k.replace(DEDUP_PREFIX, "");
+        messageCache.set(id, true);
+        count++;
+      }
+    } while (cursor !== '0');
+    
+    console.log(`✅ Loaded ${count} seen message IDs from Redis`);
   } catch (err) {
     console.warn("⚠️ Could not load seen messages from Redis:", err.message);
   }
@@ -279,12 +286,11 @@ export function seenMessage(id) {
 export function rememberMessage(id) {
   messageCache.set(id, true);
   stats.messagesSeen++;
-  // Fire-and-forget write to Redis (non-blocking)
+  
+  // Fire-and-forget write to Redis using isolated keys with an exact TTL
   try {
     const redis = getDedupRedis();
-    redis.sadd(DEDUP_KEY, id).catch(() => {});
-    // Refresh TTL so the set auto-expires after 1 hour of inactivity
-    redis.expire(DEDUP_KEY, DEDUP_TTL).catch(() => {});
+    redis.set(`${DEDUP_PREFIX}${id}`, "1", "EX", DEDUP_TTL).catch(() => {});
   } catch {}
 }
 
