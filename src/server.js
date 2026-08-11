@@ -19,7 +19,7 @@ import {
   refreshBanned,
   refreshAutoReplies
 } from "./cache.js";
-import { clearSession } from "./auth/redisSession.js";
+import { clearSession } from "./auth/supabaseSync.js";
 
 export let lastQR    = null;
 export let botStatus = "starting";
