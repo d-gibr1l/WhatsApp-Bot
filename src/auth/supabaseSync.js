@@ -1,10 +1,8 @@
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
-const archiver = require("archiver");
-const unzipper = require("unzipper");
+import { ZipArchive } from "archiver";
+import unzipper from "unzipper";
 import { createReadStream, createWriteStream } from "fs";
 import { supabase } from "../db.js";
 import { SESSION_DIR, botConfig, SUPABASE_URL, SUPABASE_KEY } from "../config.js";
@@ -32,7 +30,7 @@ function getSessionId() {
  */
 function zipDirectory(sourceDir, outPath) {
   return new Promise((resolve, reject) => {
-    const archive = archiver("zip", { zlib: { level: 1 } });
+    const archive = new ZipArchive({ zlib: { level: 1 } });
     const stream = createWriteStream(outPath);
 
     stream.on("error", (err) => reject(err));
