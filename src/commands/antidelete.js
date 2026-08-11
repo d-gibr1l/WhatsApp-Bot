@@ -103,10 +103,11 @@ export async function handleAntiDelete(sock, deletedKey, deleterJid = null) {
     deleterDisplayName = await getDisplayName(sock, chatId, deleterJid);
   }
 
-  let headerText = `👤 *From:* ${originalSenderDisplayName}`;
+  let footerText = `👤 *From:* ${originalSenderDisplayName}`;
   if (deleterDisplayName) {
-    headerText += `\n🗑️ *Deleted by:* ${deleterDisplayName}`;
+    footerText += `\n🗑️ *Deleted by:* ${deleterDisplayName}`;
   }
+  footerText += `\n🕐 *Time:* ${timeStr}`;
 
   const antideleteDest = cachedGetSetting("antidelete_dest", "chat");
   const dest = antideleteDest === "dm"
@@ -120,32 +121,33 @@ export async function handleAntiDelete(sock, deletedKey, deleterJid = null) {
       // Text message — send immediately, no download needed
       await sock.sendMessage(dest, {
         text:
-          `🗑️ *Deleted Message Detected*\n\n` +
-          `${headerText}\n` +
-          `🕐 *Time:* ${timeStr}\n` +
-          `💬 *Message:* ${stored.text}`,
+          `🗑️ *Deleted*\n` +
+          `======================\n` +
+          `💬 *Message:* _${stored.text}_\n` +
+          `=======================\n` +
+          `${footerText}`,
         mentions,
       });
       return;
     }
 
     // ── Media message ─────────────────────────────────────────────────────
-    // Send a "message deleted" placeholder immediately so the user sees
-    // something right away, then download and re-send the media in the background.
-    const caption = `🗑️ *Deleted media from ${originalSenderDisplayName} at ${timeStr}*` + (deleterDisplayName ? ` (deleted by ${deleterDisplayName})` : "");
     const mediaMsg = stored.msg.message;
+    const contentForCaption = mediaMsg?.ephemeralMessage?.message || mediaMsg?.viewOnceMessage?.message || mediaMsg?.viewOnceMessageV2?.message || mediaMsg;
+    const msgData = contentForCaption?.imageMessage || contentForCaption?.videoMessage || contentForCaption?.documentMessage;
+    const originalCaption = msgData?.caption ? `\n💬 *Caption:* _${msgData.caption}_` : "";
+
+    const caption = `🗑️ *Deleted media*` + 
+                    originalCaption + 
+                    `\n=======================\n` + 
+                    footerText;
+
     const isImage    = !!mediaMsg?.imageMessage;
     const isVideo    = !!mediaMsg?.videoMessage;
     const isAudio    = !!mediaMsg?.audioMessage;
     const isDoc      = !!mediaMsg?.documentMessage;
     const isSticker  = !!mediaMsg?.stickerMessage;
     const isViewOnce = !!(mediaMsg?.viewOnceMessage || mediaMsg?.viewOnceMessageV2);
-
-    // Placeholder lands in chat immediately (<100ms)
-    await sock.sendMessage(dest, {
-      text: `${caption}\n_Downloading media..._`,
-      mentions,
-    });
 
     // Download and re-send asynchronously — does not block the event loop
     (async () => {

@@ -9,9 +9,9 @@ export const generalCommands = {
     requiresArgs: false,
     description: "Check bot latency and server uptime",
     handler: async (sock, msg, _args, from) => {
-      const start = Date.now();
-      await replyMsg(sock, from, msg, "🏓 Pinging...");
-      const latency = Date.now() - start;
+      const msgTimestamp = msg.messageTimestamp ? msg.messageTimestamp * 1000 : Date.now();
+      let latency = Date.now() - msgTimestamp;
+      if (latency < 0) latency = 0; // Prevent negative latency if clocks are slightly out of sync
 
       const uptimeSecs = Math.floor(process.uptime());
       const h = String(Math.floor(uptimeSecs / 3600)).padStart(2, "0");
