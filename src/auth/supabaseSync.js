@@ -1,8 +1,10 @@
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
-import archiver from "archiver";
-import unzipper from "unzipper";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const archiver = require("archiver");
+const unzipper = require("unzipper");
 import { createReadStream, createWriteStream } from "fs";
 import { supabase } from "../db.js";
 import { SESSION_DIR, botConfig, SUPABASE_URL, SUPABASE_KEY } from "../config.js";
