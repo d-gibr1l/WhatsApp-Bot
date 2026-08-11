@@ -4,11 +4,25 @@ import { cachedIsAdmin, rememberBotSent } from "../cache.js";
 // ─── Messaging Helpers ───────────────────────────────────────────────────────
 
 /**
+ * Executes a promise with a timeout to prevent hanging commands.
+ */
+function withTimeout(promise, ms, timeoutErrorMsg = "Operation timed out") {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(timeoutErrorMsg)), ms))
+  ]);
+}
+
+/**
  * Standardized reply function. Tracks the message ID so the AI 
  * doesn't accidentally reply to the bot's own messages.
  */
 export async function replyMsg(sock, from, msg, text) {
-  const result = await sock.sendMessage(from, { text }, { quoted: msg });
+  const result = await withTimeout(
+    sock.sendMessage(from, { text }, { quoted: msg }),
+    15000, 
+    "Failed to send message (Timeout)"
+  );
   if (result?.key?.id) rememberBotSent(result.key.id);
   return result;
 }
@@ -17,9 +31,11 @@ export async function replyMsg(sock, from, msg, text) {
  * Simple reaction helper
  */
 export function reactMsg(sock, from, msg, emoji) {
-  return sock.sendMessage(from, {
-    react: { text: emoji, key: msg.key },
-  });
+  return withTimeout(
+    sock.sendMessage(from, { react: { text: emoji, key: msg.key } }),
+    10000,
+    "Failed to send reaction (Timeout)"
+  );
 }
 
 /**
@@ -35,15 +51,19 @@ export async function failMsg(sock, from, msg, err, context = "") {
     const senderJid = msg.key.participant ?? msg.key.remoteJid ?? "unknown";
     const errMsg = err instanceof Error ? err.message : String(err);
     
-    await sock.sendMessage(ownerJid, {
-      text:
-        `⚠️ *Command Failed*\n\n` +
-        `📍 *Command:* ${context}\n` +
-        `👤 *From:* ${senderJid.split("@")[0]}\n` +
-        `💬 *Chat:* ${from.split("@")[0]}\n` +
-        `❌ *Error:* ${errMsg.slice(0, 300)}\n` +
-        `🕐 *Time:* ${new Date().toLocaleString()}`,
-    });
+    await withTimeout(
+      sock.sendMessage(ownerJid, {
+        text:
+          `⚠️ *Command Failed*\n\n` +
+          `📍 *Command:* ${context}\n` +
+          `👤 *From:* ${senderJid.split("@")[0]}\n` +
+          `💬 *Chat:* ${from.split("@")[0]}\n` +
+          `❌ *Error:* ${errMsg.slice(0, 300)}\n` +
+          `🕐 *Time:* ${new Date().toLocaleString()}`,
+      }),
+      10000,
+      "failMsg timeout"
+    );
   } catch {
     // silently fail — never crash on error reporting
   }
@@ -58,17 +78,21 @@ export async function alertOwner(sock, context, err, extra = {}) {
     if (!botConfig.BOT_NUMBER) return;
 
     const errMsg = err instanceof Error ? err.message : String(err);
-    await sock.sendMessage(ownerJid, {
-      text:
-        `⚠️ *Bot Error Alert*\n\n` +
-        `📍 *Where:* ${context}\n` +
-        `❌ *Error:* ${errMsg.slice(0, 300)}\n` +
-        (extra.sender ? `👤 *Sender:* ${extra.sender}\n` : "") +
-        (extra.from   ? `💬 *Chat:* ${extra.from}\n`   : "") +
-        (extra.text   ? `📝 *Message:* ${String(extra.text).slice(0, 50)}\n` : "") +
-        `🕐 *Time:* ${new Date().toLocaleString()}\n` +
-        `🔢 *Stack:* ${err.stack?.split("\n")[1]?.trim() ?? "N/A"}`,
-    });
+    await withTimeout(
+      sock.sendMessage(ownerJid, {
+        text:
+          `⚠️ *Bot Error Alert*\n\n` +
+          `📍 *Where:* ${context}\n` +
+          `❌ *Error:* ${errMsg.slice(0, 300)}\n` +
+          (extra.sender ? `👤 *Sender:* ${extra.sender}\n` : "") +
+          (extra.from   ? `💬 *Chat:* ${extra.from}\n`   : "") +
+          (extra.text   ? `📝 *Message:* ${String(extra.text).slice(0, 50)}\n` : "") +
+          `🕐 *Time:* ${new Date().toLocaleString()}\n` +
+          `🔢 *Stack:* ${err.stack?.split("\n")[1]?.trim() ?? "N/A"}`,
+      }),
+      10000,
+      "alertOwner timeout"
+    );
   } catch {
     // silently fail
   }
