@@ -12,7 +12,7 @@ import path          from "path";
 import { MAX_RECONNECTS, BASE_DELAY_MS, botConfig, SESSION_DIR } from "./src/config.js";
 import {
   downloadSessionFromSupabase,
-  uploadSessionToSupabase,
+  uploadSessionWithTimeout,
   startSessionSyncTask,
   stopSessionSyncTask,
   clearSession
@@ -153,7 +153,7 @@ async function shutdown(signal, exitCode = 0) {
 
   stopSessionSyncTask();
   console.log("Uploading final session state to Supabase before shutdown...");
-  await uploadSessionToSupabase();
+  await uploadSessionWithTimeout();
 
   process.exit(exitCode);
 }
@@ -254,7 +254,6 @@ async function runBot() {
     try {
       if (!sessionLoaded) {
         await downloadSessionFromSupabase();
-        startSessionSyncTask();
         sessionLoaded = true;
       }
       if (currentSock) {
@@ -323,8 +322,8 @@ async function runBot() {
                 if (stopPoller) stopPoller();
                 stopPoller = startReminderPoller(sock);
                 startRadarEngine(sock);
+                startSessionSyncTask();
                 console.log("✅ Bot ready! Loading seen messages and waiting 3s for sync...");
-                // Load previously processed message IDs from Redis
                 await loadSeenMessages();
                 // Give WhatsApp 3 seconds to flush historical messages
                 // before we start processing commands
