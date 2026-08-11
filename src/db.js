@@ -47,8 +47,17 @@ function createMockClient() {
   };
 }
 
+import WebSocket from "ws";
+
 export const supabase = (SUPABASE_URL && SUPABASE_KEY)
-  ? createClient(SUPABASE_URL, SUPABASE_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: {
+        persistSession: false
+      },
+      realtime: {
+        transport: WebSocket
+      }
+    })
   : createMockClient();
 
 // ─── Bulk Loaders (used strictly by cache.js to populate RAM) ─────────────────
