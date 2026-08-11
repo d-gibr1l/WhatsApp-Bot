@@ -273,7 +273,7 @@ async function processMessage(sock, msg) {
 
   if (!command) return;
 
-  await reactMsg(sock, from, msg, "⏳").catch(() => {});
+  reactMsg(sock, from, msg, "⏳").catch(() => {});
 
   const argsLog = args.length > 0 ? ` ${args.join(" ")}` : "";
   console.log(`⚡ [CMD] ${prefix}${cmdName}${argsLog}`);

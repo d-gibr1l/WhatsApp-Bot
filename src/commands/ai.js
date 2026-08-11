@@ -119,7 +119,7 @@ export const aiCommands = {
       );
 
       const userMessage = args.join(" ");
-      await reactMsg(sock, from, msg, "🤖");
+      reactMsg(sock, from, msg, "🤖").catch(() => {});
 
       try {
         const reply = await askGroq(from, userMessage);
@@ -238,7 +238,7 @@ export async function handleAiReply(sock, msg, from) {
   if (!text) return false;
 
   try {
-    await reactMsg(sock, from, msg, "🤖");
+    reactMsg(sock, from, msg, "🤖").catch(() => {});
     const reply = await askGroq(from, text);
     const sent = await replyMsg(sock, from, msg, reply);
     if (sent?.key?.id) rememberAiSent(sent.key.id);
