@@ -19,12 +19,12 @@ let syncInterval = null;
 async function ensureBucket() {
   if (!SUPABASE_URL || !SUPABASE_KEY) return;
   const { error } = await supabase.storage.getBucket(BUCKET_NAME);
-  if (error && error.message.includes("The resource was not found")) {
+  if (error) {
     console.log(`[SupabaseSync] Creating bucket '${BUCKET_NAME}'...`);
     const { error: createError } = await supabase.storage.createBucket(BUCKET_NAME, {
       public: false,
     });
-    if (createError) {
+    if (createError && !createError.message.includes("already exists")) {
       console.error(`[SupabaseSync] Failed to create bucket:`, createError.message);
     }
   }
@@ -104,6 +104,7 @@ export async function uploadSessionToSupabase() {
   isSyncing = true;
   
   try {
+    await ensureBucket();
     const sessionId = botConfig.BOT_NUMBER || process.env.BOT_NUMBER || "default_session";
     const zipName = `${sessionId}.zip`;
     const tmpZipPath = path.join(os.tmpdir(), zipName);
