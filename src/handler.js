@@ -111,7 +111,7 @@ export function startReminderPoller(sock) {
   let running = false;
 
   const intervalId = setInterval(async () => {
-    if (running) return; 
+    if (!isBotReady() || running) return; 
     running = true;
     try {
       const due = await getPendingReminders();
@@ -144,6 +144,11 @@ let connectedAt = Infinity;
 export function markBotReady() {
   connectedAt = Date.now();
   console.log(`[Handler] Bot marked ready at ${connectedAt} — now accepting messages.`);
+}
+
+export function resetBotReady() {
+  connectedAt = Infinity;
+  console.log("[Handler] Bot ready state reset (connectedAt = Infinity).");
 }
 
 export function isBotReady() {

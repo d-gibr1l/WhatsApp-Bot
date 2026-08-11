@@ -52,3 +52,98 @@ test('badMacInterceptor - handles all suppressible patterns with rate-limited lo
 
   uninstallBadMacInterceptor();
 });
+
+async function triggerUnhandledRejection(err) {
+  const listeners = process.listeners('unhandledRejection');
+  const interceptorListener = listeners.find((l) => l.name === '_unhandledHandler') || listeners[listeners.length - 1];
+  if (interceptorListener) {
+    await interceptorListener(err);
+  }
+}
+
+test('badMacInterceptor - suppresses unhandledRejection for SessionError: No session record', async () => {
+  const mockPurgeCorruptKey = async () => {};
+  const mockGetSessionId = () => 'test_session';
+  const mockPurgeAllForJid = async () => {};
+
+  uninstallBadMacInterceptor();
+  installBadMacInterceptor(mockPurgeCorruptKey, mockGetSessionId, mockPurgeAllForJid);
+
+  const sessionErr = new Error('SessionError: No session record');
+  let threwException = false;
+
+  try {
+    await triggerUnhandledRejection(sessionErr);
+  } catch (_err) {
+    threwException = true;
+  }
+
+  assert.equal(threwException, false, 'unhandledRejection for SessionError should not throw an uncaught exception');
+  uninstallBadMacInterceptor();
+});
+
+test('badMacInterceptor - suppresses unhandledRejection for SessionError: No matching sessions found for message', async () => {
+  const mockPurgeCorruptKey = async () => {};
+  const mockGetSessionId = () => 'test_session';
+  const mockPurgeAllForJid = async () => {};
+
+  uninstallBadMacInterceptor();
+  installBadMacInterceptor(mockPurgeCorruptKey, mockGetSessionId, mockPurgeAllForJid);
+
+  const sessionErr = new Error('SessionError: No matching sessions found for message');
+  let threwException = false;
+
+  try {
+    await triggerUnhandledRejection(sessionErr);
+  } catch (_err) {
+    threwException = true;
+  }
+
+  assert.equal(threwException, false, 'unhandledRejection for No matching sessions found should not throw');
+  uninstallBadMacInterceptor();
+});
+
+test('badMacInterceptor - suppresses unhandledRejection for Query Timeout', async () => {
+  const mockPurgeCorruptKey = async () => {};
+  const mockGetSessionId = () => 'test_session';
+  const mockPurgeAllForJid = async () => {};
+
+  uninstallBadMacInterceptor();
+  installBadMacInterceptor(mockPurgeCorruptKey, mockGetSessionId, mockPurgeAllForJid);
+
+  const timeoutErr = new Error("unexpected error in 'init queries' (timed out)");
+  let threwException = false;
+
+  try {
+    await triggerUnhandledRejection(timeoutErr);
+  } catch (_err) {
+    threwException = true;
+  }
+
+  assert.equal(threwException, false, 'unhandledRejection for Query Timeout should not throw');
+  uninstallBadMacInterceptor();
+});
+
+test('badMacInterceptor - rate limits repeated unhandled session errors', async () => {
+  const mockPurgeCorruptKey = async () => {};
+  const mockGetSessionId = () => 'test_session';
+  const mockPurgeAllForJid = async () => {};
+
+  uninstallBadMacInterceptor();
+  installBadMacInterceptor(mockPurgeCorruptKey, mockGetSessionId, mockPurgeAllForJid);
+
+  const sessionErr = new Error('SessionError: No session record');
+  let threwException = false;
+
+  try {
+    for (let i = 0; i < 5; i++) {
+      await triggerUnhandledRejection(sessionErr);
+    }
+  } catch (_err) {
+    threwException = true;
+  }
+
+  assert.equal(threwException, false, 'repeated unhandled session errors should be safely rate-limited and suppressed');
+  uninstallBadMacInterceptor();
+});
+

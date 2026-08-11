@@ -3,7 +3,7 @@ import globals from "globals";
 
 export default [
   {
-    files: ["src/**/*.js", "index.js"],
+    files: ["src/**/*.js", "index.js", "test/**/*.js", "tests/**/*.js"],
     ...js.configs.recommended,
     languageOptions: {
       ecmaVersion: "latest",

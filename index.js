@@ -20,8 +20,8 @@ import {
   getSessionId,
 } from "./src/auth/redisSession.js";
 import { installBadMacInterceptor, uninstallBadMacInterceptor } from "./src/auth/badMacInterceptor.js";
-import { startReminderPoller, markBotReady } from "./src/handler.js";
-import { startRadarEngine } from "./src/commands/radar.js";
+import { startReminderPoller, markBotReady, resetBotReady } from "./src/handler.js";
+import { startRadarEngine, stopRadarEngine } from "./src/commands/radar.js";
 import { loadWordFilter }   from "./src/commands/wordfilter.js";
 import { loadAllowedLinks } from "./src/commands/antilink.js";
 import { loadAliases }      from "./src/commands/aliases.js";
@@ -78,6 +78,58 @@ let botReady        = false;
 let stopPoller      = null;
 let currentSock     = null;
 let lastConnectedAt = 0;
+let botReadyTimer   = null;
+
+/**
+ * Safely extracts HTTP / Baileys disconnect status code from Boom objects,
+ * error properties, error codes, and nested error causes.
+ */
+function extractStatusCode(error) {
+  if (!error) return undefined;
+  if (error instanceof Boom || error?.output?.statusCode) {
+    return error.output?.statusCode;
+  }
+  if (typeof error.statusCode === "number") {
+    return error.statusCode;
+  }
+  if (typeof error.code === "number") {
+    return error.code;
+  }
+  if (typeof error.code === "string" && !isNaN(Number(error.code))) {
+    return Number(error.code);
+  }
+  if (error.cause) {
+    return extractStatusCode(error.cause);
+  }
+  return undefined;
+}
+
+function teardownCurrentSocket(sock) {
+  if (botReadyTimer) {
+    clearTimeout(botReadyTimer);
+    botReadyTimer = null;
+  }
+
+  // 1. Reset ready state immediately
+  resetBotReady();
+
+  // 2. Stop active background timers and pollers
+  if (stopPoller) {
+    try { stopPoller(); } catch {}
+    stopPoller = null;
+  }
+  try { stopRadarEngine(); } catch {}
+
+  // 3. Forceful socket and listener teardown
+  if (sock) {
+    try { sock.ev.removeAllListeners(); } catch {}
+    try { sock.ws?.close(); } catch {}
+    try { sock.ws?.terminate(); } catch {}
+  }
+  if (currentSock === sock) {
+    currentSock = null;
+  }
+}
 
 // ─── Concurrency limiter ──────────────────────────────────────────────────────
 // Removed makeLimit: using ChatQueueManager inside src/events/messages.js instead.
@@ -86,7 +138,11 @@ let lastConnectedAt = 0;
 // Single exit path for all signals and error codes.
 // Order matters: stop poller → close socket → uninstall interceptor → drain Redis → close Redis → exit.
 
+let isShuttingDown = false;
+
 async function shutdown(signal, exitCode = 0) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
   console.log(`Shutting down (${signal}, exit ${exitCode})`);
 
   if (stopPoller) {
@@ -130,8 +186,14 @@ process.on("SIGINT",  () => shutdown("SIGINT",  0));
 
 // ─── Global crash recovery ────────────────────────────────────────────────────
 
-process.on("uncaughtException", (err) => {
-  console.error("Uncaught Exception:", err.message, err.stack);
+process.on("uncaughtException", async (err) => {
+  console.error("💥 Uncaught Exception:", err?.message || err, err?.stack || "");
+  try {
+    teardownCurrentSocket(currentSock);
+  } catch (tErr) {
+    console.error("Error tearing down socket during uncaughtException:", tErr.message);
+  }
+  await shutdown("UNCAUGHT_EXCEPTION", 1);
 });
 
 // Note: unhandledRejection listener is managed uniformly by installBadMacInterceptor.
@@ -139,8 +201,16 @@ process.on("uncaughtException", (err) => {
 // ─── Socket factory ───────────────────────────────────────────────────────────
 
 async function createSocket() {
-  const { version, isLatest } = await fetchLatestBaileysVersion();
-  console.log(`📦 Baileys ${version.join(".")} ${isLatest ? "(latest)" : "(outdated — update recommended)"}`);
+  let version = [2, 3000, 1015901307];
+  let isLatest = false;
+  try {
+    const vResult = await fetchLatestBaileysVersion();
+    version = vResult.version;
+    isLatest = vResult.isLatest;
+    console.log(`📦 Baileys ${version.join(".")} ${isLatest ? "(latest)" : "(outdated — update recommended)"}`);
+  } catch (err) {
+    console.warn(`⚠️ Could not fetch latest Baileys version (${err?.message || err}). Using fallback version ${version.join(".")}`);
+  }
 
   // getAuthState() bootstraps L1 from MongoDB on first call,
   // then returns the cached instance on reconnects.
@@ -259,58 +329,68 @@ async function runBot() {
               console.log(`Connected as: ${detectedNumber}`);
             }
 
-            if (!botReady) {
-              // First-time setup
-              botReady = true;
+            try {
+              if (!botReady) {
+                // First-time setup
+                botReady = true;
 
-              try {
-                const { getAdmins, addAdmin } = await import("./src/db.js");
-                const admins = await getAdmins();
-                if (admins.length === 0 && botConfig.BOT_NUMBER) {
-                  await addAdmin(botConfig.BOT_NUMBER);
-                  console.log(`Auto-added ${botConfig.BOT_NUMBER} as super admin`);
+                try {
+                  const { getAdmins, addAdmin } = await import("./src/db.js");
+                  const admins = await getAdmins();
+                  if (admins.length === 0 && botConfig.BOT_NUMBER) {
+                    await addAdmin(botConfig.BOT_NUMBER);
+                    console.log(`Auto-added ${botConfig.BOT_NUMBER} as super admin`);
+                  }
+                } catch (err) {
+                  console.error("Auto-admin setup failed:", err.message);
                 }
-              } catch (err) {
-                console.error("Auto-admin setup failed:", err.message);
+
+                await loadCache();
+                startCacheAutoRefresh();
+                await loadWordFilter();
+                await loadAllowedLinks();
+                await loadAliases();
+                if (stopPoller) stopPoller();
+                stopPoller = startReminderPoller(sock);
+                startRadarEngine(sock);
+                console.log("✅ Bot ready! Loading seen messages and waiting 3s for sync...");
+                // Load previously processed message IDs from Redis
+                await loadSeenMessages();
+                // Give WhatsApp 3 seconds to flush historical messages
+                // before we start processing commands
+                if (botReadyTimer) clearTimeout(botReadyTimer);
+                botReadyTimer = setTimeout(() => {
+                  markBotReady();
+                  botReadyTimer = null;
+                }, 3000);
+
+              } else {
+                // Reconnect — refresh caches
+                await loadCache();
+                await loadWordFilter();
+                await loadAllowedLinks();
+                await loadAliases();
+                if (stopPoller) stopPoller();
+                stopPoller = startReminderPoller(sock);
+                startRadarEngine(sock);
+                console.log("🔄 Reconnected — caches refreshed. Waiting 3s for sync...");
+                await loadSeenMessages();
+                if (botReadyTimer) clearTimeout(botReadyTimer);
+                botReadyTimer = setTimeout(() => {
+                  markBotReady();
+                  botReadyTimer = null;
+                }, 3000);
               }
-
-              await loadCache();
-              startCacheAutoRefresh();
-              await loadWordFilter();
-              await loadAllowedLinks();
-              await loadAliases();
-              if (stopPoller) stopPoller();
-              stopPoller = startReminderPoller(sock);
-              startRadarEngine(sock);
-              console.log("✅ Bot ready! Loading seen messages and waiting 3s for sync...");
-              // Load previously processed message IDs from Redis
-              await loadSeenMessages();
-              // Give WhatsApp 3 seconds to flush historical messages
-              // before we start processing commands
-              setTimeout(() => markBotReady(), 3000);
-
-            } else {
-              // Reconnect — refresh caches
-              await loadCache();
-              await loadWordFilter();
-              await loadAllowedLinks();
-              await loadAliases();
-              if (stopPoller) stopPoller();
-              stopPoller = startReminderPoller(sock);
-              startRadarEngine(sock);
-              console.log("🔄 Reconnected — caches refreshed. Waiting 3s for sync...");
-              await loadSeenMessages();
-              setTimeout(() => markBotReady(), 3000);
+            } catch (setupErr) {
+              console.error("⚠️ Connection setup error:", setupErr?.message || setupErr);
             }
           }
 
           if (connection === "close") {
             setDisconnected();
+            teardownCurrentSocket(sock);
 
-            const statusCode =
-              lastDisconnect?.error instanceof Boom
-                ? lastDisconnect.error.output.statusCode
-                : lastDisconnect?.error?.output?.statusCode;
+            const statusCode = extractStatusCode(lastDisconnect?.error);
 
             const reason =
               Object.entries(DisconnectReason).find(([, v]) => v === statusCode)?.[0]
@@ -380,12 +460,10 @@ async function runBot() {
 
             // ── 428: connectionClosed ─────────────────────────────────────
             // WebSocket closed cleanly — network blip or WA server rotation.
-            // Reset the attempt counter if the connection was stable >30s.
-            if (statusCode === DisconnectReason.connectionClosed) {
-              if (Date.now() - lastConnectedAt > 30_000) {
-                console.log("Stable connection lost (428) — resetting attempt counter.");
-                attempt = 1;
-              }
+            // Reset attempt counter so clean disconnects never exhaust reconnects.
+            if (statusCode === DisconnectReason.connectionClosed || statusCode === 428) {
+              console.log("Connection closed (428) — resetting attempt counter.");
+              attempt = 1;
               return safeResolve(true);
             }
 
@@ -398,10 +476,12 @@ async function runBot() {
               return safeResolve(true);
             }
 
-            // ── 408: timeout ──────────────────────────────────────────────
-            // QR scan or keepalive timed out. If we've never successfully
-            // connected (waiting for first QR scan), don't burn attempts.
-            if (statusCode === 408 && lastConnectedAt === 0) {
+            // ── 408: timeout / connectionLost ─────────────────────────────
+            // Socket timed out or keepalive failed.
+            // Decrement attempt so this doesn't count against MAX_RECONNECTS,
+            // whether on initial startup or on an established connection.
+            if (statusCode === DisconnectReason.connectionLost || statusCode === 408) {
+              console.log("Connection lost / timed out (408) — reconnecting (preserving attempt count).");
               attempt = Math.max(attempt - 1, 1);
               return safeResolve(true);
             }

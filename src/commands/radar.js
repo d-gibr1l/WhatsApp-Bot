@@ -168,6 +168,18 @@ async function pollRssFeeds(sock) {
   }
 }
 
+export function stopRadarEngine() {
+  console.log("[Radar] Stopping engine...");
+  if (rssPollerInterval) {
+    clearInterval(rssPollerInterval);
+    rssPollerInterval = null;
+  }
+  for (const timer of activeAnimeTimers.values()) {
+    clearTimeout(timer);
+  }
+  activeAnimeTimers.clear();
+}
+
 export function startRadarEngine(sock) {
   console.log("[Radar] Starting engine...");
   

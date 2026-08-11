@@ -71,8 +71,14 @@ const SUPPRESS_PATTERNS = [
   'MessageCounterError',
   'Failed to decrypt message',
   'Session error:',
+  'SessionError',
+  'No session record',
+  'No matching sessions found',
   'Closing session: SessionEntry',
   'Closing open session in favor of incoming prekey bundle',
+  'timed out',
+  'Query Timeout',
+  "unexpected error in 'init queries'",
 ];
 
 function isSuppressible(...args) {
@@ -90,7 +96,10 @@ function isSuppressible(...args) {
         a.includes('Failed') ||
         a.includes('Counter') ||
         a.includes('Key used already') ||
-        a.includes('decrypt')
+        a.includes('decrypt') ||
+        a.includes('time') ||
+        a.includes('Time') ||
+        a.includes('queries')
       );
     }
     return false;
@@ -110,7 +119,10 @@ function isSuppressible(...args) {
       text.includes('Failed') ||
       text.includes('Counter') ||
       text.includes('Key used already') ||
-      text.includes('decrypt');
+      text.includes('decrypt') ||
+      text.includes('time') ||
+      text.includes('Time') ||
+      text.includes('queries');
 
     if (!hasKeyword) return false;
   }
@@ -200,9 +212,9 @@ function extractKeyId(errOrObj) {
 }
 
 function escalateRejection(reason) {
-  if (process.listenerCount('unhandledRejection') > 1) return;
+  const errorToThrow = reason instanceof Error ? reason : new Error(String(reason ?? 'Unhandled Promise Rejection'));
   setImmediate(() => {
-    throw reason;
+    throw errorToThrow;
   });
 }
 
@@ -307,6 +319,12 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
 
   _unhandledHandler = async (reason) => {
     try {
+      if (!isSuppressible(reason)) {
+        _originalConsoleError('Unhandled Rejection:', reason);
+        escalateRejection(reason);
+        return;
+      }
+
       const errorTexts = collectErrorTexts(reason);
       const msg = errorTexts.join('\n');
       const isCounter =
@@ -314,20 +332,18 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
         msg.includes('Key used already') ||
         msg.includes('MessageCounterError');
       const isBadMac = msg.includes('Bad MAC');
-
-      if (!isCounter && !isBadMac) {
-        _originalConsoleError('Unhandled Rejection:', reason);
-        escalateRejection(reason);
-        return;
-      }
+      const isSessionError =
+        msg.includes('SessionError') ||
+        msg.includes('No session record') ||
+        msg.includes('No matching sessions found') ||
+        msg.includes('Session error:');
 
       const sessionId = getSessionId();
       const keyInfo = extractKeyId(reason);
       const keySuffix = keyInfo?.id ? keyInfo.id : 'unknown_jid';
-      const counterKey = `unhandled:counter:${sessionId}:${keySuffix}`;
-      const macKey = `unhandled:mac:${sessionId}:${keySuffix}`;
 
       if (isCounter) {
+        const counterKey = `unhandled:counter:${sessionId}:${keySuffix}`;
         if (!isRateLimited(counterKey)) {
           _originalConsoleError(
             `[BadMAC] MessageCounterError (unhandled rejection) for session '${sessionId}' — dropped.`
@@ -336,18 +352,42 @@ export function installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAll
         return;
       }
 
-      if (!isRateLimited(macKey)) {
-        _originalConsoleError(
-          `[BadMAC] Unhandled Bad MAC for session '${sessionId}'. Purging key.`
-        );
+      if (isBadMac) {
+        const macKey = `unhandled:mac:${sessionId}:${keySuffix}`;
+        if (!isRateLimited(macKey)) {
+          _originalConsoleError(
+            `[BadMAC] Unhandled Bad MAC for session '${sessionId}'. Purging key.`
+          );
+        }
+
+        if (keyInfo) {
+          try {
+            await purgeForBadMac(keyInfo);
+          } catch (err) {
+            _originalConsoleError(`[BadMAC] Purge failed for ${keyInfo.type}:${keyInfo.id}:`, err.message);
+          }
+        }
+        return;
       }
 
-      if (!keyInfo) return;
+      if (isSessionError) {
+        const matchedPattern = SUPPRESS_PATTERNS.find((p) => msg.includes(p)) || 'SessionError';
+        const sessionRateKey = `unhandled:session:${sessionId}:${matchedPattern}:${keySuffix}`;
+        if (!isRateLimited(sessionRateKey)) {
+          _originalConsoleError(
+            `[BadMAC] Suppressed unhandled SessionError (${matchedPattern}) for session '${sessionId}'.`
+          );
+        }
+        return;
+      }
 
-      try {
-        await purgeForBadMac(keyInfo);
-      } catch (err) {
-        _originalConsoleError(`[BadMAC] Purge failed for ${keyInfo.type}:${keyInfo.id}:`, err.message);
+      // Generic fallback for other suppressible patterns (e.g. Query Timeout / init queries)
+      const matchedPattern = SUPPRESS_PATTERNS.find((p) => msg.includes(p)) || 'Suppressed Rejection';
+      const genericRateKey = `unhandled:suppressed:${sessionId}:${matchedPattern}:${keySuffix}`;
+      if (!isRateLimited(genericRateKey)) {
+        _originalConsoleError(
+          `[BadMAC] Suppressed unhandled rejection (${matchedPattern}) for session '${sessionId}'.`
+        );
       }
     } catch (handlerErr) {
       _originalConsoleError('[BadMAC] Exception in unhandledRejection listener:', handlerErr);
