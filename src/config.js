@@ -3,7 +3,7 @@ config();
 
 // Supabase is used for settings, bans, admins, reminders (db.js), and now session auth (supabaseSync.js).
 // It is highly recommended to have these set for session persistence.
-const OPTIONAL_SUPABASE_VARS = ["SUPABASE_URL", "SUPABASE_KEY"];
+const OPTIONAL_SUPABASE_VARS = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"];
 for (const key of OPTIONAL_SUPABASE_VARS) {
   if (!process.env[key]) {
     console.warn(`⚠️  ${key} is not set — Supabase-backed features (settings, bans, admins) will be unavailable.`);
@@ -11,7 +11,7 @@ for (const key of OPTIONAL_SUPABASE_VARS) {
 }
 
 export const SUPABASE_URL   = process.env.SUPABASE_URL;
-export const SUPABASE_KEY   = process.env.SUPABASE_KEY;
+export const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 export const DATABASE_URL   = process.env.DATABASE_URL ?? null; // Postgres connection string for LISTEN/NOTIFY
 export const PORT           = parseInt(process.env.PORT || "3000", 10);
 export const SESSION_DIR    = "/app/session";

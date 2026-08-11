@@ -1,10 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
-import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
+import { SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from "./config.js";
 import fs from "fs/promises";
 import path from "path";
 
 function createMockClient() {
-  const errorObj = { data: null, error: new Error("Supabase is not configured. Please set SUPABASE_URL and SUPABASE_KEY in the environment.") };
+  const errorObj = { data: null, error: new Error("Supabase is not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the environment.") };
   const chain = {
     select: () => chain,
     eq: () => chain,
@@ -49,8 +49,8 @@ function createMockClient() {
 
 import WebSocket from "ws";
 
-export const supabase = (SUPABASE_URL && SUPABASE_KEY)
-  ? createClient(SUPABASE_URL, SUPABASE_KEY, {
+export const supabase = (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: {
         persistSession: false
       },
@@ -377,7 +377,7 @@ async function saveRadarFallback(data) {
 }
 
 export async function getRadars() {
-  if (SUPABASE_URL && SUPABASE_KEY) {
+  if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
     try {
       const { data, error } = await supabase.from("radar_subs").select("*");
       if (error) throw error;
@@ -391,7 +391,7 @@ export async function getRadars() {
 }
 
 export async function addRadar(id, type, target, chatId, meta = {}) {
-  if (SUPABASE_URL && SUPABASE_KEY) {
+  if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
     try {
       const { error } = await supabase
         .from("radar_subs")
@@ -411,7 +411,7 @@ export async function addRadar(id, type, target, chatId, meta = {}) {
 }
 
 export async function removeRadar(id) {
-  if (SUPABASE_URL && SUPABASE_KEY) {
+  if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
     try {
       const { error } = await supabase.from("radar_subs").delete().eq("id", id);
       if (!error) return;
@@ -424,7 +424,7 @@ export async function removeRadar(id) {
 }
 
 export async function updateRadarLastSeen(id, lastSeen) {
-  if (SUPABASE_URL && SUPABASE_KEY) {
+  if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
     try {
       const { error } = await supabase.from("radar_subs").update({ last_seen: lastSeen }).eq("id", id);
       if (!error) return;

@@ -5,7 +5,7 @@ import { ZipArchive } from "archiver";
 import unzipper from "unzipper";
 import { createReadStream, createWriteStream } from "fs";
 import { supabase } from "../db.js";
-import { SESSION_DIR, botConfig, SUPABASE_URL, SUPABASE_KEY } from "../config.js";
+import { SESSION_DIR, botConfig, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } from "../config.js";
 
 const BUCKET_NAME = "sessions";
 const MAX_ZIP_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB safety limit
@@ -50,7 +50,7 @@ function zipDirectory(sourceDir, outPath) {
  * The 'sessions' bucket must already exist (created manually in Dashboard).
  */
 export async function downloadSessionFromSupabase() {
-  if (!SUPABASE_URL || !SUPABASE_KEY) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     console.log("[SupabaseSync] Supabase not configured. Skipping session download.");
     return false;
   }
@@ -113,7 +113,7 @@ export async function downloadSessionFromSupabase() {
  * Skips if another sync is in progress, directory is empty, or zip exceeds size limit.
  */
 export async function uploadSessionToSupabase() {
-  if (!SUPABASE_URL || !SUPABASE_KEY || isSyncing) return;
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || isSyncing) return;
   isSyncing = true;
 
   const sessionId = getSessionId();
@@ -175,7 +175,7 @@ export function uploadSessionWithTimeout(timeoutMs = UPLOAD_TIMEOUT_MS) {
  * Also triggers an immediate upload 30s after being called (upload-on-connect).
  */
 export function startSessionSyncTask(intervalMs = 300_000) { // 5 minutes default
-  if (!SUPABASE_URL || !SUPABASE_KEY) return;
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
   if (syncInterval) clearInterval(syncInterval);
 
   console.log(`[SupabaseSync] Starting periodic sync every ${intervalMs / 1000}s`);
@@ -215,7 +215,7 @@ export async function clearSession() {
 
   await fs.rm(SESSION_DIR, { recursive: true, force: true }).catch(() => {});
 
-  if (SUPABASE_URL && SUPABASE_KEY) {
+  if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
     const sessionId = getSessionId();
     const zipName = `${sessionId}.zip`;
     await supabase.storage.from(BUCKET_NAME).remove([zipName]).catch(() => {});
