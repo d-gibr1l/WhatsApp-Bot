@@ -11,16 +11,7 @@ import {
   supabase,
 } from "./db.js";
 import { LRUCache } from "lru-cache";
-import { getRedis } from "./auth/redisSession.js";
-
-// ─── Redis for message deduplication ──────────────────────
-let _dedupRedis = null;
-const DEDUP_PREFIX = "seen_msg:";
-const DEDUP_TTL = 3600; // 1 hour
-
-function getDedupRedis() {
-  return getRedis();
-}
+// Redis removed: using pure in-memory LRU for message deduplication.
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -287,26 +278,9 @@ export function cachedGetAutoReply(text) {
 // ─── LRU Message Trackers (Redis-backed for restart persistence) ──
 
 export async function loadSeenMessages() {
-  try {
-    const redis = getDedupRedis();
-    let cursor = '0';
-    let count = 0;
-    
-    // Safely paginate through the keys instead of pulling a massive array at once
-    do {
-      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `${DEDUP_PREFIX}*`, 'COUNT', 200);
-      cursor = nextCursor;
-      for (const k of keys) {
-        const id = k.replace(DEDUP_PREFIX, "");
-        messageCache.set(id, true);
-        count++;
-      }
-    } while (cursor !== '0');
-    
-    console.log(`✅ Loaded ${count} seen message IDs from Redis`);
-  } catch (err) {
-    console.warn("⚠️ Could not load seen messages from Redis:", err.message);
-  }
+  // Persistent message deduplication removed with Redis migration.
+  // Using pure in-memory LRU cache.
+  console.log(`✅ Message deduplication running in-memory (LRU)`);
 }
 
 export function seenMessage(id) {
@@ -316,12 +290,6 @@ export function seenMessage(id) {
 export function rememberMessage(id) {
   messageCache.set(id, true);
   stats.messagesSeen++;
-  
-  // Fire-and-forget write to Redis using isolated keys with an exact TTL
-  try {
-    const redis = getDedupRedis();
-    redis.set(`${DEDUP_PREFIX}${id}`, "1", "EX", DEDUP_TTL).catch(() => {});
-  } catch {}
 }
 
 export function isBotSentMessage(id) {
