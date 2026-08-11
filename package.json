@@ -12,14 +12,14 @@
   "dependencies": {
     "@hapi/boom": "^10.0.1",
     "@myno_21/pinterest-scraper": "^1.0.4",
-    "@supabase/supabase-js": "^2.98.0",
+    "@supabase/supabase-js": "^2.112.3",
     "@whiskeysockets/baileys": "^6.7.0",
+    "archiver": "^8.0.0",
     "async-mutex": "^0.5.0",
     "dotenv": "^16.0.0",
     "express": "^5.2.1",
     "google-img-scrap": "^1.1.8",
     "googlethis": "^1.8.0",
-    "ioredis": "^5.11.0",
     "link-preview-js": "^3.2.0",
     "lru-cache": "^11.0.0",
     "mongodb": "^6.8.0",
@@ -31,7 +31,8 @@
     "qrcode": "^1.5.3",
     "rss-parser": "^3.13.0",
     "ruhend-scraper-vip": "^2.0.1",
-    "sharp": "^0.33.4"
+    "sharp": "^0.33.4",
+    "unzipper": "^0.12.5"
   },
   "engines": {
     "node": ">=18.0.0"

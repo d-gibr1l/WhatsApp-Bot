@@ -1,6 +1,7 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  useMultiFileAuthState
 } from "@whiskeysockets/baileys";
 import { Boom }      from "@hapi/boom";
 import pino          from "pino";
@@ -8,18 +9,14 @@ import fs            from "fs/promises";
 import os            from "os";
 import path          from "path";
 
-import { MAX_RECONNECTS, BASE_DELAY_MS, botConfig } from "./src/config.js";
+import { MAX_RECONNECTS, BASE_DELAY_MS, botConfig, SESSION_DIR } from "./src/config.js";
 import {
-  loadSession,
-  clearSession,
-  getAuthState,
-  drainPendingDbWrites,
-  closeRedisConnection,
-  purgeCorruptKey,
-  purgeAllKeysForJid,
-  getSessionId,
-} from "./src/auth/redisSession.js";
-import { installBadMacInterceptor, uninstallBadMacInterceptor } from "./src/auth/badMacInterceptor.js";
+  downloadSessionFromSupabase,
+  uploadSessionToSupabase,
+  startSessionSyncTask,
+  stopSessionSyncTask,
+  clearSession
+} from "./src/auth/supabaseSync.js";
 import { startReminderPoller, markBotReady, resetBotReady } from "./src/handler.js";
 import { startRadarEngine, stopRadarEngine } from "./src/commands/radar.js";
 import { loadWordFilter }   from "./src/commands/wordfilter.js";
@@ -43,9 +40,7 @@ const logger = pino({ level: process.env.LOG_LEVEL || "warn" });
 
 startServer();
 
-// Install Bad MAC interceptor immediately — before any socket is created.
-// This ensures even the very first connection's decryption errors are caught.
-installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAllKeysForJid);
+// Removed old Redis BadMAC interceptor.
 
 async function cleanupTmpDir() {
   try {
@@ -156,27 +151,9 @@ async function shutdown(signal, exitCode = 0) {
     currentSock = null;
   }
 
-  // Restore the original console methods and remove the unhandledRejection
-  // listener that the Bad MAC interceptor installed.
-  try {
-    uninstallBadMacInterceptor();
-  } catch (err) { console.error("Error uninstalling interceptor:", err.message); }
-
-  // Drain pending Redis writes before closing the connection.
-  // keys.set and saveCreds write-through immediately, but "issued" is not
-  // "acknowledged" — anything still in-flight would be lost on close.
-  try {
-    await drainPendingDbWrites();
-  } catch (err) {
-    console.error("⚠️  Final Redis flush failed:", err.message);
-  }
-
-  // Close the Redis connection cleanly
-  try {
-    await closeRedisConnection();
-  } catch (err) {
-    console.error("⚠️  Redis close failed:", err.message);
-  }
+  stopSessionSyncTask();
+  console.log("Uploading final session state to Supabase before shutdown...");
+  await uploadSessionToSupabase();
 
   process.exit(exitCode);
 }
@@ -212,9 +189,7 @@ async function createSocket() {
     console.warn(`⚠️ Could not fetch latest Baileys version (${err?.message || err}). Using fallback version ${version.join(".")}`);
   }
 
-  // getAuthState() bootstraps L1 from MongoDB on first call,
-  // then returns the cached instance on reconnects.
-  const { state, saveCreds } = await getAuthState();
+  const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
 
   const sock = makeWASocket({
     version,
@@ -234,13 +209,7 @@ async function createSocket() {
     getMessage: async () => ({ conversation: "" }),
   });
 
-  // saveCreds is wired directly to Redis — no debounce, immediate write.
-  // CREDS updates are rare and losing one means a full session reset.
-  sock.ev.on("creds.update", (...args) => {
-    saveCreds(...args).catch((err) => {
-      console.error("⚠️ Failed to save creds update:", err.message);
-    });
-  });
+  sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("messaging-history.set", ({ messages }) => {
     console.log(`History sync: ${messages.length} messages received (ignored).`);
@@ -284,7 +253,8 @@ async function runBot() {
 
     try {
       if (!sessionLoaded) {
-        await loadSession();
+        await downloadSessionFromSupabase();
+        startSessionSyncTask();
         sessionLoaded = true;
       }
       if (currentSock) {

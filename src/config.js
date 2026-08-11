@@ -1,9 +1,8 @@
 import { config } from "dotenv";
 config();
 
-// Supabase is used for settings, bans, admins, and reminders (db.js).
-// It is NOT required for the WhatsApp auth system — that uses Redis.
-// Warn if missing but don't crash: the bot will run without Supabase features.
+// Supabase is used for settings, bans, admins, reminders (db.js), and now session auth (supabaseSync.js).
+// It is highly recommended to have these set for session persistence.
 const OPTIONAL_SUPABASE_VARS = ["SUPABASE_URL", "SUPABASE_KEY"];
 for (const key of OPTIONAL_SUPABASE_VARS) {
   if (!process.env[key]) {

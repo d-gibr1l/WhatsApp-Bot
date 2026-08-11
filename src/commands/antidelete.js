@@ -117,7 +117,16 @@ export async function handleAntiDelete(sock, deletedKey, deleterJid = null) {
   const mentions = getMentions(stored.msg.message);
 
   try {
-    if (stored.text) {
+    const mediaMsg = stored.msg.message;
+    const contentForCaption = mediaMsg?.ephemeralMessage?.message || mediaMsg?.viewOnceMessage?.message || mediaMsg?.viewOnceMessageV2?.message || mediaMsg;
+    const isImage    = !!contentForCaption?.imageMessage;
+    const isVideo    = !!contentForCaption?.videoMessage;
+    const isAudio    = !!contentForCaption?.audioMessage;
+    const isDoc      = !!contentForCaption?.documentMessage;
+    const isSticker  = !!contentForCaption?.stickerMessage;
+    const isMedia    = isImage || isVideo || isAudio || isDoc || isSticker;
+
+    if (!isMedia && stored.text) {
       // Text message — send immediately, no download needed
       await sock.sendMessage(dest, {
         text:
@@ -131,9 +140,9 @@ export async function handleAntiDelete(sock, deletedKey, deleterJid = null) {
       return;
     }
 
+    if (!isMedia) return; // If neither text nor standard media (e.g., location, vcard), silently ignore
+
     // ── Media message ─────────────────────────────────────────────────────
-    const mediaMsg = stored.msg.message;
-    const contentForCaption = mediaMsg?.ephemeralMessage?.message || mediaMsg?.viewOnceMessage?.message || mediaMsg?.viewOnceMessageV2?.message || mediaMsg;
     const msgData = contentForCaption?.imageMessage || contentForCaption?.videoMessage || contentForCaption?.documentMessage;
     const originalCaption = msgData?.caption ? `\n💬 *Caption:* _${msgData.caption}_` : "";
 
@@ -142,11 +151,6 @@ export async function handleAntiDelete(sock, deletedKey, deleterJid = null) {
                     `\n=======================\n` + 
                     footerText;
 
-    const isImage    = !!mediaMsg?.imageMessage;
-    const isVideo    = !!mediaMsg?.videoMessage;
-    const isAudio    = !!mediaMsg?.audioMessage;
-    const isDoc      = !!mediaMsg?.documentMessage;
-    const isSticker  = !!mediaMsg?.stickerMessage;
     const isViewOnce = !!(mediaMsg?.viewOnceMessage || mediaMsg?.viewOnceMessageV2);
 
     // Download and re-send asynchronously — does not block the event loop

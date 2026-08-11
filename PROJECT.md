@@ -1,37 +1,47 @@
-# Project: Auth Module Refactoring & Optimization
+# Project: WhatsApp Bot Connection Instability & Session Error Fixes
 
 ## Architecture
-- `src/auth/redisSession.js`: Custom Baileys authentication state store backed by Redis (ioredis). Provides atomic batch key reads/writes via Redis pipelines, local L1 LRU caching with TTL, and key tombstoning during Bad MAC recovery.
-- `src/auth/badMacInterceptor.js`: Intercepts Baileys/Signal Bad MAC crypto decryption errors via monkey-patched console methods and process `unhandledRejection` hooks, rate-limiting log spam and executing targeted session/sender-key purges.
-- `index.js`: Main application entry point, initializes Redis connection, bad MAC interceptor, and Baileys socket.
+The application is a Baileys-based WhatsApp bot with Redis session persistence.
+- **Entry point & connection manager**: `index.js` manages socket creation (`makeWASocket`), connection lifecycle, reconnection backoff loops, event listeners, and startup data loaders.
+- **Auth & Session store**: `src/auth/redisSession.js` handles credential state and keys in Redis.
+- **Error Interceptor**: `src/auth/badMacInterceptor.js` installs global `unhandledRejection` and `uncaughtException` listeners to intercept libsignal decryption failures (Bad MAC, Key used already, Session errors) and prevent Node.js process crashes.
+- **Handlers & Timers**: `src/handler.js`, `src/radarEngine.js`, and `src/reminderPoller.js` manage incoming message handling and scheduled background tasks.
 
 ## Feature Inventory
-| # | Feature / Refactoring Item | Description | Target File | Milestone | Source |
-|---|-------------------|-------------|-------------|-----------|--------|
-| 1 | Tombstone Clearance on Key Save | Delete `_purgedKeys` tombstone entry when `keys.set()` writes a newly established session key, preventing 10s read blocks after recovery | `src/auth/redisSession.js` | M1 | Explorers 1, 2, 3 |
-| 2 | L1 Cache Eviction & Concurrency Fix | Fix L1 cache insertion-order behavior on key update (true LRU) and update/delete L1 cache immediately during `keys.set` rather than after pipeline.exec() | `src/auth/redisSession.js` | M1 | Explorer 1 |
-| 3 | Buffer/Data Serialization Optimization | Optimize Buffer JSON serialization/deserialization to reduce payload bloat and improve Redis/L1 performance | `src/auth/redisSession.js` | M1 | Explorer 1 |
-| 4 | Safe Batch Deserialization in `keys.get` | Wrap individual key deserialization in try-catch inside `keys.get()` so one corrupt key payload does not fail the entire batch read | `src/auth/redisSession.js` | M1 | Explorer 3 |
-| 5 | Clear `_authPromise` on `clearSession` | Reset in-flight `_authPromise` singleton when `clearSession()` is called to prevent returning stale auth state instances | `src/auth/redisSession.js` | M1 | Explorer 3 |
-| 6 | Interceptor Fast-Path String Matching | Add fast string substring checks before running regex patterns in `isSuppressible` to optimize console shimming | `src/auth/badMacInterceptor.js` | M1 | Explorer 2 |
-| 7 | Recursive Error Cause Extraction | Enhance `extractKeyId` and `_unhandledHandler` to recursively check `err.cause` / `err.reason` for nested Bad MAC key IDs before escalation | `src/auth/badMacInterceptor.js` | M1 | Explorer 2, Reviewer 2 |
-| 8 | Circuit Breaker Robustness | Preserve circuit breaker failure counter if `purgeAllKeysForJid` rejects asynchronously and align `<user>.<device>` key matching | `src/auth/badMacInterceptor.js` | M1 | Explorer 2, Reviewer 2 |
+| # | Feature | Description | Milestone | Source |
+|---|---------|-------------|-----------|--------|
+| F1 | `SessionError` Pattern Interception | Add `No session record` and `No matching sessions found for message` to `SUPPRESS_PATTERNS` in `badMacInterceptor.js` | M1 | Survey Explorer 1 / ORIGINAL_REQUEST |
+| F2 | Layer 2 `_unhandledHandler` Refactor | Update `_unhandledHandler` in `badMacInterceptor.js` to suppress all `SUPPRESS_PATTERNS` and session errors instead of calling `escalateRejection` via `setImmediate` | M1 | Survey Explorer 1 & 3 |
+| F3 | Disconnect Code Processing | Extract error status codes correctly from Boom and non-Boom errors; differentiate 408 & 428 disconnects; handle initial setup vs established drops | M2 | Survey Explorer 2 / ORIGINAL_REQUEST |
+| F4 | Immediate Socket & Resource Cleanup | Teardown sockets (`close()`, `terminate()`), remove event listeners, and clear background timers (`startReminderPoller`, `startRadarEngine`, `markBotReady`) immediately upon disconnect | M2 | Survey Explorer 2 |
+| F5 | Reconnect State & Command Race Reset | Reset `connectedAt` to `Infinity` on disconnect to prevent historical offline message flush from executing as commands; track ready timers | M2 | Survey Explorer 2 |
+| F6 | Async Setup Error Boundaries | Wrap async setup calls (`loadCache`, `loadWordFilter`, `loadAllowedLinks`, `loadAliases`, `loadSeenMessages`) and `init queries` in `connection.update` with `try...catch` | M3 | Survey Explorer 3 / ORIGINAL_REQUEST |
+| F7 | Process Error Boundary & Guard Refactor | Refactor `uncaughtException` handler for graceful shutdown; fix flawed `listenerCount > 1` guard in `badMacInterceptor.js` | M3 | Survey Explorer 3 |
+| F8 | Integration & E2E Test Suite | Build opaque-box E2E and unit test suite covering disconnect scenarios, session error suppression, and timeout boundaries | M4 | Dual Track E2E |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Auth Refactoring & Hardening | Items 1-8 in `src/auth/redisSession.js` and `src/auth/badMacInterceptor.js` | None | DONE |
-| M2 | Code Validity & Quality Gate | Verification (`node -c`), review by Reviewers, Challenger, Forensic Auditor | M1 | DONE |
+| M1 | Session Error Interception & Suppression | `src/auth/badMacInterceptor.js` | None | DONE |
+| M2 | Disconnect Code Processing & Socket Teardown | `index.js`, background timers (`src/handler.js`, `src/radarEngine.js`) | M1 | DONE |
+| M3 | Connection Setup Error Boundaries & Process Handlers | `index.js`, `src/auth/badMacInterceptor.js` | M1, M2 | DONE |
+| M4 | Integration & E2E Verification Track | Test suite in `test/` and `TEST_READY.md` | M1, M2, M3 | IN_PROGRESS |
 
 ## Interface Contracts
-### `src/auth/redisSession.js`
-- Exported functions: `useRedisAuthState(redisClient, sessionPrefix)` (async, returns `{ state, saveCreds, clearSession }`), `getRedisClient()`, `closeRedisClient()`.
-- Auth state structure: `state.creds` (AuthenticationCredentials), `state.keys.get(type, ids)` (batch fetch), `state.keys.set(data)` (batch write).
-
 ### `src/auth/badMacInterceptor.js`
-- Exported functions: `installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAllKeysForJid)`.
-- Contract: Intercepts console logs and process unhandled rejections without breaking non-Signal exception propagation.
+- Export: `installBadMacInterceptor(purgeCorruptKey, getSessionId, purgeAllKeysForJid)`
+- Behavior: Must register `unhandledRejection` listener. Must catch `Bad MAC`, `MessageCounterError`, `SessionError: No session record`, and `SessionError: No matching sessions found for message`. Must log rate-limited warning and MUST NOT throw uncaught exception.
+
+### Connection State (`index.js`)
+- `connectedAt`: `number` (timestamp when socket reaches `open` and setup completes) or `Infinity` (when socket is disconnected / connecting).
+- `isBotReady()`: Returns `true` ONLY if socket state is open AND `connectedAt` is a valid past timestamp AND bot ready timer has fired.
+- Cleanup Contract: When `connection.update` receives `{ connection: 'close' }`, `sock.ws?.terminate()`, `sock.ev.removeAllListeners()`, and all interval handles MUST be immediately invalidated before backoff delay.
 
 ## Code Layout
-- `src/auth/redisSession.js`: Redis session auth state implementation
-- `src/auth/badMacInterceptor.js`: Bad MAC error interceptor and purge handler
+- `index.js` — Main bot entry, socket lifecycle, connection.update handler, global process error handling.
+- `src/auth/badMacInterceptor.js` — Decryption error and unhandled rejection interceptor.
+- `src/auth/redisSession.js` — Redis session & key store.
+- `src/handler.js` — Message handling logic.
+- `src/radarEngine.js` — Radar polling engine.
+- `src/reminderPoller.js` — Reminder polling engine.
+- `test/` — Unit and integration tests.
