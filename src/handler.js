@@ -273,7 +273,24 @@ async function processMessage(sock, msg) {
 
   if (!command) return;
 
-  reactMsg(sock, from, msg, "⏳").catch(() => {});
+  const emojis = {
+    // AI
+    ai: "🤖", aisticker: "🤖", gemini: "🤖", claude: "🤖", voice: "🎤", tts: "🗣️",
+    // Search / Download
+    search: "🔍", google: "🔍", dl: "📥", dlapi: "📥", mp3: "🎵", gif: "🎬",
+    // Images
+    img: "🖼️", image: "🖼️", pinterest: "🖼️",
+    // Stickers
+    sticker: "✨", stickers: "✨", stickercrop: "✂️", stickertext: "🔠", toimage: "🖼️",
+    // Fun / Info
+    fact: "🧠", joke: "😂", quote: "📜", "8ball": "🎱",
+    // Utility
+    ping: "🏓", botstatus: "📊", menu: "📜", help: "📜",
+  };
+  const emoji = command.reaction || emojis[cmdName] || "⚙️";
+  
+  // Await the reaction to prevent Baileys internal queue deadlocks when sending simultaneously
+  await reactMsg(sock, from, msg, emoji).catch(() => {});
 
   const argsLog = args.length > 0 ? ` ${args.join(" ")}` : "";
   console.log(`⚡ [CMD] ${prefix}${cmdName}${argsLog}`);
@@ -288,8 +305,11 @@ async function processMessage(sock, msg) {
 
   try {
     await command.handler(sock, msg, args, from, prefix);
+    // Overwrite the initial reaction with a success checkmark once finished
+    reactMsg(sock, from, msg, "✅").catch(() => {});
   } catch (err) {
     console.error(`💥 Error in ${prefix}${cmdName}:`, err);
+    reactMsg(sock, from, msg, "❌").catch(() => {});
     await replyMsg(sock, from, msg, "⚠️ An internal error occurred while processing that command.");
     await alertOwner(sock, `Command: ${prefix}${cmdName}`, err, { sender, from, text });
   }
