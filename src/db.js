@@ -36,7 +36,7 @@ let dbReady = false;
 async function initDB() {
   if (USE_MONGO) {
     try {
-      await mongoose.connect(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true, family: 4 });
+      await mongoose.connect(MONGODB_URI, { family: 4 });
       console.log("[ HOOPER ] Connected to MongoDB.");
       dbReady = true;
     } catch (e) {
