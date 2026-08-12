@@ -1104,13 +1104,29 @@ const connectHooper = async (trigger) => {
 async function initConfigAndStart() {
   const db = await import("./src/db.js");
   
-  // Session ID priority: DB setting → auto-discover from existing MongoDB sessions → auto-generate
+  // Session ID: verify any saved ID actually has a session backup, otherwise auto-discover
+  const { sessionSchema } = await import("./System/MongoAuth/Schema/index.js");
   let dbSessionId = await db.getSetting("HOOPER_SESSION_ID");
-  if (!dbSessionId) {
-    // Try to find an existing session backup in MongoDB
+
+  // Verify the saved session ID actually has a real backup
+  if (dbSessionId) {
     try {
-      const { sessionSchema } = await import("./System/MongoAuth/Schema/index.js");
-      const existingSession = await sessionSchema.findOne({}).sort({ lastSync: -1 });
+      const exists = await sessionSchema.findOne({ sessionId: dbSessionId });
+      if (!exists || !exists.files || Object.keys(exists.files).length === 0) {
+        console.log(`[ HOOPER ] Saved session "${dbSessionId}" has no backup — searching for a valid one...`);
+        dbSessionId = null; // force re-discovery
+      }
+    } catch (e) {
+      console.log("[ HOOPER ] Could not verify session:", e.message);
+    }
+  }
+
+  if (!dbSessionId) {
+    // Auto-discover: find any existing session backup in MongoDB
+    try {
+      const existingSession = await sessionSchema.findOne({
+        files: { $exists: true, $ne: {} }
+      }).sort({ lastSync: -1 });
       if (existingSession && existingSession.sessionId) {
         dbSessionId = existingSession.sessionId;
         console.log(`[ HOOPER ] Found existing session in MongoDB: "${dbSessionId}"`);
