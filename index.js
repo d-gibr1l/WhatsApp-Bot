@@ -1104,14 +1104,24 @@ const connectHooper = async (trigger) => {
 async function initConfigAndStart() {
   const db = await import("./src/db.js");
   
-  // Session ID priority: DB setting → env var (Configurations.js) → auto-generate
+  // Session ID priority: DB setting → auto-discover from existing MongoDB sessions → auto-generate
   let dbSessionId = await db.getSetting("HOOPER_SESSION_ID");
   if (!dbSessionId) {
-    // Use the value from env/Configurations.js if it's set to something real
-    if (global.sessionId && global.sessionId !== "ok") {
-      dbSessionId = global.sessionId;
-    } else {
+    // Try to find an existing session backup in MongoDB
+    try {
+      const { sessionSchema } = await import("./System/MongoAuth/Schema/index.js");
+      const existingSession = await sessionSchema.findOne({}).sort({ lastSync: -1 });
+      if (existingSession && existingSession.sessionId) {
+        dbSessionId = existingSession.sessionId;
+        console.log(`[ HOOPER ] Found existing session in MongoDB: "${dbSessionId}"`);
+      }
+    } catch (e) {
+      console.log("[ HOOPER ] Could not query existing sessions:", e.message);
+    }
+    // If still nothing, auto-generate
+    if (!dbSessionId) {
       dbSessionId = `HOOPER-MD-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+      console.log(`[ HOOPER ] Generated new session ID: "${dbSessionId}"`);
     }
     await db.setSetting("HOOPER_SESSION_ID", dbSessionId);
   }
