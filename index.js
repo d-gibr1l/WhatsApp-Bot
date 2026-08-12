@@ -1101,7 +1101,35 @@ const connectHooper = async (trigger) => {
   return Hooper;
 };
 
-void startHooper();
+async function initConfigAndStart() {
+  const db = await import("./src/db.js");
+  
+  // Auto-generate Session ID if not present in DB
+  let dbSessionId = await db.getSetting("HOOPER_SESSION_ID");
+  if (!dbSessionId) {
+    dbSessionId = `HOOPER-MD-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    await db.setSetting("HOOPER_SESSION_ID", dbSessionId);
+  }
+  global.sessionId = dbSessionId;
+
+  // Load configs from Dashboard (MongoDB) to override .env
+  let dbPrefix = await db.getSetting("HOOPER_PREFIX");
+  if (dbPrefix) global.prefa = dbPrefix;
+
+  let dbMods = await db.getSetting("HOOPER_MODS");
+  if (dbMods) global.owner = dbMods.split(",");
+
+  let dbPackname = await db.getSetting("HOOPER_PACKNAME");
+  if (dbPackname) global.packname = dbPackname;
+
+  let dbAuthor = await db.getSetting("HOOPER_AUTHOR");
+  if (dbAuthor) global.author = dbAuthor;
+
+  // Start the bot
+  await startHooper();
+}
+
+initConfigAndStart();
 
 // Dynamic garbage collection — interval configurable via GC_INTERVAL_MINUTES env (default: 30)
 const GC_INTERVAL_MINUTES = Math.max(
