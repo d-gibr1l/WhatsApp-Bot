@@ -6,7 +6,7 @@ import axios from "axios";
 import moment from "moment-timezone";
 import { sizeFormatter } from "human-readable";
 import util from "util";
-import { Jimp } from "jimp";
+import Jimp from "jimp";
 import child_process from "child_process";
 import ffmpegStatic from "ffmpeg-static";
 
