@@ -37,7 +37,7 @@ export default {
   ],
   description: "All converter related commands",
   start: async (
-    Atlas,
+    Hooper,
     m,
     { inputCMD, text, quoted, doReact, prefix, mime },
   ) => {
@@ -51,12 +51,12 @@ export default {
           );
         }
         await doReact("🎴");
-        let mediaMess = await Atlas.downloadAndSaveMediaMessage(quoted);
+        let mediaMess = await Hooper.downloadAndSaveMediaMessage(quoted);
         let ran = await getRandom(".png");
         exec(`"${ffmpegPath}" -i ${mediaMess} ${ran}`, (err) => {
           fs.unlinkSync(mediaMess);
           if (err) {
-            Atlas.sendMessage(
+            Hooper.sendMessage(
               m.from,
               {
                 text: `Please mention a *Non-animated* sticker to process ! \n\nOr use *${prefix}togif* / *${prefix}tomp4* to process *Animated* sticker !`,
@@ -66,7 +66,7 @@ export default {
             return;
           }
           let buffer = fs.readFileSync(ran);
-          Atlas.sendMessage(
+          Hooper.sendMessage(
             m.from,
             { image: buffer, caption: `_Converted by:_  *${botName}*\n` },
             { quoted: m },
@@ -83,27 +83,26 @@ export default {
           );
         }
         await doReact("🎴");
-        let mediaMess2 = await Atlas.downloadAndSaveMediaMessage(quoted);
-        let webpToMp4 = await webp2mp4File(mediaMess2);
+        let mediaMess2 = await Hooper.downloadAndSaveMediaMessage(quoted);
+        let outPath2 = mediaMess2 + ".mp4";
 
-        // Validation to prevent crash if result is null
-        if (!webpToMp4 || !webpToMp4.result) {
-          fs.unlinkSync(mediaMess2);
-          await doReact("❌");
-          return m.reply(
-            "❌ Error: Failed to convert sticker to video. The server might be down or the file is too large.",
+        exec(`${ffmpegPath} -y -i "${mediaMess2}" -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -r 15 -c:v libx264 -preset fast -crf 26 -pix_fmt yuv420p -f mp4 "${outPath2}"`, async (err) => {
+          if (fs.existsSync(mediaMess2)) fs.unlinkSync(mediaMess2);
+          if (err) {
+            console.error("FFmpeg tomp4 error:", err);
+            await doReact("❌");
+            return m.reply("❌ Error: Failed to convert sticker to video.");
+          }
+          await Hooper.sendMessage(
+            m.from,
+            {
+              video: fs.readFileSync(outPath2),
+              caption: `_Converted by:_  *${botName}*\n`,
+            },
+            { quoted: m }
           );
-        }
-
-        await Atlas.sendMessage(
-          m.from,
-          {
-            video: { url: webpToMp4.result },
-            caption: `_Converted by:_  *${botName}*\n`,
-          },
-          { quoted: m },
-        );
-        fs.unlinkSync(mediaMess2);
+          if (fs.existsSync(outPath2)) fs.unlinkSync(outPath2);
+        });
         break;
 
       case "togif":
@@ -114,28 +113,27 @@ export default {
           );
         }
         await doReact("🎴");
-        let mediaMess3 = await Atlas.downloadAndSaveMediaMessage(quoted);
-        let webpToMp42 = await webp2mp4File(mediaMess3);
+        let mediaMess3 = await Hooper.downloadAndSaveMediaMessage(quoted);
+        let outPath = mediaMess3 + ".mp4";
 
-        // Validation to prevent crash if result is null
-        if (!webpToMp42 || !webpToMp42.result) {
-          fs.unlinkSync(mediaMess3);
-          await doReact("❌");
-          return m.reply(
-            "❌ Error: Failed to convert sticker to GIF. Please try again later.",
+        exec(`${ffmpegPath} -y -i "${mediaMess3}" -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -r 15 -c:v libx264 -preset fast -crf 26 -an -pix_fmt yuv420p -movflags +faststart -f mp4 "${outPath}"`, async (err) => {
+          if (fs.existsSync(mediaMess3)) fs.unlinkSync(mediaMess3);
+          if (err) {
+            console.error("FFmpeg togif error:", err);
+            await doReact("❌");
+            return m.reply("❌ Error: Failed to convert sticker to GIF. Please try again later.");
+          }
+          await Hooper.sendMessage(
+            m.from,
+            {
+              video: fs.readFileSync(outPath),
+              caption: `_Converted by:_  *${botName}*\n`,
+              gifPlayback: true,
+            },
+            { quoted: m }
           );
-        }
-
-        await Atlas.sendMessage(
-          m.from,
-          {
-            video: { url: webpToMp42.result },
-            caption: `_Converted by:_  *${botName}*\n`,
-            gifPlayback: true,
-          },
-          { quoted: m },
-        );
-        fs.unlinkSync(mediaMess3);
+          if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
+        });
         break;
 
       case "tomp3":
@@ -159,9 +157,9 @@ export default {
         }
         await doReact("🎶");
         let media = await quoted.download();
-        await Atlas.sendPresenceUpdate("recording", m.from);
+        await Hooper.sendPresenceUpdate("recording", m.from);
         let audio = await toAudio(media, "mp4");
-        Atlas.sendMessage(
+        Hooper.sendMessage(
           m.from,
           {
             document: audio,
@@ -194,9 +192,9 @@ export default {
         }
         await doReact("🎶");
         let media2 = await quoted.download();
-        await Atlas.sendPresenceUpdate("recording", m.from);
+        await Hooper.sendPresenceUpdate("recording", m.from);
         let audio2 = await toAudio(media2, "mp4");
-        Atlas.sendMessage(
+        Hooper.sendMessage(
           m.from,
           { audio: audio2, mimetype: "audio/mpeg" },
           { quoted: m },
@@ -214,7 +212,7 @@ export default {
         {
           let media5;
           try {
-            media5 = await Atlas.downloadAndSaveMediaMessage(quoted);
+            media5 = await Hooper.downloadAndSaveMediaMessage(quoted);
             let url = await CatboxUpload(media5);
             let mediaType = /image/.test(mime)
               ? "Image"
@@ -240,7 +238,7 @@ export default {
       case "imgtopdf":
         if (/image/.test(mime)) {
           await doReact("📑");
-          let mediaMess4 = await Atlas.downloadAndSaveMediaMessage(quoted);
+          let mediaMess4 = await Hooper.downloadAndSaveMediaMessage(quoted);
 
           async function generatePDF(path) {
             return new Promise((resolve, reject) => {
@@ -273,7 +271,7 @@ export default {
             setTimeout(async () => {
               const pdf = fs.readFileSync(pdfPATH);
 
-              Atlas.sendMessage(
+              Hooper.sendMessage(
                 m.from,
                 {
                   document: pdf,
@@ -309,7 +307,7 @@ export default {
         const res = await getBuffer(
           `https://www.qrtag.net/api/qr_8.png?url=${text}`,
         );
-        await Atlas.sendMessage(
+        await Hooper.sendMessage(
           m.from,
           { image: res, caption: `\n*Source:* ${text}` },
           { quoted: m },

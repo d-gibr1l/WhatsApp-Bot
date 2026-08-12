@@ -20,20 +20,21 @@ import { fileTypeFromBuffer } from "file-type";
 import { Boom } from "@hapi/boom";
 import { serialize, WAConnection } from "./System/whatsapp.js";
 import { smsg, getBuffer, getSizeMedia } from "./System/Function2.js";
+import InstanceLock from "./System/InstanceLock.js";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-fs.writeFileSync(path.join(__dirname, "atlas.pid"), process.pid.toString());
+fs.writeFileSync(path.join(__dirname, "hooper.pid"), process.pid.toString());
 
 // Map of noise prefixes → clean replacement line printed to stdout once per event
 const _BAILEYS_NOISE_MAP = {
   "Failed to decrypt message with any known session":
-    "[ ATLAS ] Signal: failed to decrypt (session key mismatch — skipped)",
-  "Session error:": "[ ATLAS ] Signal: session error (Bad MAC — skipped)",
+    "[ HOOPER ] Signal: failed to decrypt (session key mismatch — skipped)",
+  "Session error:": "[ HOOPER ] Signal: session error (Bad MAC — skipped)",
   "Closing open session in favor of incoming prekey bundle":
-    "[ ATLAS ] Signal: rotating session (new prekey bundle received)",
+    "[ HOOPER ] Signal: rotating session (new prekey bundle received)",
   "Closing session:": null, // suppress entirely — too verbose (raw key dump)
   "Opening session:": null,
 };
@@ -184,7 +185,7 @@ const store = {
       _lidLogTimer = setTimeout(() => {
         if (global.lidToJidMap.size > 0)
           _origLog(
-            `[ ATLAS ] LID map ready: ${global.lidToJidMap.size / 2} contact(s) mapped`,
+            `[ HOOPER ] LID map ready: ${global.lidToJidMap.size / 2} contact(s) mapped`,
           );
       }, 300);
     });
@@ -234,13 +235,14 @@ const store = {
   loadMessage: async (jid, id) => store.messages[jid]?.[id],
 };
 
-// Atlas Server configuration
+// Hooper Server configuration
 let QR_GENERATE = "invalid";
 let status = "initializing";
-let AtlasSocket = null; // module-level reference for pairing API
+let HooperSocket = null; // module-level reference for pairing API
 let mongoAuth; // module-level so the GC/sync interval can access it
 let clearAuthState = null;
 let startPromise = null;
+let instanceLock = null;
 let restartTimer = null;
 let pendingClearAuth = false;
 let reconnectAttempt = 0;
@@ -273,7 +275,7 @@ const RECONNECT_MAX_DELAY_MS = 60_000;
 const STABLE_CONNECTION_MS = 300_000;
 
 const isCurrentSocket = (socket, generation) =>
-  AtlasSocket === socket && activeSocketGeneration === generation;
+  HooperSocket === socket && activeSocketGeneration === generation;
 
 const clearStableConnectionTimer = () => {
   if (stableConnectionTimer) {
@@ -287,17 +289,17 @@ const markConnectionStableLater = (socket, generation) => {
   stableConnectionTimer = setTimeout(() => {
     if (isCurrentSocket(socket, generation) && status === "open") {
       reconnectAttempt = 0;
-      console.log(chalk.green(`[ ATLAS ] Connection stable - backoff reset`));
+      console.log(chalk.green(`[ HOOPER ] Connection stable - backoff reset`));
     }
   }, STABLE_CONNECTION_MS);
   stableConnectionTimer.unref?.();
 };
 
 const closeActiveSocket = async (reason) => {
-  const socket = AtlasSocket;
+  const socket = HooperSocket;
   if (!socket) return;
 
-  AtlasSocket = null;
+  HooperSocket = null;
   activeSocketGeneration = 0;
   socketStartedAt = 0;
   healthProbeFailures = 0;
@@ -319,7 +321,7 @@ const closeActiveSocket = async (reason) => {
     if (!closedCleanly) {
       console.log(
         chalk.yellow(
-          `[ ATLAS ] Socket close timed out - forcing WebSocket termination`,
+          `[ HOOPER ] Socket close timed out - forcing WebSocket termination`,
         ),
       );
       socket.ws?.socket?.terminate?.();
@@ -330,7 +332,7 @@ const closeActiveSocket = async (reason) => {
     }
   } catch (err) {
     console.error(
-      chalk.redBright(`[ ATLAS ] Socket cleanup error: ${err.message}`),
+      chalk.redBright(`[ HOOPER ] Socket cleanup error: ${err.message}`),
     );
   }
 };
@@ -354,7 +356,7 @@ const scheduleReconnect = (
   pendingClearAuth = pendingClearAuth || clearAuth;
   if (restartTimer) {
     console.log(
-      chalk.gray(`[ ATLAS ] Reconnect already scheduled - ${reason}`),
+      chalk.gray(`[ HOOPER ] Reconnect already scheduled - ${reason}`),
     );
     return;
   }
@@ -366,7 +368,7 @@ const scheduleReconnect = (
 
   console.log(
     chalk.yellow(
-      `[ ATLAS ] Reconnect scheduled in ${(delay / 1000).toFixed(1)}s ` +
+      `[ HOOPER ] Reconnect scheduled in ${(delay / 1000).toFixed(1)}s ` +
         `(attempt ${reconnectAttempt}) - ${reason}`,
     ),
   );
@@ -388,10 +390,10 @@ const scheduleReconnect = (
       if (inFlightStart) {
         await inFlightStart;
       }
-      await startAtlas(`reconnect: ${reason}`);
+      await startHooper(`reconnect: ${reason}`);
     } catch (err) {
       console.error(
-        chalk.redBright(`[ ATLAS ] Reconnect cycle failed: ${err.message}`),
+        chalk.redBright(`[ HOOPER ] Reconnect cycle failed: ${err.message}`),
       );
       scheduleReconnect(`reconnect cycle failed: ${err.message}`, {
         clearAuth: shouldClearAuth,
@@ -402,18 +404,18 @@ const scheduleReconnect = (
   }, delay);
 };
 
-async function startAtlas(trigger = "initial") {
+async function startHooper(trigger = "initial") {
   if (shuttingDown) return null;
   if (startPromise) return startPromise;
-  if (AtlasSocket?.ws?.isOpen && status === "open") return AtlasSocket;
+  if (HooperSocket?.ws?.isOpen && status === "open") return HooperSocket;
 
   status = "connecting";
   lastConnectionUpdateAt = Date.now();
 
-  startPromise = connectAtlas(trigger)
+  startPromise = connectHooper(trigger)
     .catch((err) => {
       console.error(
-        chalk.redBright(`[ ATLAS ] Connection startup failed: ${err.message}`),
+        chalk.redBright(`[ HOOPER ] Connection startup failed: ${err.message}`),
       );
       scheduleReconnect(`startup failed: ${err.message}`);
       return null;
@@ -425,8 +427,8 @@ async function startAtlas(trigger = "initial") {
   return startPromise;
 }
 
-const connectAtlas = async (trigger) => {
-  console.log(chalk.cyan(`[ ATLAS ] Starting connection (${trigger})...`));
+const connectHooper = async (trigger) => {
+  console.log(chalk.cyan(`[ HOOPER ] Starting connection (${trigger})...`));
   // ── Silently wipe the Cache folder on every boot / restart ──────────────
   try {
     const cacheDir = path.join(__dirname, "System", "Cache");
@@ -443,19 +445,37 @@ const connectAtlas = async (trigger) => {
   // ────────────────────────────────────────────────────────────────────────
 
   try {
-    await mongoose.connect(mongodb);
-    console.log(chalk.green(`[ ATLAS ] MongoDB connected ✓`));
+    await mongoose.connect(mongodb, { family: 4 });
+    console.log(chalk.green(`[ HOOPER ] MongoDB connected ✓`));
+    const mod = await import("./src/db.js");
+    const dashPrefix = await mod.getSetting("HOOPER_PREFIX");
+    if (dashPrefix) {
+      global.prefa = dashPrefix;
+      commands.prefix = dashPrefix;
+    }
   } catch (err) {
     console.error(
       chalk.redBright(`[ EXCEPTION ] MongoDB error: ${err.message}`),
     );
   }
+
+  if (!instanceLock) instanceLock = new InstanceLock();
+  const { requiresDelay } = await instanceLock.claimLock();
+  if (requiresDelay) {
+    console.log(chalk.yellow(`[ HOOPER ] Active deployment detected. Delaying start by 5 seconds...`));
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
+  instanceLock.startCheck(async () => {
+    console.log(chalk.redBright(`[ HOOPER ] Deployment lock stolen by newer instance - shutting down gracefully`));
+    await shutdown("LOCK_STOLEN");
+  });
+
   const nextMongoAuth = new MongoAuth(sessionId);
   const { state, saveCreds, clearState } = await nextMongoAuth.init();
   mongoAuth = nextMongoAuth;
   clearAuthState = clearState;
   console.log(
-    figlet.textSync("ATLAS", {
+    figlet.textSync("HOOPER", {
       font: "Standard",
       horizontalLayout: "default",
       vertivalLayout: "default",
@@ -472,28 +492,28 @@ const connectAtlas = async (trigger) => {
 
   console.log(
     chalk.cyan(
-      `[ ATLAS ] v${global.botVersion}  |  Node.js ${process.version}  |  ${process.platform}/${process.arch}`,
+      `[ HOOPER ] v${global.botVersion}  |  Node.js ${process.version}  |  ${process.platform}/${process.arch}`,
     ),
   );
 
   try {
     const remote = await got(
-      "https://raw.githubusercontent.com/FantoX/Atlas-MD/main/package.json",
+      "https://raw.githubusercontent.com/FantoX/Hooper-MD/main/package.json",
     ).json();
     global.latestVersion = remote.version;
     if (remote.version !== pkg.version) {
       global.updateAvailable = true;
       console.log(
         chalk.yellow(
-          `[ ATLAS ] Update available: v${pkg.version} → v${remote.version}  |  git pull && npm install`,
+          `[ HOOPER ] Update available: v${pkg.version} → v${remote.version}  |  git pull && npm install`,
         ),
       );
     } else {
-      console.log(chalk.green(`[ ATLAS ] Up to date ✓`));
+      console.log(chalk.green(`[ HOOPER ] Up to date ✓`));
     }
   } catch {
     console.log(
-      chalk.gray(`[ ATLAS ] Update check skipped (network unavailable)`),
+      chalk.gray(`[ HOOPER ] Update check skipped (network unavailable)`),
     );
   }
   console.log("");
@@ -503,7 +523,7 @@ const connectAtlas = async (trigger) => {
   const { version, isLatest } = await fetchLatestBaileysVersion();
 
   const generation = ++socketGeneration;
-  const Atlas = makeWASocket({
+  const Hooper = makeWASocket({
     logger: pino({ level: "silent" }),
     browser: ["Ubuntu", "Chrome", "20.0.04"],
     auth: state,
@@ -514,18 +534,18 @@ const connectAtlas = async (trigger) => {
     keepAliveIntervalMs: KEEP_ALIVE_INTERVAL_MS,
   });
 
-  AtlasSocket = Atlas; // expose for pairing API
+  HooperSocket = Hooper; // expose for pairing API
   activeSocketGeneration = generation;
   socketStartedAt = Date.now();
   lastConnectionUpdateAt = socketStartedAt;
   healthProbeFailures = 0;
 
-  store.bind(Atlas.ev);
+  store.bind(Hooper.ev);
 
-  Atlas.public = true;
+  Hooper.public = true;
 
   async function installPlugin() {
-    console.log(chalk.cyan(`[ ATLAS ] Checking plugins...`));
+    console.log(chalk.cyan(`[ HOOPER ] Checking plugins...`));
     let plugins = [];
     try {
       plugins = await getPluginURLs();
@@ -536,10 +556,10 @@ const connectAtlas = async (trigger) => {
     }
 
     if (!plugins.length) {
-      console.log(chalk.gray(`[ ATLAS ] No extra plugins installed`));
+      console.log(chalk.gray(`[ HOOPER ] No extra plugins installed`));
     } else {
       console.log(
-        chalk.cyan(`[ ATLAS ] Installing ${plugins.length} plugin(s)...`),
+        chalk.cyan(`[ HOOPER ] Installing ${plugins.length} plugin(s)...`),
       );
       for (let i = 0; i < plugins.length; i++) {
         const pluginUrl = plugins[i];
@@ -563,11 +583,11 @@ const connectAtlas = async (trigger) => {
             }
 
             fs.writeFileSync(filePath, pluginBody);
-            console.log(chalk.green(`[ ATLAS ] ✓ ${fileName}`));
+            console.log(chalk.green(`[ HOOPER ] ✓ ${fileName}`));
           } else {
             console.log(
               chalk.yellow(
-                `[ ATLAS ] ✗ ${path.basename(pluginUrl)} (HTTP ${statusCode})`,
+                `[ HOOPER ] ✗ ${path.basename(pluginUrl)} (HTTP ${statusCode})`,
               ),
             );
           }
@@ -579,29 +599,29 @@ const connectAtlas = async (trigger) => {
           );
         }
       }
-      console.log(chalk.green(`[ ATLAS ] Plugins ready`));
+      console.log(chalk.green(`[ HOOPER ] Plugins ready`));
     }
   }
 
   await readcommands();
 
-  Atlas.ev.on("creds.update", saveCreds);
-  Atlas.serializeM = (m) => smsg(Atlas, m, store);
-  Atlas.ev.on("connection.update", async (update) => {
-    if (!isCurrentSocket(Atlas, generation)) return;
+  Hooper.ev.on("creds.update", saveCreds);
+  Hooper.serializeM = (m) => smsg(Hooper, m, store);
+  Hooper.ev.on("connection.update", async (update) => {
+    if (!isCurrentSocket(Hooper, generation)) return;
 
     const { lastDisconnect, connection, qr } = update;
     lastConnectionUpdateAt = Date.now();
 
     if (connection) {
       status = connection;
-      console.info(`[ ATLAS ] Server Status => ${connection}`);
+      console.info(`[ HOOPER ] Server Status => ${connection}`);
     }
 
     if (connection === "open") {
       QR_GENERATE = "invalid";
       healthProbeFailures = 0;
-      markConnectionStableLater(Atlas, generation);
+      markConnectionStableLater(Hooper, generation);
     }
 
     if (connection === "close") {
@@ -611,7 +631,7 @@ const connectAtlas = async (trigger) => {
         reason === DisconnectReason.badSession ||
         reason === DisconnectReason.loggedOut;
 
-      AtlasSocket = null;
+      HooperSocket = null;
       activeSocketGeneration = 0;
       socketStartedAt = 0;
       healthProbeFailures = 0;
@@ -619,7 +639,7 @@ const connectAtlas = async (trigger) => {
 
       console.log(
         chalk.yellow(
-          `[ ATLAS ] Connection closed - ${reasonName}. Recovery starting.`,
+          `[ HOOPER ] Connection closed - ${reasonName}. Recovery starting.`,
         ),
       );
       scheduleReconnect(`disconnect: ${reasonName}`, {
@@ -631,43 +651,45 @@ const connectAtlas = async (trigger) => {
     if (qr) {
       QR_GENERATE = qr;
       status = "qr";
-      qrcodeTerminal.generate(qr, { small: true });
+      // qrcodeTerminal.generate(qr, { small: true });
     }
   });
 
-  Atlas.ev.on("group-participants.update", async (m) => {
-    if (!isCurrentSocket(Atlas, generation)) return;
-    welcomeLeft(Atlas, m);
+  Hooper.ev.on("group-participants.update", async (m) => {
+    if (!isCurrentSocket(Hooper, generation)) return;
+    welcomeLeft(Hooper, m);
   });
 
-  Atlas.ev.on("messages.upsert", async (chatUpdate) => {
-    if (!isCurrentSocket(Atlas, generation)) return;
+  Hooper.ev.on("messages.upsert", async (chatUpdate) => {
+    if (!isCurrentSocket(Hooper, generation)) return;
     if (chatUpdate.type !== "notify") return;
     const msg = chatUpdate.messages?.[0];
     if (!msg) return;
-    const m = serialize(Atlas, msg);
+    const m = serialize(Hooper, msg);
 
     if (!m?.message) return;
     if (m.key?.remoteJid === "status@broadcast") return;
     if (m.key?.id?.startsWith("BAE5") && m.key.id.length === 16) return;
 
-    core(Atlas, m, commands, chatUpdate);
+    core(Hooper, m, commands, chatUpdate);
   });
 
   // ─── Anti-Delete: catch "delete for everyone" and resend ───────────────────
-  Atlas.ev.on("messages.update", async (updates) => {
-    if (!isCurrentSocket(Atlas, generation)) return;
+  Hooper.ev.on("messages.update", async (updates) => {
+    if (!isCurrentSocket(Hooper, generation)) return;
     for (const { key, update } of updates) {
       try {
-        // Only care about group "delete for everyone" events
-        if (!key.remoteJid?.endsWith("@g.us")) continue;
         if (!update?.messageStubType) continue;
         // messageStubType 1 = REVOKE (delete for everyone)
         if (update.messageStubType !== 1) continue;
 
-        const groupId = key.remoteJid;
-        const isEnabled = await checkAntidelete(groupId);
-        if (!isEnabled) continue;
+        const chatId = key.remoteJid;
+        // Check if chat-level antidelete is enabled (true for groups or PMs if toggled)
+        const isChatEnabled = await checkAntidelete(chatId);
+        
+        const ownerJid = (global.owner && global.owner.length > 0) 
+            ? `${global.owner[0].replace(/[^0-9]/g, "")}@s.whatsapp.net` 
+            : null;
 
         // Skip if this message was deleted by the bot itself (antilink, -delete cmd, etc.)
         if (global.botDeletedMsgIds?.has(key.id)) {
@@ -676,10 +698,11 @@ const connectAtlas = async (trigger) => {
         }
 
         // Look up the original message from store cache
-        const cached = store.messages[groupId]?.[key.id];
+        const cached = store.messages[chatId]?.[key.id];
         if (!cached) continue;
 
         const deleter = key.participant || key.remoteJid;
+        const senderTag = `@${deleter.split("@")[0]}`;
 
         const {
           extractMessageContent,
@@ -688,8 +711,9 @@ const connectAtlas = async (trigger) => {
           jidNormalizedUser,
         } = await import("@whiskeysockets/baileys");
 
+        const botJid = Hooper.user?.id ? jidNormalizedUser(Hooper.user.id) : null;
+        
         // Skip if the original message was sent by the bot itself
-        const botJid = Atlas.user?.id ? jidNormalizedUser(Atlas.user.id) : null;
         if (
           cached.key?.fromMe ||
           (botJid &&
@@ -699,43 +723,25 @@ const connectAtlas = async (trigger) => {
         )
           continue;
 
-        // Skip if the deleter is a group admin
-        try {
-          const groupMeta = await Atlas.groupMetadata(groupId);
-          const admins = groupMeta.participants
-            .filter((p) => p.admin === "admin" || p.admin === "superadmin")
-            .map((p) => jidNormalizedUser(p.id));
-          if (admins.includes(jidNormalizedUser(deleter))) continue;
-        } catch {}
-
-        // Skip if the deleter is a mod
-        const isDeleterMod = await checkMod(deleter);
-        if (isDeleterMod) continue;
-
-        // Skip if the deleter is an owner
-        const deleterDigits = deleter.replace(/[^0-9]/g, "");
-        const ownerDigits = (global.owner || []).map((o) =>
-          o.replace(/[^0-9]/g, ""),
-        );
-        if (ownerDigits.includes(deleterDigits)) continue;
-
-        // Skip if the deleter is an integrated developer
-        const integratedJids = [
-          "918101187835@s.whatsapp.net",
-          "923045204414@s.whatsapp.net",
-        ];
-        if (integratedJids.includes(jidNormalizedUser(deleter))) continue;
-
-        const senderTag = `@${deleter.split("@")[0]}`;
-
         // Determine content type
         const msg = cached.message;
         if (!msg) continue;
 
         const extracted = extractMessageContent(msg);
-        const contentType = getContentType(extracted);
-        const content = extracted[contentType];
+        let contentType = getContentType(extracted);
+        let content = extracted[contentType];
 
+        // Unwrap viewOnceMessage wrappers
+        if (["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(contentType)) {
+            const unwrapped = extractMessageContent(content.message);
+            contentType = getContentType(unwrapped);
+            content = unwrapped[contentType];
+        }
+        
+        let textToSend = "";
+        let mediaBuffer = null;
+        let mediaType = null;
+        
         // Text messages
         if (
           contentType === "conversation" ||
@@ -745,83 +751,91 @@ const connectAtlas = async (trigger) => {
             contentType === "conversation"
               ? extracted.conversation
               : content?.text || "";
-          await Atlas.sendMessage(groupId, {
-            text: `🛡️ *Anti-Delete*\n\n${senderTag} deleted:\n\n${text}`,
-            mentions: [deleter],
-          });
-          continue;
-        }
-
-        // Media messages (image, video, audio, sticker, document)
-        const isImage = contentType === "imageMessage";
-        const isVideo = contentType === "videoMessage";
-        const isAudio = contentType === "audioMessage";
-        const isSticker = contentType === "stickerMessage";
-        const isDoc = contentType === "documentMessage";
-
-        if (isImage || isVideo || isAudio || isSticker || isDoc) {
-          const mediaType = isImage
-            ? "image"
-            : isVideo
-              ? "video"
-              : isAudio
-                ? "audio"
-                : isSticker
-                  ? "sticker"
-                  : "document";
-          const stream = await downloadContentFromMessage(content, mediaType);
-          let buffer = Buffer.from([]);
-          for await (const chunk of stream) {
-            buffer = Buffer.concat([buffer, chunk]);
+          textToSend = `\n\n${text}`;
+        } else {
+          // Media messages
+          const isImage = contentType === "imageMessage";
+          const isVideo = contentType === "videoMessage";
+          const isAudio = contentType === "audioMessage";
+          const isSticker = contentType === "stickerMessage";
+          const isDoc = contentType === "documentMessage";
+          
+          if (isImage || isVideo || isAudio || isSticker || isDoc) {
+             mediaType = isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : isSticker ? "sticker" : "document";
+             try {
+               const stream = await downloadContentFromMessage(content, mediaType);
+               mediaBuffer = Buffer.from([]);
+               for await (const chunk of stream) {
+                 mediaBuffer = Buffer.concat([mediaBuffer, chunk]);
+               }
+             } catch (err) {
+                 console.log("Error downloading deleted media:", err);
+             }
+             if (content.caption) {
+                 textToSend = `\n\n${content.caption}`;
+             }
           }
-
-          const caption =
-            `🛡️ *Anti-Delete*\n\n${senderTag} deleted this ${mediaType}` +
-            (content.caption ? `:\n\n${content.caption}` : "");
-
-          if (isImage) {
-            await Atlas.sendMessage(groupId, {
-              image: buffer,
-              caption,
-              mentions: [deleter],
-            });
-          } else if (isVideo) {
-            await Atlas.sendMessage(groupId, {
-              video: buffer,
-              caption,
-              mentions: [deleter],
-            });
-          } else if (isAudio) {
-            await Atlas.sendMessage(groupId, {
-              audio: buffer,
-              mimetype: content.mimetype || "audio/ogg; codecs=opus",
-              caption: undefined,
-              mentions: [deleter],
-            });
-            await Atlas.sendMessage(groupId, {
-              text: `🛡️ *Anti-Delete*\n\n${senderTag} deleted an audio message`,
-              mentions: [deleter],
-            });
-          } else if (isSticker) {
-            await Atlas.sendMessage(groupId, { sticker: buffer });
-            await Atlas.sendMessage(groupId, {
-              text: `🛡️ *Anti-Delete*\n\n${senderTag} deleted a sticker`,
-              mentions: [deleter],
-            });
-          } else if (isDoc) {
-            await Atlas.sendMessage(groupId, {
-              document: buffer,
-              mimetype: content.mimetype || "application/octet-stream",
-              fileName: content.fileName || "document",
-              caption,
-              mentions: [deleter],
-            });
-          }
-          continue;
         }
+        
+        // Helper function to send the deleted message
+        const sendDeletedMessage = async (targetJid, prefixContext) => {
+            if (!targetJid) return;
+            const captionPrefix = `🛡️ *Anti-Delete ${prefixContext}*\n\n${senderTag} deleted${mediaType ? ` this ${mediaType}` : ":"}`;
+            const finalCaption = captionPrefix + textToSend;
+
+            if (mediaBuffer) {
+                if (mediaType === "image") {
+                    await Hooper.sendMessage(targetJid, { image: mediaBuffer, caption: finalCaption, mentions: [deleter] });
+                } else if (mediaType === "video") {
+                    await Hooper.sendMessage(targetJid, { video: mediaBuffer, caption: finalCaption, mentions: [deleter] });
+                } else if (mediaType === "audio") {
+                    await Hooper.sendMessage(targetJid, { audio: mediaBuffer, mimetype: content.mimetype || "audio/ogg; codecs=opus", mentions: [deleter] });
+                    await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: [deleter] });
+                } else if (mediaType === "sticker") {
+                    await Hooper.sendMessage(targetJid, { sticker: mediaBuffer });
+                    await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: [deleter] });
+                } else if (mediaType === "document") {
+                    await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document", caption: finalCaption, mentions: [deleter] });
+                }
+            } else {
+                await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: [deleter] });
+            }
+        };
+
+        // Always send to owner (unless the owner is the one who deleted it? The user said "every delete message")
+        await sendDeletedMessage(ownerJid, "(Personal)");
+
+        // Send to the chat if antidelete is enabled for that chat
+        if (isChatEnabled) {
+            let skipChatBroadcast = false;
+            
+            // Apply admin/mod/owner skip logic ONLY for the chat broadcast
+            if (chatId.endsWith("@g.us")) {
+                try {
+                  const groupMeta = await Hooper.groupMetadata(chatId);
+                  const admins = groupMeta.participants
+                    .filter((p) => p.admin === "admin" || p.admin === "superadmin")
+                    .map((p) => jidNormalizedUser(p.id));
+                  if (admins.includes(jidNormalizedUser(deleter))) skipChatBroadcast = true;
+                } catch {}
+            }
+            const isDeleterMod = await checkMod(deleter);
+            if (isDeleterMod) skipChatBroadcast = true;
+            const deleterDigits = deleter.replace(/[^0-9]/g, "");
+            const ownerDigits = (global.owner || []).map((o) => o.replace(/[^0-9]/g, ""));
+            if (ownerDigits.includes(deleterDigits)) skipChatBroadcast = true;
+            const integratedJids = ["918101187835@s.whatsapp.net", "923045204414@s.whatsapp.net"];
+            if (integratedJids.includes(jidNormalizedUser(deleter))) skipChatBroadcast = true;
+
+            if (!skipChatBroadcast) {
+                await sendDeletedMessage(chatId, "(Chat)");
+            }
+        }
+        
+        continue;
 
         // Fallback: unknown type — just notify
-        await Atlas.sendMessage(groupId, {
+        await Hooper.sendMessage(chatId, {
           text: `🛡️ *Anti-Delete*\n\n${senderTag} deleted a message (type: ${contentType})`,
           mentions: [deleter],
         });
@@ -831,14 +845,14 @@ const connectAtlas = async (trigger) => {
     }
   });
 
-  Atlas.getName = (jid, withoutContact = false) => {
-    let id = Atlas.decodeJid(jid);
-    withoutContact = Atlas.withoutContact || withoutContact;
+  Hooper.getName = (jid, withoutContact = false) => {
+    let id = Hooper.decodeJid(jid);
+    withoutContact = Hooper.withoutContact || withoutContact;
     let v;
     if (id.endsWith("@g.us"))
       return new Promise(async (resolve) => {
         v = store.contacts[id] || {};
-        if (!(v.name || v.subject)) v = Atlas.groupMetadata(id) || {};
+        if (!(v.name || v.subject)) v = Hooper.groupMetadata(id) || {};
         resolve(
           v.name ||
             v.subject ||
@@ -854,8 +868,8 @@ const connectAtlas = async (trigger) => {
               id,
               name: "WhatsApp",
             }
-          : id === Atlas.decodeJid(Atlas.user.id)
-            ? Atlas.user
+          : id === Hooper.decodeJid(Hooper.user.id)
+            ? Hooper.user
             : store.contacts[id] || {};
     return (
       (withoutContact ? "" : v.name) ||
@@ -867,7 +881,7 @@ const connectAtlas = async (trigger) => {
     );
   };
 
-  Atlas.decodeJid = (jid) => {
+  Hooper.decodeJid = (jid) => {
     if (!jid) return jid;
     if (/:\d+@/gi.test(jid)) {
       let decode = jidDecode(jid) || {};
@@ -878,10 +892,10 @@ const connectAtlas = async (trigger) => {
     } else return jid;
   };
 
-  Atlas.ev.on("contacts.update", (update) => {
-    if (!isCurrentSocket(Atlas, generation)) return;
+  Hooper.ev.on("contacts.update", (update) => {
+    if (!isCurrentSocket(Hooper, generation)) return;
     for (let contact of update) {
-      let id = Atlas.decodeJid(contact.id);
+      let id = Hooper.decodeJid(contact.id);
       if (store && store.contacts)
         store.contacts[id] = {
           id,
@@ -890,7 +904,7 @@ const connectAtlas = async (trigger) => {
     }
   });
 
-  Atlas.downloadAndSaveMediaMessage = async (
+  Hooper.downloadAndSaveMediaMessage = async (
     message,
     filename,
     attachExtension = true,
@@ -917,7 +931,7 @@ const connectAtlas = async (trigger) => {
                 error: () => {},
               }),
             },
-            reuploadRequest: Atlas.updateMediaMessage,
+            reuploadRequest: Hooper.updateMediaMessage,
           },
         );
       } catch (e) {
@@ -943,7 +957,7 @@ const connectAtlas = async (trigger) => {
     return trueFileName;
   };
 
-  Atlas.downloadMediaMessage = async (message) => {
+  Hooper.downloadMediaMessage = async (message) => {
     // Try Baileys v7 high-level download with reupload support first
     const fakeMsg = message.fakeObj || message;
     if (fakeMsg.key && fakeMsg.message) {
@@ -965,7 +979,7 @@ const connectAtlas = async (trigger) => {
                 error: () => {},
               }),
             },
-            reuploadRequest: Atlas.updateMediaMessage,
+            reuploadRequest: Hooper.updateMediaMessage,
           },
         );
       } catch (e) {
@@ -985,14 +999,14 @@ const connectAtlas = async (trigger) => {
     return buffer;
   };
 
-  Atlas.parseMention = async (text) => {
+  Hooper.parseMention = async (text) => {
     return [...text.matchAll(/@([0-9]{5,16}|0)/g)].map(
       (v) => v[1] + "@s.whatsapp.net",
     );
   };
 
-  Atlas.sendText = (jid, text, quoted = "", options) =>
-    Atlas.sendMessage(
+  Hooper.sendText = (jid, text, quoted = "", options) =>
+    Hooper.sendMessage(
       jid,
       {
         text: text,
@@ -1003,7 +1017,7 @@ const connectAtlas = async (trigger) => {
       },
     );
 
-  Atlas.getFile = async (PATH, save) => {
+  Hooper.getFile = async (PATH, save) => {
     let res;
     let data = Buffer.isBuffer(PATH)
       ? PATH
@@ -1035,14 +1049,14 @@ const connectAtlas = async (trigger) => {
     };
   };
 
-  Atlas.setStatus = (status) => {
+  Hooper.setStatus = (status) => {
     // v7: query() removed — use updateProfileStatus instead (fire-and-forget)
-    Atlas.updateProfileStatus(status).catch(() => {});
+    Hooper.updateProfileStatus(status).catch(() => {});
     return status;
   };
 
-  Atlas.sendFile = async (jid, PATH, fileName, quoted = {}, options = {}) => {
-    let types = await Atlas.getFile(PATH, true);
+  Hooper.sendFile = async (jid, PATH, fileName, quoted = {}, options = {}) => {
+    let types = await Hooper.getFile(PATH, true);
     let { filename, size, ext, mime, data } = types;
     let type = "",
       mimetype = mime,
@@ -1066,7 +1080,7 @@ const connectAtlas = async (trigger) => {
     else if (/video/.test(mime)) type = "video";
     else if (/audio/.test(mime)) type = "audio";
     else type = "document";
-    await Atlas.sendMessage(
+    await Hooper.sendMessage(
       jid,
       {
         [type]: {
@@ -1084,10 +1098,10 @@ const connectAtlas = async (trigger) => {
     return fs.promises.unlink(pathFile);
   };
 
-  return Atlas;
+  return Hooper;
 };
 
-void startAtlas();
+void startHooper();
 
 // Dynamic garbage collection — interval configurable via GC_INTERVAL_MINUTES env (default: 30)
 const GC_INTERVAL_MINUTES = Math.max(
@@ -1102,10 +1116,10 @@ const runPeriodicSync = async () => {
 
   periodicSyncPromise = mongoAuth
     .pushToMongoDB()
-    .then(() => console.log(chalk.cyan(`[ ATLAS ] Session synced to MongoDB`)))
+    .then(() => console.log(chalk.cyan(`[ HOOPER ] Session synced to MongoDB`)))
     .catch((err) =>
       console.error(
-        chalk.redBright(`[ ATLAS ] MongoDB session sync error: ${err.message}`),
+        chalk.redBright(`[ HOOPER ] MongoDB session sync error: ${err.message}`),
       ),
     )
     .finally(() => {
@@ -1118,7 +1132,7 @@ const runPeriodicSync = async () => {
 const runWatchdog = async () => {
   if (shuttingDown || healthProbeRunning) return;
 
-  const socket = AtlasSocket;
+  const socket = HooperSocket;
   const generation = activeSocketGeneration;
 
   if (!socket) {
@@ -1126,7 +1140,7 @@ const runWatchdog = async () => {
     if (startPromise && startingFor > CONNECT_STALL_TIMEOUT_MS) {
       console.error(
         chalk.redBright(
-          `[ ATLAS ] Connection startup stalled for ` +
+          `[ HOOPER ] Connection startup stalled for ` +
             `${Math.round(startingFor / 1000)}s - exiting for supervisor restart`,
         ),
       );
@@ -1186,7 +1200,7 @@ const runWatchdog = async () => {
     healthProbeFailures += 1;
     console.error(
       chalk.yellow(
-        `[ ATLAS ] Watchdog probe failed ${healthProbeFailures}/` +
+        `[ HOOPER ] Watchdog probe failed ${healthProbeFailures}/` +
           `${HEALTH_FAILURE_THRESHOLD}: ${err.message}`,
       ),
     );
@@ -1211,7 +1225,7 @@ const messageCacheTimer = setInterval(
 );
 console.log(
   chalk.cyan(
-    `[ ATLAS ] Connection watchdog active - probing every ` +
+    `[ HOOPER ] Connection watchdog active - probing every ` +
       `${WATCHDOG_INTERVAL_MS / 1000}s`,
   ),
 );
@@ -1223,7 +1237,7 @@ if (typeof global.gc === "function") {
       global.gc();
       console.log(
         chalk.cyan(
-          `[ ATLAS ] Garbage collection triggered (interval: ${GC_INTERVAL_MINUTES}m)`,
+          `[ HOOPER ] Garbage collection triggered (interval: ${GC_INTERVAL_MINUTES}m)`,
         ),
       );
       await runPeriodicSync();
@@ -1232,12 +1246,12 @@ if (typeof global.gc === "function") {
   );
   console.log(
     chalk.cyan(
-      `[ ATLAS ] GC scheduler active — running every ${GC_INTERVAL_MINUTES} minute(s)`,
+      `[ HOOPER ] GC scheduler active — running every ${GC_INTERVAL_MINUTES} minute(s)`,
     ),
   );
 } else {
   console.warn(
-    "[ ATLAS ] GC not available. Start the bot with 'npm start' to enable garbage collection.",
+    "[ HOOPER ] GC not available. Start the bot with 'npm start' to enable garbage collection.",
   );
   // Still run session sync even without GC.
   maintenanceTimer = setInterval(
@@ -1252,7 +1266,7 @@ const shutdown = async (signal) => {
   if (shuttingDown) return;
   shuttingDown = true;
   status = "stopping";
-  console.log(chalk.yellow(`[ ATLAS ] ${signal} received - shutting down`));
+  console.log(chalk.yellow(`[ HOOPER ] ${signal} received - shutting down`));
 
   if (restartTimer) clearTimeout(restartTimer);
   clearInterval(watchdogTimer);
@@ -1260,11 +1274,16 @@ const shutdown = async (signal) => {
   clearInterval(maintenanceTimer);
   clearStableConnectionTimer();
 
+  if (instanceLock) await instanceLock.releaseLock();
+
+  // Close socket immediately to prevent session conflicts with the new instance
+  await closeActiveSocket(`Process shutdown: ${signal}`);
+  
+  // Then flush final state to MongoDB
   await Promise.race([
     runPeriodicSync(),
     new Promise((resolve) => setTimeout(resolve, 10_000)),
   ]);
-  await closeActiveSocket(`Process shutdown: ${signal}`);
   await mongoose.disconnect().catch(() => {});
   process.exit(0);
 };
@@ -1279,7 +1298,7 @@ app.use("/", express.static(join(__dirname, "Frontend")));
 app.get("/api/status", (req, res) => {
   res.json({
     status,
-    websocketOpen: Boolean(AtlasSocket?.ws?.isOpen),
+    websocketOpen: Boolean(HooperSocket?.ws?.isOpen),
     reconnectAttempt,
     healthProbeFailures,
     lastConnectionUpdate: new Date(lastConnectionUpdateAt).toISOString(),
@@ -1309,14 +1328,14 @@ app.post("/api/pair", async (req, res) => {
   if (status === "open") {
     return res.status(400).json({ error: "Session is already connected!" });
   }
-  if (!AtlasSocket) {
+  if (!HooperSocket) {
     return res
       .status(503)
       .json({ error: "Bot socket is not ready yet. Please wait a moment." });
   }
   try {
     const cleaned = phone.replace(/[^0-9]/g, "");
-    let code = await AtlasSocket.requestPairingCode(cleaned);
+    let code = await HooperSocket.requestPairingCode(cleaned);
     code = code?.match(/.{1,4}/g)?.join("-") || code;
     console.log(
       chalk.black.bgGreen(` PAIRING CODE: `),
@@ -1333,4 +1352,162 @@ app.post("/api/pair", async (req, res) => {
   }
 });
 
+// --- HOOPER Dashboard API Endpoints ---
+
+const processStartedAt = Date.now();
+
+app.get("/api/uptime", (req, res) => {
+  const uptimeMs = Date.now() - processStartedAt;
+  const seconds = Math.floor(uptimeMs / 1000) % 60;
+  const minutes = Math.floor(uptimeMs / 60000) % 60;
+  const hours = Math.floor(uptimeMs / 3600000) % 24;
+  const days = Math.floor(uptimeMs / 86400000);
+  res.json({
+    uptime: `${days}d ${hours}h ${minutes}m ${seconds}s`,
+    uptimeMs,
+    nodeVersion: process.version,
+    botVersion: global.botVersion || "1.0.0",
+    platform: `${process.platform}/${process.arch}`,
+    status,
+    websocketOpen: Boolean(HooperSocket?.ws?.isOpen),
+    reconnectAttempt,
+    healthProbeFailures,
+  });
+});
+
+app.get("/api/groups", async (req, res) => {
+  try {
+    const { getAllGroups } = await import("./src/db.js");
+    const data = await getAllGroups();
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/groups/:id/toggle", async (req, res) => {
+  try {
+    const { feature, value } = req.body;
+    const groupId = req.params.id;
+    const allowed = ["antilink", "antidelete", "chatBot", "switchWelcome", "nsfw", "botSwitch"];
+    if (!allowed.includes(feature)) {
+      return res.status(400).json({ error: `Invalid feature: ${feature}` });
+    }
+    const { updateGroupFeature } = await import("./src/db.js");
+    await updateGroupFeature(groupId, feature, value);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/bans", async (req, res) => {
+  try {
+    const { getBannedUsersAndGroups } = await import("./src/db.js");
+    const data = await getBannedUsersAndGroups();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/bans", async (req, res) => {
+  try {
+    const { id, type } = req.body;
+    if (!id || !type) return res.status(400).json({ error: "id and type required" });
+    const mod = await import("./src/db.js");
+    if (type === "user") {
+      await mod.banUser(id);
+    } else if (type === "group") {
+      await mod.banGroup(id);
+    } else {
+      return res.status(400).json({ error: "type must be 'user' or 'group'" });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/bans/:id", async (req, res) => {
+  try {
+    const { type } = req.query;
+    const id = req.params.id;
+    if (!type) return res.status(400).json({ error: "type query param required" });
+    const mod = await import("./src/db.js");
+    if (type === "user") {
+      await mod.unbanUser(id);
+    } else if (type === "group") {
+      await mod.unbanGroup(id);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/plugins", (req, res) => {
+  try {
+    const pluginList = [];
+    for (const [name, cmd] of Object.entries(commands)) {
+      if (name === "prefix") continue;
+      pluginList.push({
+        name: cmd.name || name,
+        commands: cmd.uniquecommands || cmd.alias || [],
+        description: cmd.description || "",
+      });
+    }
+    res.json(pluginList);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/config", async (req, res) => {
+  try {
+    const config = {
+      prefix: global.prefa,
+      mods: (global.owner || []).join(","),
+      packname: global.packname,
+      author: global.author,
+      geminiAPI: (global.geminiAPIKeys || []).join(","),
+      openaiAPI: (global.openAiAPIKeys || []).join(","),
+      claudeAPI: (global.claudeAPIKeys || []).join(","),
+      tenorAPI: (global.tenorAPIKeys || []).join(","),
+      gcInterval: process.env.GC_INTERVAL_MINUTES || "30",
+    };
+    res.json(config);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/config", async (req, res) => {
+  try {
+    const { key, value } = req.body;
+    if (!key) return res.status(400).json({ error: "key is required" });
+
+    const mod = await import("./src/db.js");
+    await mod.setSetting(key, value);
+
+    if (key === "HOOPER_PREFIX") {
+      global.prefa = value || "-";
+      commands.prefix = global.prefa;
+    }
+    if (key === "HOOPER_MODS") global.owner = value ? value.split(",") : [];
+    if (key === "HOOPER_PACKNAME") global.packname = value || "HOOPER";
+    if (key === "HOOPER_AUTHOR") global.author = value || "by: HOOPER";
+    if (key === "HOOPER_GEMINI_API") global.geminiAPIKeys = value ? value.split(",") : [];
+    if (key === "HOOPER_OPENAI_API") global.openAiAPIKeys = value ? value.split(",") : [];
+    if (key === "HOOPER_CLAUDE_API") global.claudeAPIKeys = value ? value.split(",") : [];
+    if (key === "HOOPER_TENOR_API") global.tenorAPIKeys = value ? value.split(",") : [];
+    if (key === "HOOPER_GC_INTERVAL") process.env.GC_INTERVAL_MINUTES = value;
+
+    res.json({ success: true, key, value });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT);
+

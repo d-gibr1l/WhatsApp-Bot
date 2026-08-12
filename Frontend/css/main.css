@@ -1,0 +1,63 @@
+@import url("https://fonts.googleapis.com/css?family=Raleway:400,700");
+
+:root {
+  --bg-dark: #27374d;
+  --bg-glass: #fbf1f1d9;
+  --text-dark: #27374d;
+  --text-light: #ffffff;
+  --text-muted: #555555;
+  --btn-inactive: #e8e4e4;
+  --btn-hover: #d4d0d0;
+  
+  --success: #22c55e;
+  --waiting: #f59e0b;
+  --connecting: #3b82f6;
+  --danger: #dc2626;
+
+  --input-border: #d1d1d4;
+  
+  --radius-screen: 14px;
+  --radius-btn: 22px;
+  --transition: all 0.25s;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: Raleway, sans-serif;
+}
+
+body {
+  background-image: url(../BG.png);
+  background-repeat: no-repeat;
+  height: 100vh;
+  background-size: cover;
+  position: relative;
+  overflow: hidden;
+  color: var(--text-dark);
+}
+
+body::before {
+  content: "";
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.11);
+  z-index: -1;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d1d4;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}

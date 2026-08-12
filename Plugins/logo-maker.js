@@ -237,10 +237,6 @@ const LOGO_TYPES = {
 
   pixel: { query: ["pixel art", "8bit style", "retro pixel", "game pixel"] },
 
-  anime: {
-    query: ["anime background", "anime sky", "anime light", "anime art"],
-  },
-
   gaming: {
     query: ["gaming setup", "rgb lights", "gamer neon", "esports vibe"],
   },
@@ -270,7 +266,7 @@ export default {
   alias: Object.keys(LOGO_TYPES),
   uniquecommands: Object.keys(LOGO_TYPES),
   description: "Ultra Advanced Logo Maker",
-  start: async (Atlas, m, { inputCMD, text, prefix }) => {
+  start: async (Hooper, m, { inputCMD, text, prefix }) => {
     if (!text) {
       return m.reply(`Example:\n${prefix}${inputCMD} Name|Tagline`);
     }
@@ -360,7 +356,7 @@ export default {
 
       const buffer = canvas.toBuffer("image/png");
 
-      await Atlas.sendMessage(
+      await Hooper.sendMessage(
         m.from,
         {
           image: buffer,

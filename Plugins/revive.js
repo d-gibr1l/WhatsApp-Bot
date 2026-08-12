@@ -8,7 +8,7 @@ export default {
   uniquecommands: ["revive", "viewonce"],
   description: "Download and resend view once messages",
 
-  start: async (Atlas, m, { inputCMD, quoted, doReact, prefix }) => {
+  start: async (Hooper, m, { inputCMD, quoted, doReact, prefix }) => {
     try {
       // Must be a reply to a message
       if (!m.quoted) {
@@ -95,13 +95,13 @@ export default {
 
       // Send as normal (non-view-once) message
       if (isImage) {
-        await Atlas.sendMessage(
+        await Hooper.sendMessage(
           m.from,
           { image: buffer, caption },
           { quoted: m }
         );
       } else {
-        await Atlas.sendMessage(
+        await Hooper.sendMessage(
           m.from,
           { video: buffer, caption },
           { quoted: m }

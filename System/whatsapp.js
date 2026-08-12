@@ -4,9 +4,9 @@ import { fileTypeFromBuffer } from "file-type";
 import { getRandom, fetchBuffer } from "./Function.js";
 
 class WAConnection {
-  constructor(Atlas) {
-    for (let v in Atlas) {
-      this[v] = Atlas[v];
+  constructor(Hooper) {
+    for (let v in Hooper) {
+      this[v] = Hooper[v];
     }
   }
 
@@ -85,7 +85,7 @@ class WAConnection {
 }
 export { WAConnection };
 
-export const serialize = (Atlas, m, options = {}) => {
+export const serialize = (Hooper, m, options = {}) => {
   if (!m) return m;
   let M = proto.WebMessageInfo;
   m = M.create(m);
@@ -96,7 +96,7 @@ export const serialize = (Atlas, m, options = {}) => {
     m.isBot = m.id.startsWith("BAE5") && m.id.length == 16;
     m.isGroup = m.from.endsWith("@g.us");
     m.sender = jidNormalizedUser(
-      (m.fromMe && Atlas.user?.id) || m.key.participant || m.from || ""
+      (m.fromMe && Hooper.user?.id) || m.key.participant || m.from || ""
     );
   }
   if (m.message) {
@@ -117,7 +117,7 @@ export const serialize = (Atlas, m, options = {}) => {
       m.quoted.isGroup = m.quoted.from.endsWith("@g.us");
       m.quoted.isBot = m.quoted.id.startsWith("BAE5") && m.quoted.id == 16;
       m.quoted.fromMe =
-        m.quoted.sender == jidNormalizedUser(Atlas.user && Atlas.user?.id);
+        m.quoted.sender == jidNormalizedUser(Hooper.user && Hooper.user?.id);
       m.quoted.text =
         m.quoted.msg?.text ||
         m.quoted.msg?.caption ||
@@ -136,12 +136,12 @@ export const serialize = (Atlas, m, options = {}) => {
         ...(m.quoted.isGroup ? { participant: m.quoted.sender } : {}),
       }));
       m.quoted.delete = () =>
-        Atlas.sendMessage(m.quoted.from, { delete: vM.key });
+        Hooper.sendMessage(m.quoted.from, { delete: vM.key });
       m.quoted.download = (pathFile) =>
-        Atlas.downloadMediaMessage(m.quoted.msg, pathFile);
+        Hooper.downloadMediaMessage(m.quoted.msg, pathFile);
     }
   }
-  m.download = (pathFile) => Atlas.downloadMediaMessage(m.msg, pathFile);
+  m.download = (pathFile) => Hooper.downloadMediaMessage(m.msg, pathFile);
   m.body = m.text =
     m.message?.conversation ||
     m.message?.[m.type]?.text ||
@@ -152,8 +152,8 @@ export const serialize = (Atlas, m, options = {}) => {
     "";
   m.reply = (text, chatId = m.from, options = {}) =>
     Buffer.isBuffer(text)
-      ? Atlas.sendFile(chatId, text, "file", "", m, { ...options })
-      : Atlas.sendText(chatId, text, m, { ...options });
+      ? Hooper.sendFile(chatId, text, "file", "", m, { ...options })
+      : Hooper.sendText(chatId, text, m, { ...options });
 
   return m;
 };

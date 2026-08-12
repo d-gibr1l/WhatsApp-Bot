@@ -71,7 +71,7 @@ export default {
   ],
   description: "All Group Management Commands",
   start: async (
-    Atlas,
+    Hooper,
     m,
     {
       inputCMD,
@@ -124,7 +124,7 @@ export default {
             : "『 *Attention Admins* 』\n\n*🎀 Message:* Check this Out !";
         }
         await doReact("🏅");
-        Atlas.sendMessage(
+        Hooper.sendMessage(
           m.from,
           { text: message, mentions: groupAdmin },
           { quoted: m },
@@ -151,13 +151,13 @@ export default {
         const oldGCName = metadata.subject;
         let ppgc;
         try {
-          ppgc = await Atlas.profilePictureUrl(m.from, "image");
+          ppgc = await Hooper.profilePictureUrl(m.from, "image");
         } catch {
           ppgc = botImage1;
         }
         try {
-          await Atlas.groupUpdateSubject(m.from, text);
-          await Atlas.sendMessage(
+          await Hooper.groupUpdateSubject(m.from, text);
+          await Hooper.sendMessage(
             m.from,
             {
               image: { url: ppgc },
@@ -193,7 +193,7 @@ export default {
           global.botDeletedMsgIds.add(m.quoted.id);
           setTimeout(() => global.botDeletedMsgIds?.delete(m.quoted.id), 300000);
           await doReact("📛");
-          await Atlas.sendMessage(m.from, { delete: key });
+          await Hooper.sendMessage(m.from, { delete: key });
         } else {
           if (!isAdmin) {
             await doReact("❌");
@@ -210,7 +210,7 @@ export default {
           if (!global.botDeletedMsgIds) global.botDeletedMsgIds = new Set();
           global.botDeletedMsgIds.add(m.quoted.id);
           setTimeout(() => global.botDeletedMsgIds?.delete(m.quoted.id), 300000);
-          await Atlas.sendMessage(m.from, { delete: key });
+          await Hooper.sendMessage(m.from, { delete: key });
         }
         break;
       }
@@ -239,7 +239,7 @@ export default {
         const mentionedUser = m.quoted ? m.quoted.sender : mentionByTag[0];
         const userId = mentionedUser || m.msg.contextInfo.participant;
         if (!groupAdmin.includes(userId)) {
-          return Atlas.sendMessage(
+          return Hooper.sendMessage(
             m.from,
             {
               text: `@${mentionedUser.split("@")[0]} Senpai is not an *Admin* of this group!`,
@@ -260,8 +260,8 @@ export default {
         }
         await doReact("📉");
         try {
-          await Atlas.groupParticipantsUpdate(m.from, [userId], "demote");
-          await Atlas.sendMessage(
+          await Hooper.groupParticipantsUpdate(m.from, [userId], "demote");
+          await Hooper.sendMessage(
             m.from,
             {
               text: `Sorry @${mentionedUser.split("@")[0]} Senpai, you have been *Demoted* by @${messageSender.split("@")[0]} !`,
@@ -271,7 +271,7 @@ export default {
           );
         } catch (error) {
           await doReact("❌");
-          await Atlas.sendMessage(
+          await Hooper.sendMessage(
             m.from,
             {
               text: `An error occured while trying to demote @${mentionedUser.split("@")[0]} Senpai !\n\n*Error:* ${error}`,
@@ -290,16 +290,16 @@ export default {
           return m.reply(`*Bot* must be *Admin* in order to use this Command!`);
         }
         await doReact("🧩");
-        const link = await Atlas.groupInviteCode(m.from);
+        const link = await Hooper.groupInviteCode(m.from);
         const linkcode = `https://chat.whatsapp.com/${link}`;
         let ppgc;
         try {
-          ppgc = await Atlas.profilePictureUrl(m.from, "image");
+          ppgc = await Hooper.profilePictureUrl(m.from, "image");
         } catch {
           ppgc = botImage1;
         }
         try {
-          await Atlas.sendMessage(
+          await Hooper.sendMessage(
             m.from,
             {
               image: { url: ppgc },
@@ -308,7 +308,7 @@ export default {
             { quoted: m },
           );
         } catch (err) {
-          await Atlas.sendMessage(
+          await Hooper.sendMessage(
             m.from,
             { text: `Failed to fetch group link: ${err.message}` },
             { quoted: m },
@@ -329,13 +329,13 @@ export default {
         }
         await doReact("⚜️");
         if (text === "close") {
-          await Atlas.groupSettingUpdate(m.from, "announcement");
+          await Hooper.groupSettingUpdate(m.from, "announcement");
           await m.reply(`Group has been closed!`);
         } else if (text === "open") {
-          await Atlas.groupSettingUpdate(m.from, "not_announcement");
+          await Hooper.groupSettingUpdate(m.from, "not_announcement");
           await m.reply(`Group has been opened!`);
         } else {
-          await Atlas.sendMessage(
+          await Hooper.sendMessage(
             m.from,
             {
               image: { url: botImage2 },
@@ -356,7 +356,7 @@ export default {
         await doReact("🎊");
         let ppgc;
         try {
-          ppgc = await Atlas.profilePictureUrl(m.from, "image");
+          ppgc = await Hooper.profilePictureUrl(m.from, "image");
         } catch {
           ppgc = botImage1;
         }
@@ -375,7 +375,7 @@ export default {
           groupAdmins.length
         }*\n_🎈 Total Participants:_ *${metadata.participants.length}*\n`;
 
-        await Atlas.sendMessage(
+        await Hooper.sendMessage(
           m.from,
           {
             image: { url: ppgc },
@@ -409,7 +409,7 @@ export default {
             : "『 *Attention Everybody* 』\n\n*🎀 Message:* Check this Out !";
         }
         await doReact("🎌");
-        Atlas.sendMessage(
+        Hooper.sendMessage(
           m.from,
           { text: message2, mentions: participants.map((a) => a.id) },
           { quoted: m },
@@ -429,15 +429,15 @@ export default {
         }
         await doReact("👋");
         try {
-          await Atlas.sendMessage(m.from, {
+          await Hooper.sendMessage(m.from, {
             image: { url: "https://wallpapercave.com/wp/wp9667218.png" },
             caption: `I'm Leaving this group on request... \n\nTake care everyone :)`,
             mentions: participants.map((a) => a.id),
             quoted: m,
           });
-          await Atlas.groupLeave(m.from);
+          await Hooper.groupLeave(m.from);
         } catch (e) {
-          await Atlas.sendMessage(
+          await Hooper.sendMessage(
             m.from,
             { text: `An error occurred !` },
             { quoted: m },
@@ -470,7 +470,7 @@ export default {
         const mentionedUser = m.quoted ? m.quoted.sender : mentionByTag[0];
         const userId = mentionedUser || m.msg.contextInfo.participant;
         if (groupAdmin.includes(userId)) {
-          return Atlas.sendMessage(
+          return Hooper.sendMessage(
             m.from,
             {
               text: `@${mentionedUser.split("@")[0]} Senpai is already an *Admin* of this group!`,
@@ -481,8 +481,8 @@ export default {
         }
         await doReact("💹");
         try {
-          await Atlas.groupParticipantsUpdate(m.from, [userId], "promote");
-          await Atlas.sendMessage(
+          await Hooper.groupParticipantsUpdate(m.from, [userId], "promote");
+          await Hooper.sendMessage(
             m.from,
             {
               text: `Congratulations @${mentionedUser.split("@")[0]} Senpai 🥳, you have been *Promoted* by @${messageSender.split("@")[0]} !`,
@@ -491,7 +491,7 @@ export default {
             { quoted: m },
           );
         } catch (error) {
-          await Atlas.sendMessage(
+          await Hooper.sendMessage(
             m.from,
             {
               text: `An error occured while trying to promote @${mentionedUser.split("@")[0]} Senpai !\n\n*Error:* ${error}`,
@@ -514,7 +514,7 @@ export default {
         }
         if (!text && !m.quoted) {
           await doReact("❔");
-          return Atlas.sendMessage(
+          return Hooper.sendMessage(
             m.from,
             { text: `Please tag a user or reply to their message to *Remove* !` },
             { quoted: m },
@@ -543,7 +543,7 @@ export default {
           return m.reply(`*Command Rejected !* You cannot remove a *Bot Owner* !`);
         }
         if (groupAdmin.includes(users)) {
-          return Atlas.sendMessage(
+          return Hooper.sendMessage(
             m.from,
             {
               text: `*Command Rejected !* @${mentionedUser.split("@")[0]} Senpai is an *Admin* of this group so you are not allowed to remove him !`,
@@ -553,8 +553,8 @@ export default {
           );
         }
         try {
-          await Atlas.groupParticipantsUpdate(m.from, [users], "remove");
-          await Atlas.sendMessage(
+          await Hooper.groupParticipantsUpdate(m.from, [users], "remove");
+          await Hooper.sendMessage(
             m.from,
             {
               text: `@${mentionedUser.split("@")[0]} has been *Removed* Successfully from *${metadata.subject}*`,
@@ -579,7 +579,7 @@ export default {
         }
         if (!/image/.test(mime)) {
           await doReact("❌");
-          return Atlas.sendMessage(
+          return Hooper.sendMessage(
             m.from,
             {
               text: `Send/reply Image With Caption ${prefix + "setgcpp"} to change the Profile Pic of this group.`,
@@ -588,9 +588,9 @@ export default {
           );
         }
         await doReact("🎴");
-        const quotedimage = await Atlas.downloadAndSaveMediaMessage(quoted);
+        const quotedimage = await Hooper.downloadAndSaveMediaMessage(quoted);
         try {
-          await Atlas.updateProfilePicture(m.from, { url: quotedimage });
+          await Hooper.updateProfilePicture(m.from, { url: quotedimage });
         } catch (error) {
           await m.reply(
             `*Error:* Failed to update profile picture. Ensure the bot has proper admin permissions.`,
@@ -600,11 +600,11 @@ export default {
         }
         let ppgc;
         try {
-          ppgc = await Atlas.profilePictureUrl(m.from, "image");
+          ppgc = await Hooper.profilePictureUrl(m.from, "image");
         } catch {
           ppgc = botImage1;
         }
-        Atlas.sendMessage(
+        Hooper.sendMessage(
           m.from,
           {
             image: { url: ppgc },
@@ -627,7 +627,7 @@ export default {
         }
         if (!text && !m.quoted) {
           await doReact("❔");
-          return Atlas.sendMessage(
+          return Hooper.sendMessage(
             m.from,
             { text: `Please provide a new group description !` },
             { quoted: m },
@@ -636,14 +636,14 @@ export default {
         await doReact("📑");
         let ppgc;
         try {
-          ppgc = await Atlas.profilePictureUrl(m.from, "image");
+          ppgc = await Hooper.profilePictureUrl(m.from, "image");
         } catch {
           ppgc = botImage1;
         }
         const newGCdesc = m.quoted ? m.quoted.msg : text;
         try {
-          await Atlas.groupUpdateDescription(m.from, newGCdesc);
-          await Atlas.sendMessage(
+          await Hooper.groupUpdateDescription(m.from, newGCdesc);
+          await Hooper.sendMessage(
             m.from,
             {
               image: { url: ppgc },
@@ -669,13 +669,13 @@ export default {
         if (m.from == "120363040838753957@g.us") {
           await doReact("❌");
           return m.reply(
-            "Sorry, this command is not allowed in *Atlas Support Group* !\n\nYou are not allowed to change support group link !",
+            "Sorry, this command is not allowed in *Hooper Support Group* !\n\nYou are not allowed to change support group link !",
           );
         }
         await doReact("💫");
         try {
-          await Atlas.groupRevokeInvite(m.from);
-          await Atlas.sendMessage(
+          await Hooper.groupRevokeInvite(m.from);
+          await Hooper.sendMessage(
             m.from,
             { text: `Group link has been *Updated* Successfully!` },
             { quoted: m },
@@ -718,7 +718,7 @@ export default {
         }
         mess += `╰────────────⊰\n\n                    *Thank You*\n`;
         await doReact("〽️");
-        Atlas.sendMessage(
+        Hooper.sendMessage(
           m.from,
           { text: mess, mentions: participants.map((a) => a.id) },
           { quoted: m },
@@ -855,18 +855,20 @@ export default {
 
       case "antidel":
       case "antidelete": {
-        if (!isAdmin) {
+        if (m.from.endsWith("@g.us") && !isAdmin) {
           await doReact("❌");
           return m.reply(`*You* must be *Admin* in order to use this Command!`);
         }
         if (!text) {
           await doReact("❔");
           return m.reply(
-            `Please provide On / Off action !\n\n*Example:*\n\n${prefix}antidel on`,
+            `Please provide On / Off action !\n\n*Example:*\n\n${prefix}antidelete on`,
           );
         }
         const antidelStatus = await checkAntidelete(m.from);
-        if (args[0] == "on") {
+        const action = args[0]?.toLowerCase();
+        
+        if (action == "on") {
           if (antidelStatus) {
             await doReact("❌");
             return m.reply(`*Anti-Delete* is already *Enabled* !`);
@@ -876,7 +878,7 @@ export default {
           await m.reply(
             `*Anti-Delete* has been *Enabled* Successfully !\n\nDeleted messages will be resent by the bot.`,
           );
-        } else if (args[0] == "off") {
+        } else if (action == "off") {
           if (!antidelStatus) {
             await doReact("❌");
             return m.reply(`*Anti-Delete* is already *Disabled* !`);
@@ -887,7 +889,7 @@ export default {
         } else {
           await doReact("❔");
           return m.reply(
-            `Please provide On / Off action !\n\n*Example:*\n\n${prefix}antidel on`,
+            `Please provide On / Off action !\n\n*Example:*\n\n${prefix}antidelete on`,
           );
         }
         break;

@@ -30,7 +30,7 @@ export default {
   description: "Various handy tool commands",
 
   start: async (
-    Atlas,
+    Hooper,
     m,
     { inputCMD, text, quoted, mime, doReact, prefix, isCreator, isintegrated },
   ) => {
@@ -48,7 +48,7 @@ export default {
           }
 
           if (doReact) await doReact("⏳");
-          const imgBuffer = await Atlas.downloadMediaMessage(target);
+          const imgBuffer = await Hooper.downloadMediaMessage(target);
 
           const form = new FormData();
           const isWebp = mimeType.includes("webp");
@@ -77,12 +77,12 @@ export default {
 
           const buffer = await getBuffer(res.data.result_url);
 
-          await Atlas.sendMessage(
+          await Hooper.sendMessage(
             m.from,
             {
               image: buffer,
               caption:
-                "✨ *Atlas-MD HD Upscale*\n\nImage enhanced successfully.",
+                "✨ *Hooper-MD HD Upscale*\n\nImage enhanced successfully.",
             },
             { quoted: m },
           );
@@ -100,7 +100,7 @@ export default {
       case "calculate":
         if (!text) {
           if (doReact) await doReact("❔");
-          return Atlas.sendMessage(
+          return Hooper.sendMessage(
             m.from,
             { text: `Example: ${prefix}calc 2+2` },
             { quoted: m },
@@ -111,14 +111,14 @@ export default {
           const result = eval(text);
 
           if (doReact) await doReact("🧮");
-          await Atlas.sendMessage(
+          await Hooper.sendMessage(
             m.from,
             { text: `🧮 Result\n\n${text} = ${result}` },
             { quoted: m },
           );
         } catch {
           if (doReact) await doReact("❌");
-          await Atlas.sendMessage(
+          await Hooper.sendMessage(
             m.from,
             { text: "❌ Invalid expression" },
             { quoted: m },
@@ -167,9 +167,9 @@ export default {
             if (!text.includes("http") && !text.includes("https")) {
               target = "http://" + text;
             }
-            const parsedUrl = url.parse(target);
+            const parsedUrl = new URL(target);
             const hostname = parsedUrl.hostname;
-            const path = parsedUrl.pathname;
+            const path = parsedUrl.pathname + parsedUrl.search;
             const options = {
               hostname: hostname,
               path: path,
@@ -198,7 +198,7 @@ export default {
                     const mainfile = fs.readFileSync(
                       `./System/Cache/${hostname}.html`,
                     );
-                    Atlas.sendMessage(
+                    Hooper.sendMessage(
                       m.from,
                       {
                         document: mainfile,
@@ -223,9 +223,9 @@ export default {
             if (!target.includes("http") && !target.includes("https")) {
               target = "http://" + target;
             }
-            const parsedUrl = url.parse(target);
+            const parsedUrl = new URL(target);
             const hostname = parsedUrl.hostname;
-            const path = parsedUrl.pathname;
+            const path = parsedUrl.pathname + parsedUrl.search;
             const options = {
               hostname: hostname,
               path: path,
@@ -254,7 +254,7 @@ export default {
                     const mainfile = fs.readFileSync(
                       `./System/Cache/${hostname}.txt`,
                     );
-                    Atlas.sendMessage(
+                    Hooper.sendMessage(
                       m.from,
                       {
                         document: mainfile,
@@ -286,7 +286,7 @@ export default {
       case "tinyurl":
         if (!text) {
           await doReact("❔");
-          return Atlas.sendMessage(
+          return Hooper.sendMessage(
             m.from,
             { text: `❌ Example: *${prefix}shorturl https://google.com*` },
             { quoted: m },
@@ -305,7 +305,7 @@ export default {
           );
           const short = await resShort.text();
 
-          await Atlas.sendMessage(
+          await Hooper.sendMessage(
             m.from,
             {
               text: `🔗 *Short URL Generated*\n\n*Original:* ${urlToShorten}\n\n*Short:* ${short}`,
@@ -314,7 +314,7 @@ export default {
           );
         } catch {
           await doReact("❌");
-          await Atlas.sendMessage(
+          await Hooper.sendMessage(
             m.from,
             { text: "❌ Failed to shorten url" },
             { quoted: m },

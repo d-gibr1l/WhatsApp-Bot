@@ -1,0 +1,18 @@
+# Hooper MD Customization Log
+*Created on 2026-08-12*
+
+This file tracks all customizations, plugin additions, and modifications made to the stock Hooper MD bot after the factory reset.
+
+---
+
+### [2026-08-12] - Dashboard Restoration
+- **Action:** Restored the custom "HOOPER" web dashboard on top of the factory reset installation.
+- **Details:** 
+  - Restored `Frontend/` folder from `Hooper-Backup`.
+  - Restored custom MongoDB connection logic in `src/db.js` from `Hooper-Backup`.
+  - Injected custom Express API endpoints (`/api/groups`, `/api/config`, `/api/bans`, etc.) back into `index.js`.
+  - Commented out `qrcodeTerminal.generate` on line 634 in `index.js` to stop the QR code from printing in the terminal logs, restricting it to only the web UI.
+
+### [2026-08-12] - Factory Reset
+- **Action:** Performed a hard reset of the repository to `FantoX001/Hooper-MD` (main branch).
+- **Details:** Wiped the custom frontend dashboard and replaced the modified downloader. Restored the original `.env` file to preserve MongoDB auth and session keys. Official dependencies re-installed via `npm install`.

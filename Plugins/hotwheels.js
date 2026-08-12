@@ -7,7 +7,7 @@ alias:[...mergedCommands],
 uniquecommands:[...mergedCommands],
 description:"Get random Hot Wheels",
 
-start: async (Atlas,m,{inputCMD})=>{
+start: async (Hooper,m,{inputCMD})=>{
 
 switch(inputCMD){
 
@@ -21,11 +21,11 @@ const data = await res.json()
 
 const image = data.imgUrl
 
-await Atlas.sendMessage(
+await Hooper.sendMessage(
 m.from,
 {
 image:{url:image},
-caption:`🏎 Atlas-MD Hot Wheels
+caption:`🏎 Hooper-MD Hot Wheels
 
 Name: ${data.name}
 Model: ${data.model}
@@ -37,9 +37,9 @@ Year: ${data.year}`
 
 }catch(e){
 
-await Atlas.sendMessage(
+await Hooper.sendMessage(
 m.from,
-{ text:"❌ Atlas-MD failed to fetch Hot Wheels."},
+{ text:"❌ Hooper-MD failed to fetch Hot Wheels."},
 { quoted:m }
 )
 

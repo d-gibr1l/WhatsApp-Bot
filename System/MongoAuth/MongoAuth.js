@@ -33,7 +33,7 @@ export default class MongoAuth {
    * Returns { state, saveCreds, clearState } for makeWASocket.
    */
   async init() {
-    console.log(`[ ATLAS ] Starting session: "${this.sessionId}"`);
+    console.log(`[ HOOPER ] Starting session: "${this.sessionId}"`);
 
     const localExists = await this._localExists();
 
@@ -41,7 +41,7 @@ export default class MongoAuth {
       const mongoExists = await this._mongoExists();
       if (mongoExists) {
         console.log(
-          `[ ATLAS ] [${this.sessionId}] Session not found locally — downloading from MongoDB...`,
+          `[ HOOPER ] [${this.sessionId}] Session not found locally — downloading from MongoDB...`,
         );
 
         try {
@@ -56,22 +56,22 @@ export default class MongoAuth {
         const downloadOk = await this._localExists();
         if (downloadOk) {
           console.log(
-            `[ ATLAS ] [${this.sessionId}] Session restored from MongoDB ✓`,
+            `[ HOOPER ] [${this.sessionId}] Session restored from MongoDB ✓`,
           );
         } else {
           console.log(
-            `[ ATLAS ] [${this.sessionId}] Session download incomplete — starting fresh (QR scan required).`,
+            `[ HOOPER ] [${this.sessionId}] Session download incomplete — starting fresh (QR scan required).`,
           );
           await fs.promises.rm(this.dir, { recursive: true, force: true });
         }
       } else {
         // Neither local nor MongoDB — empty dir triggers QR scan
         console.log(
-          `[ ATLAS ] [${this.sessionId}] No existing session found — QR scan required.`,
+          `[ HOOPER ] [${this.sessionId}] No existing session found — QR scan required.`,
         );
       }
     } else {
-      console.log(`[ ATLAS ] [${this.sessionId}] Local session found ✓`);
+      console.log(`[ HOOPER ] [${this.sessionId}] Local session found ✓`);
     }
 
     await fs.promises.mkdir(this.dir, { recursive: true });
@@ -176,7 +176,7 @@ export default class MongoAuth {
     for (const [filename, base64Content] of Object.entries(doc.files)) {
       if (!base64Content || base64Content.length === 0) {
         console.log(
-          `[ ATLAS ] [${this.sessionId}] Skipping empty entry in MongoDB session: ${filename}`,
+          `[ HOOPER ] [${this.sessionId}] Skipping empty entry in MongoDB session: ${filename}`,
         );
         continue;
       }
@@ -228,7 +228,7 @@ export default class MongoAuth {
       }
     }
 
-    console.log(`[ ATLAS ] Legacy session migrated to new file-based format.`);
+    console.log(`[ HOOPER ] Legacy session migrated to new file-based format.`);
 
     await this.pushToMongoDB();
   }
@@ -242,6 +242,6 @@ export default class MongoAuth {
       // local is already cleared
     }
 
-    console.log(`[ ATLAS ] Session cleared from local storage and MongoDB.`);
+    console.log(`[ HOOPER ] Session cleared from local storage and MongoDB.`);
   }
 }

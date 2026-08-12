@@ -1,0 +1,25 @@
+{
+  "settings": {},
+  "admins": [],
+  "banned_numbers": {},
+  "allowed_groups": {},
+  "auto_replies": {},
+  "warnings": {},
+  "reminders": [],
+  "antidelete_store": {},
+  "message_logs": [],
+  "radar_subs": [],
+  "users": {},
+  "groups": {},
+  "system": {
+    "id": "1",
+    "seletedCharacter": "0",
+    "PMchatBot": false,
+    "botMode": "public"
+  },
+  "plugins": {},
+  "aliases": {},
+  "allowed_links": [],
+  "word_filters": [],
+  "ai_history": {}
+}

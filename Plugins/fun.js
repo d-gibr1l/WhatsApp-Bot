@@ -1,4 +1,5 @@
 import axios from "axios";
+import fs from "fs";
 
 let mergedCommands = ["truth", "dare", "coinflip", "dice", "fact"];
 
@@ -8,7 +9,7 @@ export default {
   uniquecommands: ["truth", "dare", "coinflip", "dice", "fact"],
   description: "All fun Commands",
   start: async (
-    Atlas,
+    Hooper,
     m,
     { text, args, prefix, inputCMD, mentionedJid, mentionByTag, doReact },
   ) => {
@@ -122,10 +123,12 @@ export default {
           "What's the most ridiculous thing you've bought online?",
         ];
         const truthData = truth[Math.floor(Math.random() * truth.length)];
+        const truthDarePics = ["./Assets/truth_dare.jpg"];
+        const pic = fs.readFileSync(truthDarePics[Math.floor(Math.random() * truthDarePics.length)]);
 
-        await Atlas.sendMessage(
+        await Hooper.sendMessage(
           m.from,
-          { image: { url: botImage3 }, caption: `*${truthData}*` },
+          { image: pic, caption: `*${truthData}*` },
           { quoted: m },
         );
         break;
@@ -237,10 +240,12 @@ export default {
         ];
 
         const dareData = dare[Math.floor(Math.random() * dare.length)];
+        const truthDarePicsDare = ["./Assets/truth_dare.jpg"];
+        const picDare = fs.readFileSync(truthDarePicsDare[Math.floor(Math.random() * truthDarePicsDare.length)]);
 
-        await Atlas.sendMessage(
+        await Hooper.sendMessage(
           m.from,
-          { image: { url: botImage3 }, caption: `*${dareData}*` },
+          { image: picDare, caption: `*${dareData}*` },
           { quoted: m },
         );
         break;
@@ -249,9 +254,9 @@ export default {
         await doReact("🧫️");
         let result = Math.floor(Math.random() * 2) + 1;
         if (result === 1) {
-          await Atlas.sendMessage(m.from, { text: "Heads" }, { quoted: m });
+          await Hooper.sendMessage(m.from, { text: "Heads" }, { quoted: m });
         } else {
-          await Atlas.sendMessage(m.from, { text: "Tails" }, { quoted: m });
+          await Hooper.sendMessage(m.from, { text: "Tails" }, { quoted: m });
         }
         break;
 
@@ -259,13 +264,13 @@ export default {
         await doReact("🎲️");
         let max = parseInt(args[0]);
         if (!max)
-          return Atlas.sendMessage(
+          return Hooper.sendMessage(
             m.from,
             { text: "Please provide a maximum number of sides for the dice." },
             { quoted: m },
           );
         let roll = Math.floor(Math.random() * max) + 1;
-        Atlas.sendMessage(
+        Hooper.sendMessage(
           m.from,
           { text: `You rolled a ${roll}!` },
           { quoted: m },
@@ -277,9 +282,11 @@ export default {
         try {
           const response = await axios.get(`https://nekos.life/api/v2/fact`);
           const tet = `*『  Random Facts  』* \n\n${response.data.fact}`;
-          await Atlas.sendMessage(
+          const factPics = ["./Assets/Hooper.jpg"];
+          const picFact = fs.readFileSync(factPics[Math.floor(Math.random() * factPics.length)]);
+          await Hooper.sendMessage(
             m.from,
-            { image: { url: botImage4 }, caption: tet + "\n" },
+            { image: picFact, caption: tet + "\n" },
             { quoted: m },
           );
         } catch (err) {

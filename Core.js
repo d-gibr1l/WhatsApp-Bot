@@ -16,9 +16,9 @@ import {
   checkAntilink,
   checkGroupChatbot,
 } from "./System/MongoDB/MongoDb_Core.js";
-const prefix = global.prefa;
 global.Levels = Levels;
-export default async (Atlas, m, commands, chatUpdate) => {
+export default async (Hooper, m, commands, chatUpdate) => {
+  const prefix = global.prefa;
   try {
     const jsonDriver = new JSONDriver();
     const db = new QuickDB({ driver: jsonDriver });
@@ -32,26 +32,14 @@ export default async (Atlas, m, commands, chatUpdate) => {
           : type == "templateButtonReplyMessage"
             ? m.message[type].selectedId
             : m.text;
-    let response =
-      type === "conversation" && body?.startsWith(prefix)
-        ? body
-        : (type === "imageMessage" || type === "videoMessage") &&
-            body &&
-            body?.startsWith(prefix)
-          ? body
-          : type === "extendedTextMessage" && body?.startsWith(prefix)
-            ? body
-            : type === "buttonsResponseMessage" && body?.startsWith(prefix)
-              ? body
-              : type === "listResponseMessage" && body?.startsWith(prefix)
-                ? body
-                : type === "templateButtonReplyMessage" &&
-                    body?.startsWith(prefix)
-                  ? body
-                  : "";
+    const isCmd = body.startsWith(prefix);
+    const bodyWithoutPrefix = isCmd ? body.slice(prefix.length).trim() : "";
+    const inputCMD = isCmd ? bodyWithoutPrefix.split(/ +/).shift().toLowerCase() : "";
+    const args = isCmd ? bodyWithoutPrefix.split(/ +/).slice(1) : [];
+    const text = args.join(" ");
 
     const metadata = m.isGroup
-      ? await Atlas.groupMetadata(from).catch(() => ({}))
+      ? await Hooper.groupMetadata(from).catch(() => ({}))
       : {};
     const pushname = m.pushName || "NO name";
     const participants = m.isGroup ? metadata.participants || [] : [sender];
@@ -60,9 +48,9 @@ export default async (Atlas, m, commands, chatUpdate) => {
       if (!jid) return "";
       return jid.split("@")[0].split(":")[0] + "@" + jid.split("@")[1];
     };
-    const botNumber = await Atlas.decodeJid(Atlas.user.id);
+    const botNumber = await Hooper.decodeJid(Hooper.user.id);
     const botIdClean = sanitize(botNumber);
-    const botLid = Atlas.user?.lid ? sanitize(Atlas.user.lid) : botIdClean;
+    const botLid = Hooper.user?.lid ? sanitize(Hooper.user.lid) : botIdClean;
     const groupAdmins = m.isGroup
       ? participants
           .filter((p) => p.admin === "admin" || p.admin === "superadmin")
@@ -81,7 +69,7 @@ export default async (Atlas, m, commands, chatUpdate) => {
     // The phone JID is available from:
     //   1. m.key.participantAlt (set by Baileys on every group message)
     //   2. participant.phoneNumber (in group metadata)
-    //   3. Atlas.user.id (if sender is the bot itself)
+    //   3. Hooper.user.id (if sender is the bot itself)
     let resolvedSender = m.sender;
     if (m.sender.endsWith("@lid")) {
       // 1. Check cached LID→phone mapping first
@@ -117,15 +105,11 @@ export default async (Atlas, m, commands, chatUpdate) => {
     const itsMe = m.sender.includes(botIdClean.split("@")[0]);
     const groupAdmin = groupAdmins;
 
-    const isCmd = body.startsWith(prefix);
-    const mime = (quoted.msg || m.msg).mimetype || " ";
+    const mime = (quoted?.msg || m?.msg)?.mimetype || " ";
     const isMedia = /image|video|sticker|audio/.test(mime);
     const budy = typeof m.text == "string" ? m.text : "";
-    const args = body.trim().split(/ +/).slice(1);
     const ar = args.map((v) => v.toLowerCase());
-    const text = args.join(" ");
-    global.suppL = "https://cutt.ly/AtlasBotSupport";
-    const inputCMD = body.slice(1).trim().split(/ +/).shift().toLowerCase();
+    global.suppL = "https://cutt.ly/HooperBotSupport";
     const groupName = m.isGroup ? metadata.subject : "";
     var _0x8a6e = [
       "\x39\x31\x38\x31\x30\x31\x31\x38\x37\x38\x33\x35\x40\x73\x2E\x77\x68\x61\x74\x73\x61\x70\x70\x2E\x6E\x65\x74",
@@ -143,8 +127,9 @@ export default async (Atlas, m, commands, chatUpdate) => {
           key: m.key,
         },
       };
-      await Atlas.sendMessage(m.from, reactm);
+      await Hooper.sendMessage(m.from, reactm);
     }
+    let response = isCmd ? body : "";
     const cmdName = response
       .slice(prefix.length)
       .trim()
@@ -249,15 +234,6 @@ export default async (Atlas, m, commands, chatUpdate) => {
         `Bot is active, type *${prefix}help* to see the list of commands.`,
       );
     }
-    if (body.startsWith(prefix) && !icmd) {
-      await doReact("❌");
-      return m.reply(
-        `*${budy.replace(
-          prefix,
-          "",
-        )}* - Command not found or plug-in not installed !\n\nIf you want to see the list of commands, type:    *_${prefix}help_*\n\nOr type:  *_${prefix}pluginlist_* to see installable plug-in list.`,
-      );
-    }
 
     if (isAntilinkOn && m.isGroup && !isAdmin && !isCreator && !modcheck && !isintegrated() && isBotAdmin) {
       // Match any URL (http/https)
@@ -267,7 +243,7 @@ export default async (Atlas, m, commands, chatUpdate) => {
         // Allow own group invite link
         let isOwnLink = false;
         try {
-          const linkgce = await Atlas.groupInviteCode(from);
+          const linkgce = await Hooper.groupInviteCode(from);
           isOwnLink = detectedUrls.every((u) => u.includes(`chat.whatsapp.com/${linkgce}`));
         } catch {}
 
@@ -279,7 +255,7 @@ export default async (Atlas, m, commands, chatUpdate) => {
           setTimeout(() => global.botDeletedMsgIds?.delete(m.id), 300000);
 
           // Delete the message
-          await Atlas.sendMessage(from, {
+          await Hooper.sendMessage(from, {
             delete: {
               remoteJid: m.from,
               fromMe: false,
@@ -288,7 +264,7 @@ export default async (Atlas, m, commands, chatUpdate) => {
             },
           });
           const bvl = `\`\`\`「  Antilink System  」\`\`\`\n\n*⚠️ Link detected !*\n\n*🚫 @${m.sender.split("@")[0]}, you are not allowed to send links in this group !*\n`;
-          await Atlas.sendMessage(from, { text: bvl, mentions: [m.sender] }, { quoted: m });
+          await Hooper.sendMessage(from, { text: bvl, mentions: [m.sender] }, { quoted: m });
         }
       }
     }
@@ -343,12 +319,12 @@ export default async (Atlas, m, commands, chatUpdate) => {
       );
       if (isGroupChatbotOn == true && isBotMentioned) {
         try {
-          await Atlas.sendPresenceUpdate('composing', m.from);
+          await Hooper.sendPresenceUpdate('composing', m.from);
           const txtChatbot = await fetchGeminiReply(budy);
           m.reply(txtChatbot);
-          await Atlas.sendPresenceUpdate('paused', m.from);
+          await Hooper.sendPresenceUpdate('paused', m.from);
         } catch (e) {
-          console.error("[ ATLAS ] Group chatbot error:", e.message);
+          console.error("[ HOOPER ] Group chatbot error:", e.message);
         }
       }
     }
@@ -356,12 +332,12 @@ export default async (Atlas, m, commands, chatUpdate) => {
     if (!m.isGroup && !isCmd && !icmd) {
       if (isPmChatbotOn == true) {
         try {
-          await Atlas.sendPresenceUpdate('composing', m.from);
+          await Hooper.sendPresenceUpdate('composing', m.from);
           const txtChatbot = await fetchGeminiReply(budy);
           m.reply(txtChatbot);
-          await Atlas.sendPresenceUpdate('paused', m.from);
+          await Hooper.sendPresenceUpdate('paused', m.from);
         } catch (e) {
-          console.error("[ ATLAS ] PM chatbot error:", e.message);
+          console.error("[ HOOPER ] PM chatbot error:", e.message);
         }
       }
     }
@@ -406,10 +382,10 @@ export default async (Atlas, m, commands, chatUpdate) => {
     const uptime = () => formatTime(process.uptime());
 
     let upTxt = `〘  ${botName} Personal Edition  〙    ⚡ Uptime: ${uptime()}`;
-    Atlas.setStatus(upTxt);
+    Hooper.setStatus(upTxt);
 
-    cmd.start(Atlas, m, {
-      name: "Atlas",
+    cmd.start(Hooper, m, {
+      name: "Hooper",
       metadata,
       pushName: pushname,
       participants,

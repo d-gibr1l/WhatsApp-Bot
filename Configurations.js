@@ -30,11 +30,11 @@ if (!gg) {
 }
 
 global.owner = gg.split(",");
-global.mongodb = process.env.MONGODB || "mongodb://localhost:27017/atlas";
+global.mongodb = process.env.MONGODB || "mongodb://localhost:27017/hooper";
 global.sessionId = stripEnv(process.env.SESSION_ID, "ok");
 global.prefa = stripEnv(process.env.PREFIX, "-");
-global.packname = stripEnv(process.env.PACKNAME, `Atlas Bot`);
-global.author = stripEnv(process.env.AUTHOR, "by: Team Atlas");
+global.packname = stripEnv(process.env.PACKNAME, `Hooper Bot`);
+global.author = stripEnv(process.env.AUTHOR, "by: Team Hooper");
 global.port = stripEnv(process.env.PORT, "10000");
 
 // Multi-key pools — comma-separate as many keys as you want in .env
