@@ -1104,10 +1104,15 @@ const connectHooper = async (trigger) => {
 async function initConfigAndStart() {
   const db = await import("./src/db.js");
   
-  // Auto-generate Session ID if not present in DB
+  // Session ID priority: DB setting → env var (Configurations.js) → auto-generate
   let dbSessionId = await db.getSetting("HOOPER_SESSION_ID");
   if (!dbSessionId) {
-    dbSessionId = `HOOPER-MD-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    // Use the value from env/Configurations.js if it's set to something real
+    if (global.sessionId && global.sessionId !== "ok") {
+      dbSessionId = global.sessionId;
+    } else {
+      dbSessionId = `HOOPER-MD-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    }
     await db.setSetting("HOOPER_SESSION_ID", dbSessionId);
   }
   global.sessionId = dbSessionId;
