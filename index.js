@@ -1360,6 +1360,14 @@ const shutdown = async (signal) => {
     console.log(chalk.green(`[ HOOPER ] Final session sync complete`));
   }
   await mongoose.disconnect().catch(() => {});
+  
+  if (signal === "LOCK_STOLEN") {
+    console.log(chalk.cyan(`[ HOOPER ] Pausing execution to prevent PM2 restarts. Waiting for Render to terminate container.`));
+    // Keep the event loop alive indefinitely so PM2 doesn't restart it
+    setInterval(() => {}, 1000 * 60 * 60);
+    return;
+  }
+  
   process.exit(0);
 };
 
