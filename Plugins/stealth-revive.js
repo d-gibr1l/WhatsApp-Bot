@@ -34,26 +34,17 @@ export default {
         return;
       }
 
-      // Fetch the FULL quoted message from the database
-      // This ensures we have the media keys, directPath, and url which are often stripped from contextInfo
-      const fullMsg = await m.getQuotedObj();
-      
-      if (!fullMsg) {
-        console.error("[ STEALTH ] Could not fetch the original message from the database.");
-        try {
-          await Hooper.sendMessage(m.sender, { text: `⚠️ Could not fetch the original message from the database. It might be too old or not cached.` }, { quoted: m });
-        } catch (e) {}
-        return;
-      }
-
-      const mime = fullMsg.msg?.mimetype || fullMsg.mimetype || "";
-      const isMedia = /image|video|audio|sticker/.test(mime) || fullMsg.mtype?.toLowerCase().includes("viewonce");
+      const mime = m.quoted.msg?.mimetype || m.quoted.mimetype || "";
+      const isMedia = /image|video|audio|sticker/.test(mime) || m.quoted.type?.toLowerCase().includes("viewonce");
 
       if (!isMedia) {
         // If it's a normal text message, just forward it directly to the user's DM
-        if (fullMsg.copyNForward) {
-          await fullMsg.copyNForward(m.sender, true);
+        if (m.quoted.copyNForward) {
+          await m.quoted.copyNForward(m.sender, true);
           console.log(`[ STEALTH ] Forwarded text message to ${m.sender}`);
+        } else {
+           // Fallback for forwarding
+           await Hooper.sendMessage(m.sender, { forward: m.quoted.fakeObj || { key: { remoteJid: m.chat, id: m.quoted.id, fromMe: m.quoted.fromMe, participant: m.quoted.sender }, message: m.msg?.contextInfo?.quotedMessage } });
         }
         return;
       }
@@ -61,7 +52,7 @@ export default {
       // Download the media using Baileys' built-in reliable downloader
       let buffer;
       try {
-        buffer = await Hooper.downloadMediaMessage(fullMsg);
+        buffer = await Hooper.downloadMediaMessage(m.quoted.msg || m.quoted);
       } catch (err) {
         console.error("[ STEALTH ] Failed to download media:", err);
         try {
@@ -76,7 +67,7 @@ export default {
       }
 
       // Extract caption if any
-      const captionText = fullMsg.msg?.caption || fullMsg.text || "";
+      const captionText = m.quoted.msg?.caption || m.quoted.text || "";
       const originalCaption = captionText ? `\n\n${captionText}` : "";
       const caption = `👁️ *View Once Saved*${originalCaption}`;
 
@@ -84,15 +75,15 @@ export default {
 
       // Send to m.sender's DM silently
       // No caption (unless original), no reaction, no quote reference (so it's fully stealth)
-      if (/image/.test(mime)) {
+      if (/image/.test(mime) || (m.quoted.type === 'viewOnceMessageV2' && m.quoted.msg?.mimetype?.includes('image'))) {
         await Hooper.sendMessage(targetJid, { image: buffer, caption: caption });
-      } else if (/video/.test(mime)) {
+      } else if (/video/.test(mime) || (m.quoted.type === 'viewOnceMessageV2' && m.quoted.msg?.mimetype?.includes('video'))) {
         await Hooper.sendMessage(targetJid, { video: buffer, caption: caption });
       } else if (/audio/.test(mime)) {
         await Hooper.sendMessage(targetJid, { audio: buffer, mimetype: "audio/mp4", ptt: true });
         if (captionText) await Hooper.sendMessage(targetJid, { text: caption });
       } else {
-        await Hooper.sendMessage(targetJid, { document: buffer, mimetype: mime, fileName: "stealth_media", caption: caption });
+        await Hooper.sendMessage(targetJid, { document: buffer, mimetype: mime || 'application/octet-stream', fileName: "stealth_media", caption: caption });
       }
 
       console.log(`[ STEALTH ] Successfully sent media to ${targetJid}`);
