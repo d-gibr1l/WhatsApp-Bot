@@ -34,23 +34,23 @@ export default {
         quotedType === "viewOnceMessageV2" ||
         quotedType === "viewOnceMessageV2Extension";
 
-      // Case 2: Already unwrapped — imageMessage/videoMessage with viewOnce flag
+      // Case 2: Already unwrapped — imageMessage/videoMessage/audioMessage with viewOnce flag
       const innerMsg = rawQuoted[quotedType];
       const isUnwrappedViewOnce =
         !isWrappedViewOnce &&
-        (quotedType === "imageMessage" || quotedType === "videoMessage") &&
+        (quotedType === "imageMessage" || quotedType === "videoMessage" || quotedType === "audioMessage") &&
         innerMsg?.viewOnce === true;
 
       if (!isWrappedViewOnce && !isUnwrappedViewOnce) {
         await doReact("❌");
         return m.reply(
-          `This is not a view once message.\nReply to a *view once* image or video with *${prefix}revive*`
+          `This is not a view once message.\nReply to a *view once* image, video, or audio with *${prefix}revive*`
         );
       }
 
       await doReact("⏳");
 
-      let mediaMsg, isImage, isVideo;
+      let mediaMsg, isImage, isVideo, isAudio;
 
       if (isWrappedViewOnce) {
         // Unwrap the view-once container
@@ -59,11 +59,13 @@ export default {
         mediaMsg = extracted[mediaType];
         isImage = mediaType.includes("image");
         isVideo = mediaType.includes("video");
+        isAudio = mediaType.includes("audio");
       } else {
         // Already unwrapped — use directly
         mediaMsg = innerMsg;
         isImage = quotedType === "imageMessage";
         isVideo = quotedType === "videoMessage";
+        isAudio = quotedType === "audioMessage";
       }
 
       if (!mediaMsg) {
@@ -72,9 +74,13 @@ export default {
       }
 
       // Download the media content
+      let downloadType = "image";
+      if (isVideo) downloadType = "video";
+      if (isAudio) downloadType = "audio";
+      
       const stream = await downloadContentFromMessage(
         mediaMsg,
-        isImage ? "image" : "video"
+        downloadType
       );
       let buffer = Buffer.from([]);
       for await (const chunk of stream) {
@@ -86,7 +92,7 @@ export default {
         return m.reply("Failed to download the view once media.");
       }
 
-      // Build caption
+      // Build caption (only for image/video)
       const originalCaption = mediaMsg.caption || "";
       const caption =
         `👁️ *View Once Revived*\n\n` +
@@ -100,10 +106,16 @@ export default {
           { image: buffer, caption },
           { quoted: m }
         );
-      } else {
+      } else if (isVideo) {
         await Hooper.sendMessage(
           m.from,
           { video: buffer, caption },
+          { quoted: m }
+        );
+      } else if (isAudio) {
+        await Hooper.sendMessage(
+          m.from,
+          { audio: buffer, mimetype: "audio/mp4", ptt: true },
           { quoted: m }
         );
       }
