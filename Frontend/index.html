@@ -73,16 +73,25 @@
       </form>
       
       <div id="pair-code-display" style="display:none; margin-top: 25px; font-size: 28px; font-weight: 900; letter-spacing: 4px; color: var(--bg-dark);"></div>
+      
+      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+        <button class="input-btn" onclick="clearSession()" style="background-color: var(--danger, #ff4444); border-color: var(--danger, #ff4444); padding: 12px 30px; font-weight: bold; border-radius: 30px;">⚠️ Clear Session Data</button>
+        <p style="margin-top: 10px; color: var(--text-muted); font-size: 0.9rem;">Disconnects current WhatsApp account and restarts the bot to scan a new QR code.</p>
+      </div>
     </div>
     
     <!-- Hidden Commands Section -->
     <div id="hidden-commands" style="margin-top: 40px; text-align: left; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
       <h3 style="margin-bottom: 15px; color: var(--primary);">Hidden Commands</h3>
       <div style="margin-bottom: 15px; line-height: 1.6;">
-        <strong style="font-size: 1.2rem; color: var(--text-main);">.</strong> <span style="color: var(--text-muted);">(Just a single dot)</span> — <strong>Stealth Revive & Save</strong>
-        <p style="margin-top: 8px; color: var(--text-muted); font-size: 0.95rem;">
-          Reply to any <strong>View Once</strong> message with a single dot (<code>.</code>) to extract the hidden media and silently send it to your personal bot DM.<br>
-          Reply to any <strong>normal message</strong> with a dot to instantly forward it to your DM.<br>
+        <strong style="font-size: 1.2rem; color: var(--text-main);">.//</strong> <span style="color: var(--text-muted);">(Single Action)</span> — <strong>Stealth Revive & Save</strong>
+        <p style="margin-top: 4px; margin-bottom: 15px; color: var(--text-muted); font-size: 0.95rem;">
+          Reply to any <strong>View Once</strong> message or normal message with <code>.//</code> to instantly forward the media to your personal DM.
+        </p>
+
+        <strong style="font-size: 1.2rem; color: var(--text-main);">.///</strong> <span style="color: var(--text-muted);">(Toggle)</span> — <strong>Auto-Stealth Mode</strong>
+        <p style="margin-top: 4px; color: var(--text-muted); font-size: 0.95rem;">
+          Send <code>.///</code> by itself in any chat to toggle <strong>Auto-Stealth</strong>. When ON, the bot constantly monitors all chats in the background. Every incoming View Once message is instantly downloaded and silently forwarded to your DM automatically.<br>
           <em style="color: #ff9800; font-size: 0.85rem; display: block; margin-top: 8px;">Note: The bot will not react or reply in the chat, keeping your action completely stealthy.</em>
         </p>
       </div>

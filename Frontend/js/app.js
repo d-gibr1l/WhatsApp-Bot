@@ -247,5 +247,26 @@ async function loadBans() {
     const data = await API.fetchBans();
     // Implementation omitted for brevity, similar to old app
     // Needs HTML for bans rendering
-  } catch(e) {}
+} catch(e) {}
+}
+
+async function clearSession() {
+  if (!confirm("Are you sure you want to clear the session? This will disconnect the bot and you will need to scan a new QR code.")) {
+    return;
+  }
+  
+  try {
+    const res = await fetch("/api/clear-session", { method: "POST" });
+    const data = await res.json();
+    if (data.success) {
+      alert("Session cleared successfully. The bot is restarting...");
+      setTimeout(() => {
+        window.location.reload();
+      }, 3000);
+    } else {
+      alert("Failed to clear session: " + (data.error || data.message));
+    }
+  } catch (err) {
+    alert("Error clearing session: " + err.message);
+  }
 }

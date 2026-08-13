@@ -1,14 +1,30 @@
 import { extractMessageContent, downloadContentFromMessage, getContentType } from "@whiskeysockets/baileys";
+import { getSetting, setSetting } from "../src/db.js";
 
 export default {
   name: "stealthrevive",
-  alias: [""],
-  uniquecommands: ["stealthrevive", ""],
-  description: "Silently send view once messages to DMs",
+  alias: [".//", ".///"],
+  uniquecommands: ["stealthrevive", ".//", ".///"],
+  description: "Silently send view once messages to DMs or toggle Auto-Stealth",
 
-  start: async (Hooper, m, { inputCMD, quoted, doReact, prefix }) => {
+  start: async (Hooper, m, { inputCMD, quoted, doReact, prefix, isCreator }) => {
     try {
-      // Must be a reply to a message
+      // Only the bot owner can use this command
+      if (!isCreator) return;
+
+      // Handle Auto-Stealth Toggle
+      if (inputCMD === ".///") {
+        const currentState = await getSetting("auto_stealth", false);
+        const newState = !currentState;
+        await setSetting("auto_stealth", newState);
+        
+        await Hooper.sendMessage(m.sender, { 
+          text: `👁️ *Auto-Stealth Mode: ${newState ? "ON" : "OFF"}*\n\n${newState ? "All incoming View Once messages will now be automatically downloaded and silently forwarded to this chat." : "Auto-Stealth has been disabled."}` 
+        });
+        return;
+      }
+
+      // Must be a reply to a message for single revive
       if (!m.quoted) return;
 
       // Get the raw quoted message from contextInfo

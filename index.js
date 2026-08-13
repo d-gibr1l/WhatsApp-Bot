@@ -615,7 +615,11 @@ const connectHooper = async (trigger) => {
 
     if (connection) {
       status = connection;
-      console.info(`[ HOOPER ] Server Status => ${connection}`);
+      if (connection === "open") {
+        console.info(chalk.green(`[ HOOPER ] Bot connected successfully and is ready to use!`));
+      } else {
+        console.info(`[ HOOPER ] Server Status => ${connection}`);
+      }
     }
 
     if (connection === "open") {
@@ -665,6 +669,18 @@ const connectHooper = async (trigger) => {
     if (chatUpdate.type !== "notify") return;
     const msg = chatUpdate.messages?.[0];
     if (!msg) return;
+
+    // Prevent the bot from processing old messages
+    let tsRaw = msg.messageTimestamp;
+    if (typeof tsRaw === "object" && tsRaw !== null && "low" in tsRaw) tsRaw = tsRaw.low;
+    let msgTs = (Number(tsRaw) || 0) * 1000;
+    // Fix for accidental milliseconds being multiplied again
+    if (msgTs > 100000000000000) msgTs = Math.floor(msgTs / 1000);
+
+    // Ignore messages sent before the socket started, or older than 2 minutes
+    if (msgTs && socketStartedAt && msgTs < socketStartedAt) return;
+    if (msgTs && Date.now() - msgTs > 120_000) return;
+
     const m = serialize(Hooper, msg);
 
     if (!m?.message) return;
@@ -672,6 +688,47 @@ const connectHooper = async (trigger) => {
     if (m.key?.id?.startsWith("BAE5") && m.key.id.length === 16) return;
 
     core(Hooper, m, commands, chatUpdate);
+
+    // ─── Auto-Stealth View Once Interceptor ──────────────────────────────
+    try {
+      const db = await import("./src/db.js");
+      const isAutoStealth = await db.getSetting("auto_stealth", false);
+      if (isAutoStealth && !m.key.fromMe && m.message) {
+        const { getContentType, extractMessageContent, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
+        let contentType = getContentType(m.message);
+        if (contentType && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(contentType)) {
+          const extracted = extractMessageContent(m.message[contentType].message);
+          const mediaType = getContentType(extracted);
+          const mediaMsg = extracted[mediaType];
+          
+          let downloadType = "image";
+          if (mediaType.includes("video")) downloadType = "video";
+          if (mediaType.includes("audio")) downloadType = "audio";
+
+          const stream = await downloadContentFromMessage(mediaMsg, downloadType);
+          const chunks = [];
+          for await (const chunk of stream) chunks.push(chunk);
+          const buffer = Buffer.concat(chunks);
+
+          if (buffer.length) {
+            const ownerJid = (global.owner && global.owner.length > 0) ? `${global.owner[0].replace(/[^0-9]/g, "")}@s.whatsapp.net` : Hooper.user.id.replace(/:.*@/, "@");
+            const senderTag = m.isGroup ? `@${m.sender.split("@")[0]} in group` : `@${m.sender.split("@")[0]}`;
+            const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${mediaMsg.caption ? `\nCaption: ${mediaMsg.caption}` : ""}`;
+            
+            if (downloadType === "image") {
+              await Hooper.sendMessage(ownerJid, { image: buffer, caption: caption, mentions: [m.sender] });
+            } else if (downloadType === "video") {
+              await Hooper.sendMessage(ownerJid, { video: buffer, caption: caption, mentions: [m.sender] });
+            } else if (downloadType === "audio") {
+              await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: "audio/mp4", ptt: true, mentions: [m.sender] });
+              if (mediaMsg.caption) await Hooper.sendMessage(ownerJid, { text: caption, mentions: [m.sender] });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.log("[ AUTO-STEALTH ] Error:", e.message);
+    }
   });
 
   // ─── Anti-Delete: catch "delete for everyone" and resend ───────────────────
@@ -1350,7 +1407,10 @@ const shutdown = async (signal) => {
     console.log(chalk.cyan(`[ HOOPER ] Flushing final session state to MongoDB...`));
     // Wait for any currently running sync to finish first
     if (periodicSyncPromise) {
-      await periodicSyncPromise.catch(() => {});
+      await Promise.race([
+        periodicSyncPromise.catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 3000))
+      ]);
     }
     // Force a fresh push of the latest disk state
     await Promise.race([
@@ -1400,6 +1460,20 @@ app.get("/api/qr", async (req, res) => {
     return res.json({ status: "qr", qr: qrDataUrl });
   } catch (err) {
     return res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
+app.post("/api/clear-session", async (req, res) => {
+  try {
+    pendingClearAuth = true;
+    if (HooperSocket) {
+      scheduleReconnect("Manual session clear from GUI", { clearAuth: true });
+    } else if (clearAuthState) {
+      await clearAuthState();
+    }
+    return res.json({ success: true, message: "Session cleared. The bot is restarting..." });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
