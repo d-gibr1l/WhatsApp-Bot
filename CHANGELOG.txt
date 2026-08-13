@@ -5,6 +5,17 @@ This file tracks all customizations, plugin additions, and modifications made to
 
 ---
 
+### [2026-08-13] - Bug Fixes & Stealth Features
+- **Action:** Implemented new features and squashed deployment bugs.
+- **Details:** 
+  - Created `Plugins/stealth-revive.js` to silently forward view-once and regular media/messages directly to the owner's DM when responding with `.`.
+  - Fixed a JavaScript parsing bug in `Core.js` where empty-string aliases (`""`) were evaluated as falsy by `.find()`. Changed to `.some()` to correctly execute the `.` command.
+  - Stopped massive PM2 "failed to kill" log spam during graceful shutdowns by setting `kill_retry_time: 2000` in `ecosystem.config.cjs`.
+  - Fixed a dangerous infinite PM2 restart loop in `index.js` caused by Zero-Downtime deployments (Render). When a newer instance steals the lock (`LOCK_STOLEN`), the older instance now hangs indefinitely to await container teardown instead of exiting and triggering PM2 restarts.
+  - Enhanced the Frontend Dashboard: Uptime is now dynamic, added a "Hidden Commands" section, and UI tabs now persist across refreshes via `localStorage`.
+
+---
+
 ### [2026-08-12] - Dashboard Restoration
 - **Action:** Restored the custom "HOOPER" web dashboard on top of the factory reset installation.
 - **Details:** 
