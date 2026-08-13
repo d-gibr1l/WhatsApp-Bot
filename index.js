@@ -821,7 +821,7 @@ const connectHooper = async (trigger) => {
           if (isImage || isVideo || isAudio || isSticker || isDoc) {
              mediaType = isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : isSticker ? "sticker" : "document";
              try {
-               const stream = await downloadContentFromMessage(content, mediaType);
+               const stream = await downloadContentFromMessage(content, mediaType === "sticker" ? "image" : mediaType);
                const chunks = [];
                for await (const chunk of stream) {
                  chunks.push(chunk);
@@ -861,8 +861,9 @@ const connectHooper = async (trigger) => {
             }
         };
 
-        // Always send to owner (unless the owner is the one who deleted it? The user said "every delete message")
-        await sendDeletedMessage(ownerJid, "(Personal)");
+        // Always send to owner
+        const originType = chatId.endsWith("@g.us") ? "Group" : "DM";
+        await sendDeletedMessage(ownerJid, `(${originType})`);
 
         // Send to the chat if antidelete is enabled for that chat
         if (isChatEnabled) {

@@ -10,7 +10,11 @@ const __dirname = dirname(__filename);
 function ffmpeg(buffer, args = [], ext = '', ext2 = '') {
   return new Promise(async (resolve, reject) => {
     try {
-      let tmp = path.join(__dirname, './Cache', + new Date + '.' + ext)
+      const cacheDir = path.join(__dirname, './Cache');
+      if (!fs.existsSync(cacheDir)) {
+        fs.mkdirSync(cacheDir, { recursive: true });
+      }
+      let tmp = path.join(cacheDir, + new Date + '.' + ext)
       let out = tmp + '.' + ext2
       await fs.promises.writeFile(tmp, buffer)
       spawn(ffmpegPath, [

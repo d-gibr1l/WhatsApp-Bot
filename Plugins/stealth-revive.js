@@ -69,21 +69,29 @@ export default {
       // Extract caption if any
       const captionText = m.quoted.msg?.caption || m.quoted.text || "";
       const originalCaption = captionText ? `\n\n${captionText}` : "";
-      const caption = `👁️ *View Once Saved*${originalCaption}`;
+      
+      const isViewOnce = m.quoted.type?.toLowerCase().includes("viewonce");
+      const senderNumber = m.quoted.sender.split("@")[0];
+      
+      const caption = isViewOnce 
+         ? `👁️ *View Once Saved*${originalCaption}`
+         : `saved from @${senderNumber}.\n------------------------${originalCaption}`;
 
       const targetJid = m.sender;
 
       // Send to m.sender's DM silently
       // No caption (unless original), no reaction, no quote reference (so it's fully stealth)
+      const messageOptions = { caption: caption, mentions: isViewOnce ? undefined : [m.quoted.sender] };
+
       if (/image/.test(mime) || (m.quoted.type === 'viewOnceMessageV2' && m.quoted.msg?.mimetype?.includes('image'))) {
-        await Hooper.sendMessage(targetJid, { image: buffer, caption: caption });
+        await Hooper.sendMessage(targetJid, { image: buffer, ...messageOptions });
       } else if (/video/.test(mime) || (m.quoted.type === 'viewOnceMessageV2' && m.quoted.msg?.mimetype?.includes('video'))) {
-        await Hooper.sendMessage(targetJid, { video: buffer, caption: caption });
+        await Hooper.sendMessage(targetJid, { video: buffer, ...messageOptions });
       } else if (/audio/.test(mime)) {
         await Hooper.sendMessage(targetJid, { audio: buffer, mimetype: "audio/mp4", ptt: true });
-        if (captionText) await Hooper.sendMessage(targetJid, { text: caption });
+        if (captionText) await Hooper.sendMessage(targetJid, { text: caption, mentions: messageOptions.mentions });
       } else {
-        await Hooper.sendMessage(targetJid, { document: buffer, mimetype: mime || 'application/octet-stream', fileName: "stealth_media", caption: caption });
+        await Hooper.sendMessage(targetJid, { document: buffer, mimetype: mime || 'application/octet-stream', fileName: "stealth_media", ...messageOptions });
       }
 
       console.log(`[ STEALTH ] Successfully sent media to ${targetJid}`);
