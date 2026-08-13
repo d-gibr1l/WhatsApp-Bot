@@ -16,6 +16,7 @@ module.exports = {
       max_restarts: 100,
       exp_backoff_restart_delay: 1000,
       kill_timeout: 30000,
+      kill_retry_time: 2000,
       watch: false,
     },
   ],
