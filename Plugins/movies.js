@@ -16,11 +16,11 @@ export default {
         );
       }
 
-      const apiKey = process.env.TMDB_API_KEY;
+      const apiKey = global.tmdbAPIKey || process.env.TMDB_API_KEY;
       if (!apiKey) {
         await doReact("❌");
         return m.reply(
-          `❌ The TMDB API key is missing! The bot owner must add \`TMDB_API_KEY\` to the .env file.\n\nGet a free key from themoviedb.org/settings/api`
+          `❌ The TMDB API key is missing! The bot owner must add it via the Settings Dashboard or \`TMDB_API_KEY\` in the .env file.\n\nGet a free key from themoviedb.org/settings/api`
         );
       }
 

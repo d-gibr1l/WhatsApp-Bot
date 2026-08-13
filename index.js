@@ -1156,6 +1156,9 @@ async function initConfigAndStart() {
   let dbAuthor = await db.getSetting("HOOPER_AUTHOR");
   if (dbAuthor) global.author = dbAuthor;
 
+  let dbTmdbApi = await db.getSetting("HOOPER_TMDB_API");
+  if (dbTmdbApi) global.tmdbAPIKey = dbTmdbApi;
+
   // Start the bot
   await startHooper();
 }
@@ -1542,6 +1545,7 @@ app.get("/api/config", async (req, res) => {
       openaiAPI: (global.openAiAPIKeys || []).join(","),
       claudeAPI: (global.claudeAPIKeys || []).join(","),
       tenorAPI: (global.tenorAPIKeys || []).join(","),
+      tmdbAPI: global.tmdbAPIKey || "",
       gcInterval: process.env.GC_INTERVAL_MINUTES || "30",
     };
     res.json(config);
@@ -1569,6 +1573,7 @@ app.post("/api/config", async (req, res) => {
     if (key === "HOOPER_OPENAI_API") global.openAiAPIKeys = value ? value.split(",") : [];
     if (key === "HOOPER_CLAUDE_API") global.claudeAPIKeys = value ? value.split(",") : [];
     if (key === "HOOPER_TENOR_API") global.tenorAPIKeys = value ? value.split(",") : [];
+    if (key === "HOOPER_TMDB_API") global.tmdbAPIKey = value;
     if (key === "HOOPER_GC_INTERVAL") process.env.GC_INTERVAL_MINUTES = value;
 
     res.json({ success: true, key, value });

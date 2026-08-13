@@ -134,6 +134,7 @@ async function loadSettings() {
     if (document.getElementById('cfg-packname')) document.getElementById('cfg-packname').value = data.packname || '';
     if (document.getElementById('cfg-author')) document.getElementById('cfg-author').value = data.author || '';
     if (document.getElementById('cfg-gemini')) document.getElementById('cfg-gemini').value = data.geminiAPI || '';
+    if (document.getElementById('cfg-tmdb')) document.getElementById('cfg-tmdb').value = data.tmdbAPI || '';
     if (document.getElementById('cfg-openai')) document.getElementById('cfg-openai').value = data.openaiAPI || '';
     if (document.getElementById('cfg-claude')) document.getElementById('cfg-claude').value = data.claudeAPI || '';
     if (document.getElementById('cfg-tenor')) document.getElementById('cfg-tenor').value = data.tenorAPI || '';
