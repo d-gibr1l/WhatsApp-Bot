@@ -57,7 +57,7 @@
     </div>
 
     <!-- QR/Pairing Section -->
-    <div id="view-pairing" style="margin-top: 20px; text-align: center;">
+    <div id="view-pairing" style="display: none; margin-top: 20px; text-align: center;">
       <h2 style="margin-bottom: 15px;">Link Device</h2>
       <p class="stat-label" style="margin-bottom: 20px;">Scan QR Code or enter number</p>
 
@@ -74,10 +74,12 @@
       
       <div id="pair-code-display" style="display:none; margin-top: 25px; font-size: 28px; font-weight: 900; letter-spacing: 4px; color: var(--bg-dark);"></div>
       
-      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
-        <button class="input-btn" onclick="clearSession()" style="background-color: var(--danger, #ff4444); border-color: var(--danger, #ff4444); padding: 12px 30px; font-weight: bold; border-radius: 30px;">⚠️ Clear Session Data</button>
-        <p style="margin-top: 10px; color: var(--text-muted); font-size: 0.9rem;">Disconnects current WhatsApp account and restarts the bot to scan a new QR code.</p>
-      </div>
+    </div>
+    
+    <!-- Clear Session Section -->
+    <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+      <button class="input-btn" onclick="clearSession()" style="background-color: var(--danger, #ff4444); border-color: var(--danger, #ff4444); padding: 12px 30px; font-weight: bold; border-radius: 30px;">⚠️ Clear Session Data</button>
+      <p style="margin-top: 10px; color: var(--text-muted); font-size: 0.9rem;">Disconnects current WhatsApp account and restarts the bot to scan a new QR code.</p>
     </div>
     
     <!-- Hidden Commands Section -->
