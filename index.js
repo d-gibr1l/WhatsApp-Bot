@@ -765,10 +765,11 @@ const connectHooper = async (trigger) => {
              mediaType = isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : isSticker ? "sticker" : "document";
              try {
                const stream = await downloadContentFromMessage(content, mediaType);
-               mediaBuffer = Buffer.from([]);
+               const chunks = [];
                for await (const chunk of stream) {
-                 mediaBuffer = Buffer.concat([mediaBuffer, chunk]);
+                 chunks.push(chunk);
                }
+               mediaBuffer = Buffer.concat(chunks);
              } catch (err) {
                  console.log("Error downloading deleted media:", err);
              }
@@ -947,10 +948,11 @@ const connectHooper = async (trigger) => {
         ? message.mtype.replace(/Message/gi, "")
         : mime.split("/")[0];
       const stream = await downloadContentFromMessage(quoted, messageType);
-      buffer = Buffer.from([]);
+      const chunks = [];
       for await (const chunk of stream) {
-        buffer = Buffer.concat([buffer, chunk]);
+        chunks.push(chunk);
       }
+      buffer = Buffer.concat(chunks);
     }
     let type = await fileTypeFromBuffer(buffer);
     const trueFileName = attachExtension ? filename + "." + type.ext : filename;
@@ -993,10 +995,11 @@ const connectHooper = async (trigger) => {
       ? message.mtype.replace(/Message/gi, "")
       : mime.split("/")[0];
     const stream = await downloadContentFromMessage(message, messageType);
-    let buffer = Buffer.from([]);
+    const chunks = [];
     for await (const chunk of stream) {
-      buffer = Buffer.concat([buffer, chunk]);
+      chunks.push(chunk);
     }
+    let buffer = Buffer.concat(chunks);
     return buffer;
   };
 

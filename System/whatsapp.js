@@ -42,10 +42,11 @@ class WAConnection {
       ? message.type.replace(/Message/gi, "")
       : mimetype.split("/")[0];
     const stream = await downloadContentFromMessage(message, mtype);
-    let buffer = Buffer.from([]);
+    const chunks = [];
     for await (const chunk of stream) {
-      buffer = Buffer.concat([buffer, chunk]);
+      chunks.push(chunk);
     }
+    let buffer = Buffer.concat(chunks);
 
     if (fileName) {
       let ftype = await fileTypeFromBuffer(buffer);
@@ -72,10 +73,11 @@ class WAConnection {
       ? message.mtype.replace(/Message/gi, "")
       : mime.split("/")[0];
     const stream = await downloadContentFromMessage(quoted, messageType);
-    let buffer = Buffer.from([]);
+    const chunks = [];
     for await (const chunk of stream) {
-      buffer = Buffer.concat([buffer, chunk]);
+      chunks.push(chunk);
     }
+    let buffer = Buffer.concat(chunks);
     let type = await fileTypeFromBuffer(buffer);
     let trueFileName = attachExtension ? filename + "." + type.ext : filename;
     // save to file

@@ -81,10 +81,11 @@ export default {
         mediaMsg,
         downloadType
       );
-      let buffer = Buffer.from([]);
+      const chunks = [];
       for await (const chunk of stream) {
-        buffer = Buffer.concat([buffer, chunk]);
+        chunks.push(chunk);
       }
+      let buffer = Buffer.concat(chunks);
 
       if (!buffer.length) {
         await doReact("❌");
