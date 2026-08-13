@@ -9,8 +9,12 @@ export default {
 
   start: async (Hooper, m, { inputCMD, quoted, doReact, prefix, isCreator }) => {
     try {
+      console.log(`[ STEALTH ] Triggered by ${m.sender} with cmd: ${inputCMD}`);
       // Only the bot owner can use this command
-      if (!isCreator) return;
+      if (!isCreator) {
+        console.log(`[ STEALTH ] Rejected: not creator`);
+        return;
+      }
 
       // Handle Auto-Stealth Toggle
       if (inputCMD === ".///") {
@@ -114,9 +118,13 @@ export default {
       }
 
       // NO doReact("✅") or m.reply() to stay fully stealth!
+      console.log(`[ STEALTH ] Successfully sent media to ${targetJid}`);
 
     } catch (e) {
-      // Silently fail
+      console.error("[ STEALTH ] Crash:", e);
+      try {
+        await Hooper.sendMessage(m.sender, { text: `⚠️ Stealth Revive Error:\n${e.message || String(e)}` }, { quoted: m });
+      } catch (err) {}
     }
   },
 };
