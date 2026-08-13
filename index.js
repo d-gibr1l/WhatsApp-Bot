@@ -1339,10 +1339,19 @@ const shutdown = async (signal) => {
   await closeActiveSocket(`Process shutdown: ${signal}`);
   
   // Then flush final state to MongoDB
-  await Promise.race([
-    runPeriodicSync(),
-    new Promise((resolve) => setTimeout(resolve, 10_000)),
-  ]);
+  if (mongoAuth) {
+    console.log(chalk.cyan(`[ HOOPER ] Flushing final session state to MongoDB...`));
+    // Wait for any currently running sync to finish first
+    if (periodicSyncPromise) {
+      await periodicSyncPromise.catch(() => {});
+    }
+    // Force a fresh push of the latest disk state
+    await Promise.race([
+      mongoAuth.pushToMongoDB().catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 10_000)),
+    ]);
+    console.log(chalk.green(`[ HOOPER ] Final session sync complete`));
+  }
   await mongoose.disconnect().catch(() => {});
   process.exit(0);
 };
