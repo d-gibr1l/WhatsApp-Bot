@@ -708,9 +708,9 @@ const connectHooper = async (trigger) => {
           jidNormalizedUser,
         } = await import("@whiskeysockets/baileys");
 
-        const actualSender = cached.key.fromMe ? Hooper.user.id : (cached.key.participant || cached.key.remoteJid);
-        const deleter = update.participant || actualSender;
-        const senderTag = `@${jidNormalizedUser(deleter).split("@")[0]}`;
+        const actualSender = cached.key.fromMe ? (Hooper.user?.id || "") : (cached.key.participant || cached.key.remoteJid || "");
+        const deleter = update.participant || actualSender || "";
+        const senderTag = deleter ? `@${jidNormalizedUser(deleter).split("@")[0]}` : "@unknown";
 
         const botJid = Hooper.user?.id ? jidNormalizedUser(Hooper.user.id) : null;
         
