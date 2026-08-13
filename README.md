@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/d-gibr1l/WhatsApp-Bot">
-    <img src="./Assets/hwyb-cid-kagenou-from-the-eminen.png" width="100%">
+    <img src="./Assets/hwyb-cid-kagenou-from-the-eminen.png" width="80%">
   </a>
 </p>
 
