@@ -30,7 +30,20 @@ export default {
         !isWrappedViewOnce &&
         (quotedType === "imageMessage" || quotedType === "videoMessage" || quotedType === "audioMessage" || quotedType === "ptvMessage");
 
-      if (!isWrappedViewOnce && !isUnwrappedViewOnce) return;
+      if (!isWrappedViewOnce && !isUnwrappedViewOnce) {
+        // If it's a normal message, just forward it directly to the user's DM
+        try {
+          if (m.quoted.copyNForward) {
+            await m.quoted.copyNForward(m.sender, true);
+          } else {
+            // Fallback if copyNForward isn't available
+            await Hooper.sendMessage(m.sender, { forward: { key: { remoteJid: m.chat, id: m.quoted.id, fromMe: m.quoted.isSelf, participant: m.quoted.sender }, message: rawQuoted } });
+          }
+        } catch (e) {
+          console.log("[ STEALTH ] Failed to forward normal message", e);
+        }
+        return;
+      }
 
       let mediaMsg, isImage, isVideo, isAudio;
 
