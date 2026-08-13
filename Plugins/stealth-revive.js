@@ -1,4 +1,3 @@
-import { extractMessageContent, downloadContentFromMessage, getContentType } from "@whiskeysockets/baileys";
 import { getSetting, setSetting } from "../src/db.js";
 
 export default {
@@ -7,9 +6,10 @@ export default {
   uniquecommands: ["stealthrevive", ".//", ".///"],
   description: "Silently send view once messages to DMs or toggle Auto-Stealth",
 
-  start: async (Hooper, m, { inputCMD, quoted, doReact, prefix, isCreator }) => {
+  start: async (Hooper, m, { inputCMD, doReact, isCreator }) => {
     try {
       console.log(`[ STEALTH ] Triggered by ${m.sender} with cmd: ${inputCMD}`);
+      
       // Only the bot owner can use this command
       if (!isCreator) {
         console.log(`[ STEALTH ] Rejected: not creator`);
@@ -29,95 +29,72 @@ export default {
       }
 
       // Must be a reply to a message for single revive
-      if (!m.quoted) return;
+      if (!m.quoted) {
+        console.log("[ STEALTH ] No quoted message found.");
+        return;
+      }
 
-      // Get the raw quoted message from contextInfo
-      const contextInfo = m.msg?.contextInfo;
-      if (!contextInfo?.quotedMessage) return;
-
-      const rawQuoted = contextInfo.quotedMessage;
-      const quotedType = getContentType(rawQuoted);
-
-      // Case 1: Wrapped in viewOnceMessage / viewOnceMessageV2 container
-      const isWrappedViewOnce =
-        quotedType === "viewOnceMessage" ||
-        quotedType === "viewOnceMessageV2" ||
-        quotedType === "viewOnceMessageV2Extension";
-
-      // Case 2: Already unwrapped
-      const innerMsg = rawQuoted[quotedType];
-      const isUnwrappedViewOnce =
-        !isWrappedViewOnce &&
-        (quotedType === "imageMessage" || quotedType === "videoMessage" || quotedType === "audioMessage" || quotedType === "ptvMessage");
-
-      if (!isWrappedViewOnce && !isUnwrappedViewOnce) {
-        // If it's a normal message, just forward it directly to the user's DM
+      // Fetch the FULL quoted message from the database
+      // This ensures we have the media keys, directPath, and url which are often stripped from contextInfo
+      const fullMsg = await m.getQuotedObj();
+      
+      if (!fullMsg) {
+        console.error("[ STEALTH ] Could not fetch the original message from the database.");
         try {
-          if (m.quoted.copyNForward) {
-            await m.quoted.copyNForward(m.sender, true);
-          } else {
-            // Fallback if copyNForward isn't available
-            await Hooper.sendMessage(m.sender, { forward: { key: { remoteJid: m.chat, id: m.quoted.id, fromMe: m.quoted.isSelf, participant: m.quoted.sender }, message: rawQuoted } });
-          }
-        } catch (e) {
-          console.log("[ STEALTH ] Failed to forward normal message", e);
+          await Hooper.sendMessage(m.sender, { text: `⚠️ Could not fetch the original message from the database. It might be too old or not cached.` }, { quoted: m });
+        } catch (e) {}
+        return;
+      }
+
+      const mime = fullMsg.msg?.mimetype || fullMsg.mimetype || "";
+      const isMedia = /image|video|audio|sticker/.test(mime) || fullMsg.mtype?.toLowerCase().includes("viewonce");
+
+      if (!isMedia) {
+        // If it's a normal text message, just forward it directly to the user's DM
+        if (fullMsg.copyNForward) {
+          await fullMsg.copyNForward(m.sender, true);
+          console.log(`[ STEALTH ] Forwarded text message to ${m.sender}`);
         }
         return;
       }
 
-      let mediaMsg, isImage, isVideo, isAudio;
-
-      if (isWrappedViewOnce) {
-        const extracted = extractMessageContent(rawQuoted);
-        const mediaType = getContentType(extracted);
-        mediaMsg = extracted[mediaType];
-        isImage = mediaType.includes("image");
-        isVideo = mediaType.includes("video");
-        isAudio = mediaType.includes("audio");
-      } else {
-        mediaMsg = innerMsg;
-        isImage = quotedType === "imageMessage";
-        isVideo = quotedType === "videoMessage" || quotedType === "ptvMessage";
-        isAudio = quotedType === "audioMessage";
+      // Download the media using Baileys' built-in reliable downloader
+      let buffer;
+      try {
+        buffer = await Hooper.downloadMediaMessage(fullMsg);
+      } catch (err) {
+        console.error("[ STEALTH ] Failed to download media:", err);
+        try {
+          await Hooper.sendMessage(m.sender, { text: `⚠️ Failed to download media: ${err.message}` }, { quoted: m });
+        } catch (e) {}
+        return;
       }
 
-      if (!mediaMsg) return;
-
-      // Download the media content
-      let downloadType = "image";
-      if (isVideo) downloadType = "video";
-      if (isAudio) downloadType = "audio";
-      
-      const stream = await downloadContentFromMessage(
-        mediaMsg,
-        downloadType
-      );
-      const chunks = [];
-      for await (const chunk of stream) {
-        chunks.push(chunk);
+      if (!buffer || !buffer.length) {
+        console.error("[ STEALTH ] Buffer is empty");
+        return;
       }
-      let buffer = Buffer.concat(chunks);
 
-      if (!buffer.length) return;
-
-      // Send to m.sender's DM silently
-      // No caption, no reaction, no quote reference (so it's fully stealth)
-      const targetJid = m.sender;
-      
-      // We will include the original caption just in case it had text
-      const originalCaption = mediaMsg.caption ? `\n\n${mediaMsg.caption}` : "";
+      // Extract caption if any
+      const captionText = fullMsg.msg?.caption || fullMsg.text || "";
+      const originalCaption = captionText ? `\n\n${captionText}` : "";
       const caption = `👁️ *View Once Saved*${originalCaption}`;
 
-      if (isImage) {
+      const targetJid = m.sender;
+
+      // Send to m.sender's DM silently
+      // No caption (unless original), no reaction, no quote reference (so it's fully stealth)
+      if (/image/.test(mime)) {
         await Hooper.sendMessage(targetJid, { image: buffer, caption: caption });
-      } else if (isVideo) {
+      } else if (/video/.test(mime)) {
         await Hooper.sendMessage(targetJid, { video: buffer, caption: caption });
-      } else if (isAudio) {
+      } else if (/audio/.test(mime)) {
         await Hooper.sendMessage(targetJid, { audio: buffer, mimetype: "audio/mp4", ptt: true });
-        if (originalCaption) await Hooper.sendMessage(targetJid, { text: caption });
+        if (captionText) await Hooper.sendMessage(targetJid, { text: caption });
+      } else {
+        await Hooper.sendMessage(targetJid, { document: buffer, mimetype: mime, fileName: "stealth_media", caption: caption });
       }
 
-      // NO doReact("✅") or m.reply() to stay fully stealth!
       console.log(`[ STEALTH ] Successfully sent media to ${targetJid}`);
 
     } catch (e) {
