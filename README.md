@@ -10,42 +10,7 @@
   <i>An Opensource WhatsApp bot by <a href="https://github.com/d-gibr1l">d-gibr1l</a> & Team Hooper — built with Baileys Multi-Device for maximum features, stability and compatibility.</i>
 </p>
 
-<p align="center">
-  <a href="https://github.com/d-gibr1l/WhatsApp-Bot/fork">
-    <img src="https://img.shields.io/github/forks/d-gibr1l/WhatsApp-Bot?label=Fork&style=social">
-  </a>
-  &nbsp;
-  <a href="https://github.com/d-gibr1l/WhatsApp-Bot/stargazers">
-    <img src="https://img.shields.io/github/stars/d-gibr1l/WhatsApp-Bot?style=social">
-  </a>
-</p>
 
-<p align="center">
-  <a href="https://github.com/d-gibr1l/WhatsApp-Bot/actions/workflows/ci.yml">
-    <img src="https://github.com/d-gibr1l/WhatsApp-Bot/actions/workflows/ci.yml/badge.svg" alt="CI Build Status">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/d-gibr1l">
-    <img src="https://img.shields.io/badge/Owner-Team Hooper-white.svg?style=for-the-badge&logo=github" width="170px">
-  </a>
-  <a href="https://github.com/d-gibr1l/WhatsApp-Bot/blob/main/LICENSE.md">
-    <img src="https://img.shields.io/github/license/d-gibr1l/WhatsApp-Bot?color=%231e81b0&style=for-the-badge" width="114px">
-  </a>
-  <a href="https://github.com/d-gibr1l">
-    <img src="https://img.shields.io/badge/Open%20Source-YES-green.svg?style=for-the-badge" width="150px">
-  </a>
-  <a href="https://github.com/d-gibr1l">
-    <img src="https://img.shields.io/badge/Maintained-YES-green.svg?style=for-the-badge" width="143px">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://cutt.ly/HooperSupportStrict">
-    <img src="https://img.shields.io/badge/Join%20Support%20Group-25D366?style=for-the-badge&logo=whatsapp&logoColor=white" width="200px">
-  </a>
-</p>
 
 ---
 
