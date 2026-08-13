@@ -701,15 +701,16 @@ const connectHooper = async (trigger) => {
         const cached = store.messages[chatId]?.[key.id];
         if (!cached) continue;
 
-        const deleter = key.participant || key.remoteJid;
-        const senderTag = `@${deleter.split("@")[0]}`;
-
         const {
           extractMessageContent,
           getContentType,
           downloadContentFromMessage,
           jidNormalizedUser,
         } = await import("@whiskeysockets/baileys");
+
+        const actualSender = cached.key.fromMe ? Hooper.user.id : (cached.key.participant || cached.key.remoteJid);
+        const deleter = update.participant || actualSender;
+        const senderTag = `@${jidNormalizedUser(deleter).split("@")[0]}`;
 
         const botJid = Hooper.user?.id ? jidNormalizedUser(Hooper.user.id) : null;
         
