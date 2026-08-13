@@ -30,6 +30,7 @@ export function showToast(msg, type = 'success') {
 }
 
 export function switchTab(tabId) {
+  localStorage.setItem('activeTab', tabId);
   // Update nav buttons
   document.querySelectorAll('.tab-btn').forEach(btn => {
     if (btn.dataset.tab === tabId) btn.classList.add('active');

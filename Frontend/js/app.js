@@ -20,6 +20,24 @@ document.addEventListener('DOMContentLoaded', () => {
   boot();
 });
 
+function restoreTab() {
+  const activeTab = localStorage.getItem('activeTab') || 'overview';
+  switchTab(activeTab);
+  if (activeTab === 'settings') loadSettings();
+  if (activeTab === 'modules') loadGroups();
+}
+
+let localUptimeMs = 0;
+let localUptimeInterval;
+
+function formatUptime(ms) {
+  const seconds = Math.floor(ms / 1000) % 60;
+  const minutes = Math.floor(ms / 60000) % 60;
+  const hours = Math.floor(ms / 3600000) % 24;
+  const days = Math.floor(ms / 86400000);
+  return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+}
+
 function setupEventListeners() {
   document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -45,6 +63,7 @@ async function boot() {
     qrInterval = setInterval(fetchQR, 3000);
   } else {
     loadDashboard();
+    restoreTab();
   }
 }
 
@@ -76,6 +95,7 @@ function updateConnectionUI() {
     clearInterval(statusInterval);
     clearInterval(qrInterval);
     loadDashboard();
+    restoreTab();
   } else {
     if (pill) pill.className = 'status-pill waiting_qr';
     if (text) text.innerText = 'Connecting...';
@@ -120,9 +140,18 @@ async function handlePairing(e) {
 async function loadDashboard() {
   try {
     const data = await API.fetchUptime();
-    document.getElementById('val-uptime').innerText = data.uptime || '--';
+    localUptimeMs = data.uptimeMs || 0;
+    
+    document.getElementById('val-uptime').innerText = formatUptime(localUptimeMs);
     document.getElementById('val-node').innerText = data.nodeVersion || '--';
     document.getElementById('val-bot').innerText = data.botVersion || '--';
+
+    if (localUptimeInterval) clearInterval(localUptimeInterval);
+    localUptimeInterval = setInterval(() => {
+        localUptimeMs += 1000;
+        const uptimeEl = document.getElementById('val-uptime');
+        if (uptimeEl) uptimeEl.innerText = formatUptime(localUptimeMs);
+    }, 1000);
   } catch(e) {}
 }
 
