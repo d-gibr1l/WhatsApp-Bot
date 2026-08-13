@@ -713,16 +713,6 @@ const connectHooper = async (trigger) => {
 
         const botJid = Hooper.user?.id ? jidNormalizedUser(Hooper.user.id) : null;
         
-        // Skip if the original message was sent by the bot itself
-        if (
-          cached.key?.fromMe ||
-          (botJid &&
-            jidNormalizedUser(
-              cached.key?.participant || cached.key?.remoteJid,
-            ) === botJid)
-        )
-          continue;
-
         // Determine content type
         const msg = cached.message;
         if (!msg) continue;
