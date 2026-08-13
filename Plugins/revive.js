@@ -38,13 +38,12 @@ export default {
       const innerMsg = rawQuoted[quotedType];
       const isUnwrappedViewOnce =
         !isWrappedViewOnce &&
-        (quotedType === "imageMessage" || quotedType === "videoMessage" || quotedType === "audioMessage") &&
-        innerMsg?.viewOnce === true;
+        (quotedType === "imageMessage" || quotedType === "videoMessage" || quotedType === "audioMessage" || quotedType === "ptvMessage");
 
       if (!isWrappedViewOnce && !isUnwrappedViewOnce) {
         await doReact("❌");
         return m.reply(
-          `This is not a view once message.\nReply to a *view once* image, video, or audio with *${prefix}revive*`
+          `This is not a media message.\nReply to an image, video, or audio with *${prefix}revive*`
         );
       }
 
@@ -64,7 +63,7 @@ export default {
         // Already unwrapped — use directly
         mediaMsg = innerMsg;
         isImage = quotedType === "imageMessage";
-        isVideo = quotedType === "videoMessage";
+        isVideo = quotedType === "videoMessage" || quotedType === "ptvMessage";
         isAudio = quotedType === "audioMessage";
       }
 
