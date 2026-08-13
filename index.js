@@ -680,8 +680,8 @@ const connectHooper = async (trigger) => {
     for (const { key, update } of updates) {
       try {
         if (!update?.messageStubType) continue;
-        // messageStubType 1 = REVOKE (delete for everyone)
-        if (update.messageStubType !== 1) continue;
+        // messageStubType 1 = REVOKE, 132 = ADMIN_REVOKE
+        if (update.messageStubType !== 1 && update.messageStubType !== 132) continue;
 
         const chatId = key.remoteJid;
         // Check if chat-level antidelete is enabled (true for groups or PMs if toggled)
