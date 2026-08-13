@@ -228,7 +228,7 @@ export default async (Hooper, m, commands, chatUpdate) => {
       }
     }
 
-    if (body == prefix) {
+    if (body == prefix && !m.quoted) {
       await doReact("❌");
       return m.reply(
         `Bot is active, type *${prefix}help* to see the list of commands.`,
