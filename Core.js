@@ -139,13 +139,13 @@ export default async (Hooper, m, commands, chatUpdate) => {
     const cmd =
       commands.get(cmdName) ||
       Array.from(commands.values()).find((v) =>
-        v.alias.find((x) => x.toLowerCase() == cmdName),
+        v.alias.some((x) => x.toLowerCase() == cmdName),
       ) ||
       "";
     const icmd =
       commands.get(cmdName) ||
       Array.from(commands.values()).find((v) =>
-        v.alias.find((x) => x.toLowerCase() == cmdName),
+        v.alias.some((x) => x.toLowerCase() == cmdName),
       );
     const mentionByTag =
       type == "extendedTextMessage" &&
