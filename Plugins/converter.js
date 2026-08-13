@@ -159,7 +159,7 @@ export default {
         let media = await quoted.download();
         await Hooper.sendPresenceUpdate("recording", m.from);
         let audio = await toAudio(media, "mp4");
-        Hooper.sendMessage(
+        await Hooper.sendMessage(
           m.from,
           {
             document: audio,
@@ -168,7 +168,7 @@ export default {
           },
           { quoted: m },
         );
-
+        await Hooper.sendPresenceUpdate("paused", m.from);
         break;
 
       case "toaudio":
@@ -194,11 +194,12 @@ export default {
         let media2 = await quoted.download();
         await Hooper.sendPresenceUpdate("recording", m.from);
         let audio2 = await toAudio(media2, "mp4");
-        Hooper.sendMessage(
+        await Hooper.sendMessage(
           m.from,
           { audio: audio2, mimetype: "audio/mpeg" },
           { quoted: m },
         );
+        await Hooper.sendPresenceUpdate("paused", m.from);
         break;
 
       case "tourl":

@@ -46,8 +46,10 @@ export default {
           { audio: { url: urls[0].url }, mimetype: "audio/mpeg" },
           { quoted: m }
         );
+        await Hooper.sendPresenceUpdate("paused", m.from);
       } catch (e) {
         m.reply(`An error occurred!: ${e.message}`);
+        await Hooper.sendPresenceUpdate("paused", m.from);
       }
     };
 

@@ -332,6 +332,8 @@ export default {
           },
           { quoted: m },
         );
+        
+        await Hooper.sendPresenceUpdate("paused", m.from);
 
         break;
 

@@ -168,8 +168,10 @@ export default {
               },
               { quoted: m },
             );
+            await Hooper.sendPresenceUpdate("paused", m.from);
           } else {
             await doReact("❌");
+            await Hooper.sendPresenceUpdate("paused", m.from);
             return m.reply(
               result?.message ||
                 `Unable to find lyrics for the song: *${text}*`,
@@ -178,6 +180,7 @@ export default {
         } catch (err) {
           console.error("Lyrics Error:", err);
           await doReact("❌");
+          await Hooper.sendPresenceUpdate("paused", m.from);
           return m.reply(
             `An error occurred while fetching lyrics for: *${text}*`,
           );
