@@ -24,7 +24,7 @@ export default {
     if (inputCMD === "groups") {
       // Must be a direct message to the bot itself by the creator
       if (!isCreator || m.isGroup) {
-         return m.reply("⚠️ This command can only be used in a direct message with the bot owner.");
+         return;
       }
 
       const groups = await Hooper.groupFetchAllParticipating();

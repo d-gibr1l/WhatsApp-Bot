@@ -102,12 +102,13 @@ export const serialize = (Hooper, m, options = {}) => {
     );
   }
   if (m.message) {
-    m.type = getContentType(m.message);
     m.message = extractMessageContent(m.message);
+    m.type = getContentType(m.message);
     m.msg = m.message[m.type];
     m.mentions = m.msg?.contextInfo ? m.msg?.contextInfo.mentionedJid : [];
     m.quoted = m.msg?.contextInfo ? m.msg?.contextInfo.quotedMessage : null;
     if (m.quoted) {
+      m.quoted = extractMessageContent(m.quoted);
       m.quoted.type = getContentType(m.quoted);
       m.quoted.msg = m.quoted[m.quoted.type];
       m.quoted.mentions = m.msg.contextInfo.mentionedJid;

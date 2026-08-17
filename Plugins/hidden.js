@@ -36,20 +36,10 @@ export default {
 *Usage:* \`.groups\` in a DM.
 *Description:* Lists all groups the bot is in and provides their ID numbers for remote management.
 
-5️⃣ *Mute & Allow Groups*
-*Command:* \`.mute\` / \`.allow\`
-*Usage:* \`.mute 1 2\` or \`.allow all\`
-*Description:* Remotely ban or unban the bot from functioning in specific groups.
-
-6️⃣ *Anti-Delete System*
+5️⃣ *Anti-Delete System*
 *Command:* \`.antidelete\`
 *Usage:* \`.antidelete <on/off> [numbers/all]\`
 *Description:* Catches "Delete for Everyone" messages and broadcasts them back to the group or forwards them to your DM.
-
-7️⃣ *Bot Work Mode*
-*Command:* \`.mode\`
-*Usage:* \`.mode public/private/self\`
-*Description:* Changes the global visibility of the bot.
 `;
 
       await Hooper.sendMessage(m.from, { text: hiddenText }, { quoted: m });
