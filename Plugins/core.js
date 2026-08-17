@@ -263,6 +263,7 @@ export default {
           "logo-maker": { icon: "🎨", label: "ʟᴏɢᴏ ᴍᴀᴋᴇʀ" },
           logo: { icon: "🖼️", label: "ʟᴏɢᴏ ꜱᴛʏʟᴇꜱ" },
           systemcommands: { icon: "⚙️", label: "ꜱʏꜱᴛᴇᴍ" },
+          hidden: { icon: "🕵️‍♂️", label: "ʜɪᴅᴅᴇɴ ᴄᴏᴍᴍᴀɴᴅꜱ" },
           revive: { icon: "👁️", label: "ᴠɪᴇᴡ ᴏɴᴄᴇ" },
           tools: { icon: "🧰", label: "ᴛᴏᴏʟꜱ" },
         };
@@ -308,7 +309,7 @@ export default {
         const { checkMod } = await import("../System/MongoDB/MongoDb_Core.js");
         const isMod = isCreator || await checkMod(m.sender);
         if (m.isGroup || !isMod) {
-           allCommands = allCommands.filter(arr => arr[0] !== "moderator.js" && arr[0] !== "systemcommands.js");
+           allCommands = allCommands.filter(arr => arr[0] !== "moderator.js" && arr[0] !== "systemcommands.js" && arr[0] !== "hidden.js");
         }
         
         const totalCmds = allCommands.reduce(
