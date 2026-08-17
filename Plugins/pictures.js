@@ -10,6 +10,7 @@ let mergedCommands = [
   "gif",
   "pin",
   "pinterest",
+  "tweet",
 ];
 
 export default {
@@ -102,20 +103,25 @@ export default {
           );
         }
         await doReact("🎴");
-        let resGif = await axios.get(
-          `https://tenor.googleapis.com/v2/search?q=${text}&key=${tenorApiKey}&client_key=my_project&limit=12&media_filter=mp4`,
-        );
-        let resultGif = Math.floor(Math.random() * 12);
-        let gifUrl = resGif.data.results[resultGif].media_formats.mp4.url;
-        await Hooper.sendMessage(
-          m.from,
-          {
-            video: { url: gifUrl },
-            gifPlayback: true,
-            caption: `🎀 Gif serach result for: *${text}*\n`,
-          },
-          { quoted: m },
-        );
+        try {
+          let resGif = await axios.get(
+            `https://tenor.googleapis.com/v2/search?q=${text}&key=${tenorApiKey}&client_key=my_project&limit=12&media_filter=mp4`,
+          );
+          let resultGif = Math.floor(Math.random() * 12);
+          let gifUrl = resGif.data.results[resultGif].media_formats.mp4.url;
+          await Hooper.sendMessage(
+            m.from,
+            {
+              video: { url: gifUrl },
+              gifPlayback: true,
+              caption: `🎀 Gif serach result for: *${text}*\n`,
+            },
+            { quoted: m },
+          );
+        } catch (e) {
+          console.error("Gif Command Error:", e.message);
+          m.reply("⚠️ GIF search failed. The API key might be expired or invalid.");
+        }
         break;
 
       case "pin":
@@ -179,6 +185,49 @@ export default {
         } catch (e) {
           await doReact("❌");
           m.reply(`Pinterest search failed: ${e.message}`);
+        }
+        break;
+      case "tweet": {
+        let tweetText = text;
+        
+        // If no text provided, check if replying to a text message
+        if (!tweetText && m.quoted) {
+          tweetText = m.quoted.conversation || m.quoted.extendedTextMessage?.text || m.quoted.imageMessage?.caption || m.quoted.videoMessage?.caption || "";
+        }
+
+        if (!tweetText) {
+          await doReact("❔");
+          return m.reply(`📖 *${prefix}tweet*\n\nPlease provide some text or reply to a message.\nExample: *${prefix}tweet Hello world!*`);
+        }
+
+        await doReact("⏳");
+
+        const pushName2 = m.pushName || "WhatsApp User";
+        const username = pushName2.replace(/[^a-zA-Z0-9]/g, "").toLowerCase() || "user";
+        
+        let avatarUrl = "https://i.imgur.com/8Q5gQkk.png"; // Fallback default avatar
+        try {
+          const ppUrl = await Hooper.profilePictureUrl(m.sender, "image");
+          if (ppUrl) avatarUrl = ppUrl;
+        } catch (_err) {
+          // Fallback
+        }
+
+        const apiUrl = `https://some-random-api.com/canvas/misc/tweet?avatar=${encodeURIComponent(avatarUrl)}&comment=${encodeURIComponent(tweetText)}&displayname=${encodeURIComponent(pushName2)}&username=${encodeURIComponent(username)}`;
+
+        try {
+          const response = await axios.get(apiUrl, { responseType: "arraybuffer" });
+          const buffer = Buffer.from(response.data, "binary");
+
+          await Hooper.sendMessage(m.from, {
+            image: buffer,
+            caption: "🐦 *Fake Tweet Generated!*"
+          }, { quoted: m });
+          
+          await doReact("✅");
+        } catch (err) {
+          console.error("❌ Tweet generation error:", err.message);
+          m.reply("⚠️ Failed to generate the tweet image. Please try again later.");
         }
         break;
       }

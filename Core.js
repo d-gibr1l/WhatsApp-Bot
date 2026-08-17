@@ -193,36 +193,35 @@ export default async (Hooper, m, commands, chatUpdate) => {
     const isPmChatbotOn = await checkPmChatbot();
     const isGroupChatbotOn = await checkGroupChatbot(m.from);
     const botWorkMode = await getBotMode();
-
-    if (isCmd || icmd) {
-      if (botWorkMode == "private") {
-        if (!isCreator && !modcheck) {
-          return console.log(`${timePrefix} ` + chalk.black(chalk.bgYellow("[ REJECTED ]")) + " " + chalk.black(chalk.bgYellow(`Private mode — ${m.pushName} (${body})`)));
-        }
-      }
-      if (botWorkMode == "self") {
-        if (m.sender != botNumber) {
-          return console.log(`${timePrefix} ` + chalk.black(chalk.bgYellow("[ REJECTED ]")) + " " + chalk.black(chalk.bgYellow(`Self mode — ${m.pushName} (${body})`)));
-        }
-      }
-    }
-
-    const infoCommands = ["mods", "modlist", "owner", "owners", "support", "supportgc"];
+    const { checkAllowedChat } = await import("./System/MongoDB/MongoDb_Core.js");
+    const isAllowedChat = await checkAllowedChat(m.from);
+    const infoCommands = ["mods", "modlist", "owner", "owners", "support", "supportgc", "groups", "mute", "allow", "antidelete"];
 
     if (isCmd || icmd) {
       if (isbannedUser && !isCreator && !modcheck) {
         return; // Silently ignore banned users
       }
-    }
-
-    if (isCmd || icmd) {
-      if (
-        isBannedGroup &&
-        budy != `${prefix}unbangc` &&
-        budy != `${prefix}unbangroup` &&
-        !isCreator && !modcheck && !infoCommands.includes(inputCMD)
-      ) {
-        return; // Silently ignore in banned groups (except contact/info commands)
+      
+      // Auto-stealth commands and info commands bypass mode/mute restrictions for creators/mods
+      const isBypassCmd = isStealthCmd || (infoCommands.includes(inputCMD) && (isCreator || modcheck));
+      
+      if (!isBypassCmd) {
+        if (botWorkMode === "private") {
+          // In private mode, block all group chats unless explicitly allowed, OR if it's the owner
+          if (isGroup && !isAllowedChat && !isCreator && !modcheck) {
+             return;
+          }
+        } else if (botWorkMode === "self") {
+          // In self mode, block everyone EXCEPT the bot owner, OR if the chat is explicitly allowed
+          if (m.sender !== botNumber && !isAllowedChat) {
+             return;
+          }
+        }
+        
+        // Handle Group Muting (bangroup)
+        if (isGroup && isBannedGroup && !isAllowedChat) {
+           return; // Silently ignore in muted groups
+        }
       }
     }
 

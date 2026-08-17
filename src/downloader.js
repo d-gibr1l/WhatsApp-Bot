@@ -4,6 +4,9 @@ import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
+import { S3Client } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
+import { createReadStream } from "fs";
 import * as db from "./db.js";
 import { heavyQueue } from "./queue.js";
 
@@ -159,6 +162,12 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
 
   if (cookiePath) args.push("--cookies", cookiePath);
 
+  if (process.env.RENDER || process.env.KOYEB || existsSync("./wireproxy")) {
+    args.push("--proxy", "socks5://127.0.0.1:1080");
+  }
+
+  const maxFilesize = (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY) ? "100M" : "55M";
+
   if (audioOnly) {
     args.push("-x", "--audio-format", "mp3", "--audio-quality", "0", "-o", `${tmpBase}.mp3`);
   } else {
@@ -169,7 +178,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
       ? "best"
       // Prefer pre-muxed mp4 first (no re-encoding needed = fast)
       // Fall back to separate streams only if needed
-      : `best[ext=mp4][height<=${quality}]/bestvideo[height<=${quality}][vcodec^=avc]+bestaudio[acodec^=mp4a]/best[height<=${quality}]/best`;
+      : `best[ext=mp4][filesize<=${maxFilesize}][height<=${quality}]/bestvideo[height<=${quality}][vcodec^=avc]+bestaudio[acodec^=mp4a]/best[height<=${quality}]/best`;
 
     args.push("-f", format, "-o", `${tmpBase}.%(ext)s`);
 
@@ -231,7 +240,47 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
           webp: "image/webp",
         };
 
-        return resolve({ filePath: finalPath, contentType: mimeTypes[ext] || "video/mp4", title });
+        const contentType = mimeTypes[ext] || "video/mp4";
+
+        if (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY && process.env.R2_SECRET_KEY && process.env.R2_BUCKET_NAME) {
+          try {
+            const s3Client = new S3Client({
+              region: "auto",
+              endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+              credentials: {
+                accessKeyId: process.env.R2_ACCESS_KEY,
+                secretAccessKey: process.env.R2_SECRET_KEY,
+              },
+            });
+
+            const fileStream = createReadStream(finalPath);
+            const uploadParams = {
+              Bucket: process.env.R2_BUCKET_NAME,
+              Key: `downloads/${Date.now()}_${basename(finalPath)}`,
+              Body: fileStream,
+              ContentType: contentType,
+            };
+
+            const uploader = new Upload({
+              client: s3Client,
+              params: uploadParams,
+            });
+
+            await uploader.done();
+            await fsPromises.unlink(finalPath).catch(() => {});
+
+            const publicUrl = process.env.R2_PUBLIC_URL 
+              ? `${process.env.R2_PUBLIC_URL}/${uploadParams.Key}` 
+              : `https://${process.env.R2_BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${uploadParams.Key}`;
+
+            return resolve({ filePath: null, url: publicUrl, contentType, title });
+          } catch (uploadErr) {
+            console.error("[Downloader] R2 Upload failed:", uploadErr);
+            // Fallback to local file if upload fails
+          }
+        }
+
+        return resolve({ filePath: finalPath, url: null, contentType, title });
       } catch (err) {
         reject(err);
       }

@@ -25,7 +25,7 @@ let mergedCommands = [
 export default {
   name: "systemcommands",
   alias: [...mergedCommands],
-  uniquecommands: ["script", "support", "help", "alive", "restart"],
+  uniquecommands: ["script", "help", "alive", "restart"],
   description: "All system commands",
   start: async (
     Hooper,
@@ -178,27 +178,26 @@ export default {
       case "script":
       case "sc":
         await doReact("🧣");
-        let repoInfo = await axios.get(
-          "https://api.github.com/repos/FantoX/Hooper-MD",
-        );
-        let repo = repoInfo.data;
-        let txt = `            🧣 *${botName}'s Script* 🧣\n\n*🎀 Total Forks:* ${
-          repo.forks_count
-        }\n*⭐ Total Stars:* ${repo.stargazers_count}\n*📜 License:* ${
-          repo.license.name
-        }\n*📁 Repo Size:* ${(repo.size / 1024).toFixed(
-          2,
-        )} MB\n*📅 Last Updated:* ${repo.updated_at}\n\n*🔗 Repo Link:* ${
-          repo.html_url
-        }\n\n❝ Dont forget to give a Star ⭐ to the repo. It's made with restless hardwork by *Team HOOPER*. ❞\n\n*©️ Team HOOPER- ${new Date().getFullYear()}*`;
-        Hooper.sendMessage(m.from, { image: pic, caption: txt }, { quoted: m });
-        break;
-
-      case "support":
-      case "supportgc":
-        await doReact("🔰");
-        let txt2 = `              🧣 *Support Group* 🧣\n\n*${botName}* is an open source project, and we are always happy to help you.\n\n*Link:* ${suppL}\n\n*Note:* Please don't spam in the group, and don't message *Admins directly* without permission. Ask for help inside *Group*.\n\n*Thanks for using Hooper.*`;
-        Hooper.sendMessage(m.from, { image: pic, caption: txt2 }, { quoted: m });
+        try {
+          let repoInfo = await axios.get(
+            "https://api.github.com/repos/d-gibr1l/WhatsApp-Bot",
+            { headers: { "User-Agent": "Hooper-Bot/1.0" } }
+          );
+          let repo = repoInfo.data;
+          let txt = `            🧣 *${botName}'s Script* 🧣\n\n*🎀 Total Forks:* ${
+            repo.forks_count
+          }\n*⭐ Total Stars:* ${repo.stargazers_count}\n*📜 License:* ${
+            repo.license?.name || "None"
+          }\n*📁 Repo Size:* ${(repo.size / 1024).toFixed(
+            2,
+          )} MB\n*📅 Last Updated:* ${repo.updated_at}\n\n*🔗 Repo Link:* ${
+            repo.html_url
+          }\n\n❝ Dont forget to give a Star ⭐ to the repo. It's made with restless hardwork by *Team HOOPER*. ❞\n\n*©️ Team HOOPER- ${new Date().getFullYear()}*`;
+          Hooper.sendMessage(m.from, { image: pic, caption: txt }, { quoted: m });
+        } catch (e) {
+          console.error("Script Command Error:", e.message);
+          m.reply("⚠️ Could not fetch repository information at this time.");
+        }
         break;
 
       case "help":
@@ -298,7 +297,21 @@ export default {
         const uptimeStr = `${upH}h ${upM}m ${upS}s`;
 
         const pluginsDir = path.join(process.cwd(), "Plugins");
-        const allCommands = await readUniqueCommands(pluginsDir);
+        let allCommands = await readUniqueCommands(pluginsDir);
+        
+        // Hide 'groups', 'status', and 'stealth-revive' plugins if not chatting with the bot's own number
+        const itsMe = m.sender === global.botNumber;
+        if (m.isGroup || !itsMe) {
+          allCommands = allCommands.filter(arr => arr[0] !== "groups.js" && arr[0] !== "status.js" && arr[0] !== "stealth-revive.js");
+        }
+        
+        // Hide moderator commands if not a mod
+        const { checkMod } = await import("../System/MongoDB/MongoDb_Core.js");
+        const isMod = isCreator || await checkMod(m.sender);
+        if (!isMod) {
+           allCommands = allCommands.filter(arr => arr[0] !== "moderator.js" && arr[0] !== "systemcommands.js");
+        }
+        
         const totalCmds = allCommands.reduce(
           (acc, arr) => acc + arr.length - 1,
           0,
@@ -306,19 +319,14 @@ export default {
         const formattedCommands = formatCommands(allCommands);
 
         var helpText = [
-          `ᴋᴏɴɴɪᴄʜɪᴡᴀ *${pushName}* ꜱᴇɴᴘᴀɪ 👋`,
-          `ɪ ᴀᴍ *${botName}*, ᴀ ᴡʜᴀᴛꜱᴀᴘᴘ ʙᴏᴛ`,
-          `ᴅᴇᴠᴇʟᴏᴘᴇᴅ ʙʏ *ᴛᴇᴀᴍ ʜᴏᴏᴘᴇʀ* 🌸`,
+          `Yo @${m.sender.split("@")[0]}`,
           ``,
           `🎀 *ᴘʀᴇꜰɪx* : \`${prefix}\``,
           `📦 *ᴄᴏᴍᴍᴀɴᴅꜱ* : *${totalCmds}* ᴀᴠᴀɪʟᴀʙʟᴇ`,
-          `🕐 *ᴜᴘᴛɪᴍᴇ* : ${uptimeStr}`,
           ``,
           formattedCommands,
           ``,
-          `*ꜱᴜᴘᴘᴏʀᴛ ɢʀᴏᴜᴘ:* \`${prefix}support\``,
-          ``,
-          `ᴘᴏᴡᴇʀᴇᴅ ʙʏ: © *ᴛᴇᴀᴍ ʜᴏᴏᴘᴇʀ*`,
+          `ᴘᴏᴡᴇʀᴇᴅ ʙʏ: *YOURS TRULY*`,
         ].join("\n");
 
         await Hooper.sendMessage(
@@ -328,7 +336,8 @@ export default {
             gifPlayback: true,
             gifAttribution: 1, // Fix for Android playback
             mimetype: "video/mp4", // Explicit mimetype for Android
-            caption: helpText
+            caption: helpText,
+            mentions: [m.sender]
           },
           { quoted: m },
         );

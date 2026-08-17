@@ -1,7 +1,7 @@
 import axios from "axios";
 import yts from "youtube-yts";
 import { searchit } from "@fantox01/search-it";
-import { ringtone, wallpaper } from "../System/Scrapers.js";
+import { ringtone } from "../System/Scrapers.js";
 import { Sticker, StickerTypes } from "wa-sticker-formatter";
 import { getLyrics } from "@fantox01/lyrics-scraper";
 
@@ -17,8 +17,6 @@ let mergedCommands = [
   "weather",
   "github",
   "gh",
-  "wallpaper",
-  "wall",
   "wikipedia",
   "wiki",
   "anime",
@@ -36,7 +34,6 @@ export default {
     "stickersearch",
     "weather",
     "github",
-    "wallpaper",
     "wikipedia",
     "anime",
   ],
@@ -178,7 +175,7 @@ export default {
             );
           }
         } catch (err) {
-          console.error("Lyrics Error:", err);
+          console.error("Lyrics Error:", err.message);
           await doReact("❌");
           await Hooper.sendPresenceUpdate("paused", m.from);
           return m.reply(
@@ -293,29 +290,37 @@ export default {
           );
         }
         await doReact("🧧");
-        let gif = await axios.get(
-          `https://tenor.googleapis.com/v2/search?q=${text}&key=${tenorApiKey}&client_key=my_project&limit=8&media_filter=gif`,
-        );
-        let resultst = Math.floor(Math.random() * 8);
-        let gifUrl = gif.data.results[resultst].media_formats.gif.url;
+        try {
+          let gif = await axios.get(
+            `https://tenor.googleapis.com/v2/search?q=${text}&key=${tenorApiKey}&client_key=my_project&limit=8&media_filter=gif`,
+          );
+          let resultst = Math.floor(Math.random() * 8);
+          let gifUrl = gif.data.results[resultst].media_formats.gif.url;
 
-        let response = await axios.get(gifUrl, {
-          responseType: "arraybuffer",
-        });
-        let buffer = Buffer.from(response.data, "utf-8");
+          let response = await axios.get(gifUrl, {
+            responseType: "arraybuffer",
+          });
+          let buffer = Buffer.from(response.data, "utf-8");
 
-        let stickerMess = new Sticker(buffer, {
-          pack: packname,
-          author: pushName,
-          type: StickerTypes.FULL,
-          categories: ["🤩", "🎉"],
-          id: "12345",
-          quality: 60,
-          background: "transparent",
-        });
-        let stickerBuffer2 = await stickerMess.toBuffer();
-        Hooper.sendMessage(m.from, { sticker: stickerBuffer2 }, { quoted: m });
-        break;
+          let stickerMess = new Sticker(buffer, {
+            pack: packname,
+            author: pushName,
+            type: StickerTypes.FULL,
+            categories: ["🤩", "🎉"],
+            id: "12345",
+            quality: 60,
+            background: "transparent",
+          });
+          let stickerBuffer2 = await stickerMess.toBuffer();
+          Hooper.sendMessage(
+            m.from,
+            { sticker: stickerBuffer2 },
+            { quoted: m },
+          );
+        } catch (e) {
+          console.error("Stickersearch Error:", e.message);
+          m.reply("⚠️ Sticker search failed. The API key might be expired or invalid.");
+        }break;
 
       case "gh":
       case "github":
@@ -347,34 +352,6 @@ export default {
           },
           { quoted: m },
         );
-        break;
-
-      case "wallpaper":
-      case "wall":
-        if (!text) {
-          await doReact("❔");
-          return m.reply(`Please provide a wallpaper search term!\n\nExample: *${prefix}wallpaper nature*`);
-        }
-        await doReact("🖼️");
-        try {
-          const results = await wallpaper(text);
-          if (!results || !results.length) {
-            await doReact("❌");
-            return m.reply(`No wallpapers found for: *${text}*`);
-          }
-          const picked = results[Math.floor(Math.random() * Math.min(results.length, 10))];
-          const imgUrl = picked.image[0] || picked.image[1] || picked.image[2];
-          if (!imgUrl) {
-            await doReact("❌");
-            return m.reply(`No wallpapers found for: *${text}*`);
-          }
-          const caption = `🖼️ *${picked.title || text}*\n_Type:_ ${picked.type || "Wallpaper"}\n\n_🧩 Powered by_ *${botName}*`;
-          await Hooper.sendMessage(m.from, { image: { url: imgUrl }, caption }, { quoted: m });
-        } catch (err) {
-          console.error("[ WALLPAPER ] Error:", err.message);
-          await doReact("❌");
-          m.reply(`Wallpaper search failed: ${err.message}`);
-        }
         break;
 
       case "wikipedia":

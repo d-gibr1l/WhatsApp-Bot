@@ -273,42 +273,45 @@ export default {
           ],
         };
 
-        const quoteResponse = await axios.post(
-          "https://bot.lyo.su/quote/generate",
-          quoteJson,
-          {
-            headers: { "Content-Type": "application/json" },
-          }
-        );
+        try {
+          const quoteResponse = await axios.post(
+            "https://bot.lyo.su/quote/generate",
+            quoteJson,
+            {
+              headers: { "Content-Type": "application/json" },
+            }
+          );
 
-        await fs.promises.writeFile(
-          "quote.png",
-          quoteResponse.data.result.image,
-          "base64"
-        );
+          await fs.promises.writeFile(
+            "quote.png",
+            quoteResponse.data.result.image,
+            "base64"
+          );
 
-        let stickerMess = new Sticker("quote.png", {
-          pack: packname,
-          author: pushName,
-          type: StickerTypes.FULL,
-          categories: ["🤩", "🎉"],
-          id: "12345",
-          quality: 70,
-          background: "transparent",
-        });
-
-        const stickerBuffer2 = await stickerMess.toBuffer();
-        await Hooper.sendMessage(
-          m.from,
-          { sticker: stickerBuffer2 },
-          { quoted: m }
-        )
-          .then((result) => {
-            fs.unlinkSync("quote.png");
-          })
-          .catch((err) => {
-            m.reply("An error occurd!");
+          let stickerMess = new Sticker("quote.png", {
+            pack: packname,
+            author: pushName,
+            type: StickerTypes.FULL,
+            categories: ["🤩", "🎉"],
+            id: "12345",
+            quality: 70,
+            background: "transparent",
           });
+
+          const stickerBuffer2 = await stickerMess.toBuffer();
+          await Hooper.sendMessage(
+            m.from,
+            { sticker: stickerBuffer2 },
+            { quoted: m }
+          );
+
+          if (fs.existsSync("quote.png")) {
+            fs.unlinkSync("quote.png");
+          }
+        } catch (e) {
+          console.error("Quote Generator Error:", e.message);
+          m.reply("⚠️ Quotly API is currently unavailable due to server issues (526 Invalid SSL).");
+        }
 
         break;
 

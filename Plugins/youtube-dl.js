@@ -1,4 +1,6 @@
 import axios from "axios";
+import { downloadWithYtDlp, getMediaInfo } from "../src/downloader.js";
+import fs from "fs";
 
 let mergedCommands = [
   "play",
@@ -9,7 +11,6 @@ let mergedCommands = [
   "ytmp4",
   "video",
   "mp4",
-  "video",
 ];
 
 const YT_REGEX =
@@ -25,7 +26,7 @@ export default {
   name: "youtube",
   alias: [...mergedCommands],
   uniquecommands: ["play", "mp3", "mp4"],
-  description: "Advanced YouTube system (API based)",
+  description: "Advanced YouTube system (Local Proxy/R2 based)",
 
   start: async (Hooper, m, { inputCMD, text, doReact, prefix }) => {
     const botName = global.botName || "HOOPER";
@@ -41,144 +42,91 @@ export default {
 📌 *Usage:*
 • ${prefix}play <song name>
 • ${prefix}mp3 <youtube link>
-• ${prefix}video <video name>
 • ${prefix}mp4 <youtube link>
-• ${prefix}yts <query>
 
 ✨ Reply to link also works`);
     }
 
     try {
+      let targetUrl = extractUrl(query) || `ytsearch1:${query}`;
+
       switch (inputCMD) {
         case "mp4":
         case "ytmp4":
-        case "video":
+        case "video": {
           await doReact("🎥");
+          
+          let info = await getMediaInfo(targetUrl);
+          await Hooper.sendMessage(
+            m.from,
+            {
+              image: info.thumbnail ? { url: info.thumbnail } : undefined,
+              caption: `🎬 *${info.title}*\n⏱ ${info.duration || "Unknown"}\n\n⬇️ Downloading Video...`,
+            },
+            { quoted: m },
+          );
 
-          let videoUrl = extractUrl(query);
-          if (!videoUrl) {
-            const search = await axios.get(
-              `https://api-faa.my.id/faa/youtube?q=${encodeURIComponent(query)}`,
-            );
-            if (!search.data.status || !search.data.result.length) {
-              return m.reply("❌ No video found");
-            }
+          const { filePath, url, contentType, title } = await downloadWithYtDlp(targetUrl, false, "720");
 
-            videoUrl = search.data.result[0].link;
-
+          if (url) {
+            // R2 Uploaded
             await Hooper.sendMessage(
               m.from,
               {
-                image: { url: search.data.result[0].imageUrl },
-                caption: `🎬 *${search.data.result[0].title}*\n⏱ ${search.data.result[0].duration}\n\n⬇️ Downloading...`,
+                video: { url },
+                mimetype: contentType,
+                caption: `🎬 *${title}*\n\n> Powered by ${botName} (Cloud Stream)`,
               },
               { quoted: m },
             );
+          } else {
+            // Local file
+            await Hooper.sendMessage(
+              m.from,
+              {
+                video: fs.readFileSync(filePath),
+                mimetype: contentType,
+                caption: `🎬 *${title}*\n\n> Powered by ${botName} (Local)`,
+              },
+              { quoted: m },
+            );
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
           }
-
-          const videoRes = await axios.get(
-            `https://api-faa.my.id/faa/ytmp4?url=${encodeURIComponent(videoUrl)}`,
-          );
-          const videoData = videoRes.data;
-
-          if (!videoData.status) throw new Error("API failed");
-
-          await Hooper.sendMessage(
-            m.from,
-            {
-              video: { url: videoData.result.download_url },
-              mimetype: "video/mp4",
-              caption: `🎬 *Video Downloaded*\n\n> Powered by ${botName}`,
-            },
-            { quoted: m },
-          );
-
           await doReact("✅");
           break;
-
-        case "mp3":
-        case "ytmp3":
-          await doReact("🎶");
-
-          const audioUrl = extractUrl(query);
-          if (!audioUrl)
-            return m.reply(
-              "❌ Invalid YouTube link. Please provide a valid YouTube URL for mp3.",
-            );
-
-          const audioRes = await axios.get(
-            `https://api-faa.my.id/faa/ytmp3?url=${encodeURIComponent(audioUrl)}`,
-          );
-          const audioData = audioRes.data;
-
-          if (!audioData.status) throw new Error("API failed");
-
-          const {
-            title: audioTitle,
-            thumbnail: audioThumbnail,
-            mp3: audioMp3,
-          } = audioData.result;
-
-          await Hooper.sendMessage(
-            m.from,
-            {
-              audio: { url: audioMp3 },
-              mimetype: "audio/mpeg",
-              contextInfo: {
-                externalAdReply: {
-                  title: audioTitle,
-                  body: "🎧 YouTube Audio",
-                  thumbnailUrl: audioThumbnail,
-                  mediaType: 2,
-                  renderLargerThumbnail: true,
-                },
-              },
-            },
-            { quoted: m },
-          );
-          break;
+        }
 
         case "play":
         case "song":
         case "yt":
-          await doReact("📥");
-
-          const playRes = await axios.get(
-            `https://api-faa.my.id/faa/ytplay?query=${encodeURIComponent(query)}`,
-          );
-          const playData = playRes.data;
-
-          if (!playData.status) throw new Error("API failed");
-
-          const {
-            title: playTitle,
-            author: playAuthor,
-            thumbnail: playThumbnail,
-            mp3: playMp3,
-          } = playData.result;
-
+        case "mp3":
+        case "ytmp3": {
+          await doReact("🎶");
+          
+          let info = await getMediaInfo(targetUrl);
           await Hooper.sendMessage(
             m.from,
             {
-              image: { url: playThumbnail },
-              caption: `🎶 *${playTitle}*
-👤 ${playAuthor}
-
-⬇️ Downloading...`,
+              image: info.thumbnail ? { url: info.thumbnail } : undefined,
+              caption: `🎶 *${info.title}*\n\n⬇️ Downloading Audio...`,
             },
             { quoted: m },
           );
 
+          const { filePath, url, contentType, title } = await downloadWithYtDlp(targetUrl, true);
+
+          const audioPayload = url ? { url } : fs.readFileSync(filePath);
+
           await Hooper.sendMessage(
             m.from,
             {
-              audio: { url: playMp3 },
+              audio: audioPayload,
               mimetype: "audio/mpeg",
               contextInfo: {
                 externalAdReply: {
-                  title: playTitle,
-                  body: playAuthor,
-                  thumbnailUrl: playThumbnail,
+                  title: title,
+                  body: "🎧 YouTube Audio",
+                  thumbnailUrl: info.thumbnail,
                   mediaType: 2,
                   renderLargerThumbnail: true,
                 },
@@ -186,10 +134,14 @@ export default {
             },
             { quoted: m },
           );
+
+          if (!url && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+          await doReact("✅");
           break;
+        }
       }
     } catch (err) {
-      console.error("[ EXCEPTION ] Error converting to opus:", err);
+      console.error("[ EXCEPTION ] YouTube Download Error:", err);
       m.reply(`❌ Error: ${err.message}`);
     }
   },

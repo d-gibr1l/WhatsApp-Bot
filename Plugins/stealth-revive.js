@@ -2,11 +2,11 @@ import { getSetting, setSetting } from "../src/db.js";
 
 export default {
   name: "stealthrevive",
-  alias: [".//", ".///"],
-  uniquecommands: ["stealthrevive", ".//", ".///"],
+  alias: [".//", ".///", "stealth"],
+  uniquecommands: ["stealthrevive", ".//", ".///", "stealth"],
   description: "Silently send view once messages to DMs or toggle Auto-Stealth",
 
-  start: async (Hooper, m, { inputCMD, doReact, isCreator }) => {
+  start: async (Hooper, m, { inputCMD, text, doReact, isCreator, mentionByTag }) => {
     try {
       console.log(`[ STEALTH ] Triggered by ${m.sender} with cmd: ${inputCMD}`);
       
@@ -16,15 +16,49 @@ export default {
         return;
       }
 
-      // Handle Auto-Stealth Toggle
-      if (inputCMD === ".///") {
-        const currentState = await getSetting("auto_stealth", false);
-        const newState = !currentState;
-        await setSetting("auto_stealth", newState);
+      // Handle Auto-Stealth Toggles
+      if (inputCMD === ".///" || inputCMD === "stealth") {
+        let targetJid = m.from; // Default to current chat
+        let isGlobal = false;
         
-        await Hooper.sendMessage(m.sender, { 
-          text: `👁️ *Auto-Stealth Mode: ${newState ? "ON" : "OFF"}*\n\n${newState ? "All incoming View Once messages will now be automatically downloaded and silently forwarded to this chat." : "Auto-Stealth has been disabled."}` 
-        });
+        if (text) {
+          if (text.toLowerCase() === "all") {
+             isGlobal = true;
+          } else if (mentionByTag && mentionByTag.length > 0) {
+             targetJid = mentionByTag[0];
+          } else {
+             const cleanedNumber = text.replace(/[^0-9]/g, "");
+             if (cleanedNumber) targetJid = cleanedNumber + (cleanedNumber.length > 15 ? "@g.us" : "@s.whatsapp.net");
+          }
+        }
+
+        if (isGlobal) {
+          const currentState = await getSetting("auto_stealth", false);
+          const newState = !currentState;
+          await setSetting("auto_stealth", newState);
+          
+          await Hooper.sendMessage(m.sender, { 
+            text: `👁️ *Global Auto-Stealth: ${newState ? "ON" : "OFF"}*\n\n${newState ? "All incoming View Once messages from ALL chats will be silently forwarded to you." : "Global Auto-Stealth disabled."}` 
+          });
+        } else {
+          // Toggle for specific JID
+          let targetsStr = await getSetting("auto_stealth_targets", "");
+          let targets = targetsStr ? targetsStr.split(",") : [];
+          
+          let enabled = false;
+          if (targets.includes(targetJid)) {
+             targets = targets.filter(j => j !== targetJid);
+          } else {
+             targets.push(targetJid);
+             enabled = true;
+          }
+          
+          await setSetting("auto_stealth_targets", targets.join(","));
+          
+          await Hooper.sendMessage(m.sender, { 
+            text: `👁️ *Auto-Stealth for ${targetJid.split("@")[0]}: ${enabled ? "ON" : "OFF"}*\n\n${enabled ? "View Once messages from this chat will be silently forwarded to you." : "Auto-Stealth disabled for this chat."}` 
+          });
+        }
         return;
       }
 
@@ -74,7 +108,7 @@ export default {
       const senderNumber = m.quoted.sender.split("@")[0];
       
       const caption = isViewOnce 
-         ? `👁️ *View Once Saved*${originalCaption}`
+         ? `viewonce saved from @${senderNumber}.${originalCaption}`
          : `saved from @${senderNumber}.\n------------------------${originalCaption}`;
 
       const targetJid = m.sender;

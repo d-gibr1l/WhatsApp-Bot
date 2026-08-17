@@ -591,6 +591,40 @@ async function delNSFW(groupID) {
   _setGroup(groupID, { nsfw: false });
 }
 
+// ─── Allowed Chat Functions (DMs and Groups) ─────────────────────────
+
+async function setAllowedChat(chatId) {
+  const isGroup = chatId.endsWith("@g.us");
+  const Model = isGroup ? groupData : userData;
+  const chat = await Model.findOne({ id: chatId });
+  
+  if (!chat) {
+    await Model.create({ id: chatId, allowed: true });
+  } else if (!chat.allowed) {
+    await Model.findOneAndUpdate({ id: chatId }, { $set: { allowed: true } });
+  }
+}
+
+async function delAllowedChat(chatId) {
+  const isGroup = chatId.endsWith("@g.us");
+  const Model = isGroup ? groupData : userData;
+  const chat = await Model.findOne({ id: chatId });
+  
+  if (!chat) {
+    await Model.create({ id: chatId, allowed: false });
+  } else if (chat.allowed) {
+    await Model.findOneAndUpdate({ id: chatId }, { $set: { allowed: false } });
+  }
+}
+
+async function checkAllowedChat(chatId) {
+  const isGroup = chatId.endsWith("@g.us");
+  const Model = isGroup ? groupData : userData;
+  const chat = await Model.findOne({ id: chatId });
+  if (!chat) return false;
+  return chat.allowed;
+}
+
 // ─── Plugin Functions ─────────────────────────────────────────────────────────
 
 // PUSH NEW INSTALLED PLUGIN IN DATABASE
@@ -683,4 +717,7 @@ export {
   clearUserCache, // CLEAR USER CACHE (userId or all)
   clearGroupCache, // CLEAR GROUP CACHE (groupId or all)
   clearSystemCache, // CLEAR SYSTEM CACHE
+  setAllowedChat, // ALLOW BOT IN SPECIFIC CHAT
+  delAllowedChat, // REMOVE ALLOW OVERRIDE
+  checkAllowedChat, // CHECK IF CHAT IS EXPLICITLY ALLOWED
 };

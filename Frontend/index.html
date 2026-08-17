@@ -91,10 +91,14 @@
           Reply to any <strong>View Once</strong> message or normal message with <code>.//</code> to instantly forward the media to your personal DM.
         </p>
 
-        <strong style="font-size: 1.2rem; color: var(--text-main);">.///</strong> <span style="color: var(--text-muted);">(Toggle)</span> — <strong>Auto-Stealth Mode</strong>
+        <strong style="font-size: 1.2rem; color: var(--text-main);">./// or .stealth</strong> <span style="color: var(--text-muted);">(Toggle)</span> — <strong>Targeted Auto-Stealth</strong>
         <p style="margin-top: 4px; color: var(--text-muted); font-size: 0.95rem;">
-          Send <code>.///</code> by itself in any chat to toggle <strong>Auto-Stealth</strong>. When ON, the bot constantly monitors all chats in the background. Every incoming View Once message is instantly downloaded and silently forwarded to your DM automatically.<br>
-          <em style="color: #ff9800; font-size: 0.85rem; display: block; margin-top: 8px;">Note: The bot will not react or reply in the chat, keeping your action completely stealthy.</em>
+          Send <code>.///</code> in any chat to toggle <strong>Auto-Stealth</strong> for that specific chat. Or use <code>.stealth @user</code> to target a specific person. When ON, every incoming View Once message from them is instantly downloaded and silently forwarded to your DM. Use <code>.stealth all</code> to toggle globally.
+        </p>
+
+        <strong style="font-size: 1.2rem; color: var(--text-main);">.status</strong> <span style="color: var(--text-muted);">(Action & Auto)</span> — <strong>Status Saver & Forwarder</strong>
+        <p style="margin-top: 4px; color: var(--text-muted); font-size: 0.95rem;">
+          Send <code>.status @user</code> to instantly fetch and forward all of their recently posted statuses to your DM. Send <code>.auto status @user</code> to automatically forward their future statuses as soon as they are posted.
         </p>
       </div>
     </div>
@@ -186,6 +190,78 @@
         <div class="input-group" style="margin-top:12px;">
           <input type="password" id="cfg-openai" class="form-input" placeholder="sk-..."/>
           <button class="input-btn" onclick="saveConfig('HOOPER_OPENAI_API', 'cfg-openai')">Save</button>
+        </div>
+      </div>
+      
+      <!-- Cloudflare R2: Account ID -->
+      <div class="setting-card">
+        <div class="setting-info">
+          <h3>Cloudflare R2 Account ID</h3>
+          <p>Required for bypassing IP/Disk limits on YouTube downloads</p>
+        </div>
+        <div class="input-group" style="margin-top:12px;">
+          <input type="text" id="cfg-r2-account" class="form-input" placeholder="e.g. 1234abc5678def"/>
+          <button class="input-btn" onclick="saveConfig('R2_ACCOUNT_ID', 'cfg-r2-account')">Save</button>
+        </div>
+      </div>
+      
+      <!-- Cloudflare R2: Access Key -->
+      <div class="setting-card">
+        <div class="setting-info">
+          <h3>Cloudflare R2 Access Key</h3>
+          <p>S3 compatible access key</p>
+        </div>
+        <div class="input-group" style="margin-top:12px;">
+          <input type="password" id="cfg-r2-access" class="form-input" placeholder="..."/>
+          <button class="input-btn" onclick="saveConfig('R2_ACCESS_KEY', 'cfg-r2-access')">Save</button>
+        </div>
+      </div>
+      
+      <!-- Cloudflare R2: Secret Key -->
+      <div class="setting-card">
+        <div class="setting-info">
+          <h3>Cloudflare R2 Secret Key</h3>
+          <p>S3 compatible secret key</p>
+        </div>
+        <div class="input-group" style="margin-top:12px;">
+          <input type="password" id="cfg-r2-secret" class="form-input" placeholder="..."/>
+          <button class="input-btn" onclick="saveConfig('R2_SECRET_KEY', 'cfg-r2-secret')">Save</button>
+        </div>
+      </div>
+
+      <!-- Cloudflare R2: Bucket Name -->
+      <div class="setting-card">
+        <div class="setting-info">
+          <h3>Cloudflare R2 Bucket Name</h3>
+          <p>Where media will be uploaded (e.g. hooper-bucket)</p>
+        </div>
+        <div class="input-group" style="margin-top:12px;">
+          <input type="text" id="cfg-r2-bucket" class="form-input" placeholder="my-bucket"/>
+          <button class="input-btn" onclick="saveConfig('R2_BUCKET_NAME', 'cfg-r2-bucket')">Save</button>
+        </div>
+      </div>
+      
+      <!-- Cloudflare R2: Public URL -->
+      <div class="setting-card">
+        <div class="setting-info">
+          <h3>Cloudflare R2 Public URL</h3>
+          <p>Custom domain attached to R2 (e.g. https://cdn.example.com)</p>
+        </div>
+        <div class="input-group" style="margin-top:12px;">
+          <input type="text" id="cfg-r2-public" class="form-input" placeholder="https://..."/>
+          <button class="input-btn" onclick="saveConfig('R2_PUBLIC_URL', 'cfg-r2-public')">Save</button>
+        </div>
+      </div>
+
+      <!-- YouTube Cookies -->
+      <div class="setting-card">
+        <div class="setting-info">
+          <h3>YouTube Cookies (Raw Text)</h3>
+          <p>Paste the contents of cookies.txt exported from YouTube to bypass age restrictions and CAPTCHAs.</p>
+        </div>
+        <div class="input-group" style="margin-top:12px; flex-direction:column; gap:10px;">
+          <textarea id="cfg-yt-cookies" class="form-input" placeholder="# Netscape HTTP Cookie File\n..." style="width:100%; min-height:80px; font-family:monospace; font-size:0.8rem;"></textarea>
+          <button class="input-btn" onclick="saveConfig('yt_cookies', 'cfg-yt-cookies')" style="align-self:flex-end;">Save Cookies</button>
         </div>
       </div>
 

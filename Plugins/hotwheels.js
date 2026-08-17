@@ -7,7 +7,7 @@ alias:[...mergedCommands],
 uniquecommands:[...mergedCommands],
 description:"Get random Hot Wheels",
 
-start: async (Hooper,m,{inputCMD})=>{
+start: async (Hooper,m,{inputCMD, doReact})=>{
 
 switch(inputCMD){
 
@@ -15,7 +15,7 @@ case "hotwheels":
 case "hw":
 
 try{
-
+await doReact("🚗");
 const res = await fetch("https://hot-wheels-rugs.onrender.com/api/random")
 const data = await res.json()
 

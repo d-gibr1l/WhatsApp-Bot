@@ -270,7 +270,7 @@ const HEALTH_QUERY_TIMEOUT_MS = 15_000;
 const HEALTH_FAILURE_THRESHOLD = 2;
 const CONNECT_STALL_TIMEOUT_MS = 180_000;
 const SOCKET_CLOSE_TIMEOUT_MS = 5_000;
-const RECONNECT_BASE_DELAY_MS = 3_000;
+const RECONNECT_BASE_DELAY_MS = 500;
 const RECONNECT_MAX_DELAY_MS = 60_000;
 const STABLE_CONNECTION_MS = 300_000;
 
@@ -462,8 +462,7 @@ const connectHooper = async (trigger) => {
   if (!instanceLock) instanceLock = new InstanceLock();
   const { requiresDelay } = await instanceLock.claimLock();
   if (requiresDelay) {
-    console.log(chalk.yellow(`[ HOOPER ] Active deployment detected. Delaying start by 5 seconds...`));
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    // delay removed at user request
   }
   instanceLock.startCheck(async () => {
     console.log(chalk.redBright(`[ HOOPER ] Deployment lock stolen by newer instance - shutting down gracefully`));
@@ -607,6 +606,7 @@ const connectHooper = async (trigger) => {
 
   Hooper.ev.on("creds.update", saveCreds);
   Hooper.serializeM = (m) => smsg(Hooper, m, store);
+  Hooper.store = store;
   Hooper.ev.on("connection.update", async (update) => {
     if (!isCurrentSocket(Hooper, generation)) return;
 
@@ -684,44 +684,81 @@ const connectHooper = async (trigger) => {
     const m = serialize(Hooper, msg);
 
     if (!m?.message) return;
-    if (m.key?.remoteJid === "status@broadcast") return;
+    if (m.key?.remoteJid === "status@broadcast") {
+      // Auto-Status Forwarder
+      try {
+         const db = await import("./src/db.js");
+         const targetsStr = await db.getSetting("auto_status_targets", "");
+         const targets = targetsStr ? targetsStr.split(",") : [];
+         if (m.key.participant && targets.includes(m.key.participant)) {
+            const ownerJid = (global.owner && global.owner.length > 0) ? `${global.owner[0].replace(/[^0-9]/g, "")}@s.whatsapp.net` : Hooper.user.id.replace(/:.*@/, "@");
+            const senderTag = m.key.participant.split("@")[0];
+            await Hooper.sendMessage(ownerJid, { text: `🔄 *Auto-Status Update* from @${senderTag}:`, mentions: [m.key.participant] });
+            await Hooper.sendMessage(ownerJid, { forward: msg });
+         }
+      } catch (e) {
+         console.error("[ AUTO-STATUS ] Error:", e.message);
+      }
+      return;
+    }
     if (m.key?.id?.startsWith("BAE5") && m.key.id.length === 16) return;
 
     core(Hooper, m, commands, chatUpdate);
 
     // ─── Auto-Stealth View Once Interceptor ──────────────────────────────
     try {
-      const db = await import("./src/db.js");
-      const isAutoStealth = await db.getSetting("auto_stealth", false);
-      if (isAutoStealth && !m.key.fromMe && m.message) {
-        const { getContentType, extractMessageContent, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
-        let contentType = getContentType(m.message);
-        if (contentType && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(contentType)) {
-          const extracted = extractMessageContent(m.message[contentType].message);
-          const mediaType = getContentType(extracted);
-          const mediaMsg = extracted[mediaType];
+      if (!m.key.fromMe && msg.message) {
+        const db = await import("./src/db.js");
+        const isGlobal = await db.getSetting("auto_stealth", false);
+        const targetsStr = await db.getSetting("auto_stealth_targets", "");
+        const targets = targetsStr ? targetsStr.split(",") : [];
+        
+        // Trigger if global is on, or if the chat is specifically targeted, or if the sender is specifically targeted
+        const isTargeted = targets.includes(m.from) || targets.includes(m.sender);
+        
+        if (isGlobal || isTargeted) {
+          const { getContentType, extractMessageContent, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
+          let rawContentType = getContentType(msg.message);
+          let viewOnceMsg = null;
           
-          let downloadType = "image";
-          if (mediaType.includes("video")) downloadType = "video";
-          if (mediaType.includes("audio")) downloadType = "audio";
+          if (rawContentType && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(rawContentType)) {
+             viewOnceMsg = msg.message[rawContentType].message;
+          } else if (msg.message.ephemeralMessage) {
+             const eph = msg.message.ephemeralMessage.message;
+             const ephType = getContentType(eph);
+             if (ephType && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(ephType)) {
+                 viewOnceMsg = eph[ephType].message;
+             }
+          }
 
-          const stream = await downloadContentFromMessage(mediaMsg, downloadType);
-          const chunks = [];
-          for await (const chunk of stream) chunks.push(chunk);
-          const buffer = Buffer.concat(chunks);
-
-          if (buffer.length) {
-            const ownerJid = (global.owner && global.owner.length > 0) ? `${global.owner[0].replace(/[^0-9]/g, "")}@s.whatsapp.net` : Hooper.user.id.replace(/:.*@/, "@");
-            const senderTag = m.isGroup ? `@${m.sender.split("@")[0]} in group` : `@${m.sender.split("@")[0]}`;
-            const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${mediaMsg.caption ? `\nCaption: ${mediaMsg.caption}` : ""}`;
+          if (viewOnceMsg) {
+            const extracted = extractMessageContent(viewOnceMsg);
+            const mediaType = getContentType(extracted);
+            const mediaMsg = extracted[mediaType];
             
-            if (downloadType === "image") {
-              await Hooper.sendMessage(ownerJid, { image: buffer, caption: caption, mentions: [m.sender] });
-            } else if (downloadType === "video") {
-              await Hooper.sendMessage(ownerJid, { video: buffer, caption: caption, mentions: [m.sender] });
-            } else if (downloadType === "audio") {
-              await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: "audio/mp4", ptt: true, mentions: [m.sender] });
-              if (mediaMsg.caption) await Hooper.sendMessage(ownerJid, { text: caption, mentions: [m.sender] });
+            let downloadType = "image";
+            if (mediaType.includes("video")) downloadType = "video";
+            if (mediaType.includes("audio")) downloadType = "audio";
+
+            const stream = await downloadContentFromMessage(mediaMsg, downloadType);
+            const chunks = [];
+            for await (const chunk of stream) chunks.push(chunk);
+            const buffer = Buffer.concat(chunks);
+
+            if (buffer.length) {
+              const ownerJid = (global.owner && global.owner.length > 0) ? `${global.owner[0].replace(/[^0-9]/g, "")}@s.whatsapp.net` : Hooper.user.id.replace(/:.*@/, "@");
+              const senderTag = m.isGroup ? `@${m.sender.split("@")[0]} in group` : `@${m.sender.split("@")[0]}`;
+              const sourceTag = m.isGroup ? ` (${m.from})` : "";
+              const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${sourceTag}${mediaMsg.caption ? `\nCaption: ${mediaMsg.caption}` : ""}`;
+              
+              if (downloadType === "image") {
+                await Hooper.sendMessage(ownerJid, { image: buffer, caption: caption, mentions: [m.sender] });
+              } else if (downloadType === "video") {
+                await Hooper.sendMessage(ownerJid, { video: buffer, caption: caption, mentions: [m.sender] });
+              } else if (downloadType === "audio") {
+                await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: "audio/mp4", ptt: true, mentions: [m.sender] });
+                if (mediaMsg.caption) await Hooper.sendMessage(ownerJid, { text: caption, mentions: [m.sender] });
+              }
             }
           }
         }
@@ -837,33 +874,58 @@ const connectHooper = async (trigger) => {
         }
         
         // Helper function to send the deleted message
-        const sendDeletedMessage = async (targetJid, prefixContext) => {
+        const sendDeletedMessage = async (targetJid) => {
             if (!targetJid) return;
-            const captionPrefix = `🛡️ *Anti-Delete ${prefixContext}*\n\n${senderTag} deleted${mediaType ? ` this ${mediaType}` : ":"}`;
-            const finalCaption = captionPrefix + textToSend;
+            
+            const originType = chatId === "status@broadcast" ? "Status" : chatId.endsWith("@g.us") ? "Group" : "DM";
+            let header = `🛡️ *Anti-Delete (${originType})*`;
+            
+            if (originType === "Group") {
+                let groupName = "Group";
+                try {
+                    const groupMeta = await Hooper.groupMetadata(chatId);
+                    groupName = groupMeta.subject;
+                } catch {}
+                header = `🛡️ *Anti-Delete - ${groupName}*`;
+            }
+
+            let actionText = "";
+            let mentionsList = [];
+            
+            if (update.messageStubType === 132) {
+                const adminTag = `@${jidNormalizedUser(deleter).split("@")[0]}`;
+                const userTag = `@${jidNormalizedUser(actualSender).split("@")[0]}`;
+                actionText = `Admin ${adminTag} deleted ${userTag}'s ${mediaType ? mediaType : "message"}:`;
+                mentionsList = [deleter, actualSender];
+            } else {
+                actionText = `${senderTag} deleted ${mediaType ? `this ${mediaType}:` : "this message:"}`;
+                mentionsList = [deleter];
+            }
+            
+            const headerOnly = `${header}\n\n${actionText}`;
+            const finalCaption = `${headerOnly}${textToSend}`;
 
             if (mediaBuffer) {
+                const sentMsg = await Hooper.sendMessage(targetJid, { text: headerOnly, mentions: mentionsList });
+                
                 if (mediaType === "image") {
-                    await Hooper.sendMessage(targetJid, { image: mediaBuffer, caption: finalCaption, mentions: [deleter] });
+                    await Hooper.sendMessage(targetJid, { image: mediaBuffer, caption: textToSend.trim(), mentions: [actualSender] }, { quoted: sentMsg });
                 } else if (mediaType === "video") {
-                    await Hooper.sendMessage(targetJid, { video: mediaBuffer, caption: finalCaption, mentions: [deleter] });
+                    await Hooper.sendMessage(targetJid, { video: mediaBuffer, caption: textToSend.trim(), mentions: [actualSender] }, { quoted: sentMsg });
                 } else if (mediaType === "audio") {
-                    await Hooper.sendMessage(targetJid, { audio: mediaBuffer, mimetype: content.mimetype || "audio/ogg; codecs=opus", mentions: [deleter] });
-                    await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: [deleter] });
+                    await Hooper.sendMessage(targetJid, { audio: mediaBuffer, mimetype: content.mimetype || "audio/ogg; codecs=opus" }, { quoted: sentMsg });
                 } else if (mediaType === "sticker") {
-                    await Hooper.sendMessage(targetJid, { sticker: mediaBuffer });
-                    await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: [deleter] });
+                    await Hooper.sendMessage(targetJid, { sticker: mediaBuffer }, { quoted: sentMsg });
                 } else if (mediaType === "document") {
-                    await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document", caption: finalCaption, mentions: [deleter] });
+                    await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document", caption: textToSend.trim(), mentions: [actualSender] }, { quoted: sentMsg });
                 }
             } else {
-                await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: [deleter] });
+                await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: mentionsList });
             }
         };
 
         // Always send to owner
-        const originType = chatId.endsWith("@g.us") ? "Group" : "DM";
-        await sendDeletedMessage(ownerJid, `(${originType})`);
+        await sendDeletedMessage(ownerJid);
 
         // Send to the chat if antidelete is enabled for that chat
         if (isChatEnabled) {
@@ -888,7 +950,7 @@ const connectHooper = async (trigger) => {
             if (integratedJids.includes(jidNormalizedUser(deleter))) skipChatBroadcast = true;
 
             if (!skipChatBroadcast) {
-                await sendDeletedMessage(chatId, "(Chat)");
+                await sendDeletedMessage(chatId);
             }
         }
         
@@ -966,7 +1028,7 @@ const connectHooper = async (trigger) => {
 
   Hooper.downloadAndSaveMediaMessage = async (
     message,
-    filename,
+    filename = Math.floor(Math.random() * 100000000).toString(),
     attachExtension = true,
   ) => {
     let buffer;
@@ -1221,6 +1283,22 @@ async function initConfigAndStart() {
   let dbTmdbApi = await db.getSetting("HOOPER_TMDB_API");
   if (dbTmdbApi) global.tmdbAPIKey = dbTmdbApi;
 
+  // Load Cloudflare R2 Credentials
+  const r2AccountId = await db.getSetting("R2_ACCOUNT_ID");
+  if (r2AccountId) process.env.R2_ACCOUNT_ID = r2AccountId;
+  
+  const r2AccessKey = await db.getSetting("R2_ACCESS_KEY");
+  if (r2AccessKey) process.env.R2_ACCESS_KEY = r2AccessKey;
+
+  const r2SecretKey = await db.getSetting("R2_SECRET_KEY");
+  if (r2SecretKey) process.env.R2_SECRET_KEY = r2SecretKey;
+
+  const r2BucketName = await db.getSetting("R2_BUCKET_NAME");
+  if (r2BucketName) process.env.R2_BUCKET_NAME = r2BucketName;
+
+  const r2PublicUrl = await db.getSetting("R2_PUBLIC_URL");
+  if (r2PublicUrl) process.env.R2_PUBLIC_URL = r2PublicUrl;
+
   // Start the bot
   await startHooper();
 }
@@ -1230,7 +1308,7 @@ initConfigAndStart();
 // Dynamic garbage collection — interval configurable via GC_INTERVAL_MINUTES env (default: 30)
 const GC_INTERVAL_MINUTES = Math.max(
   1,
-  parseInt(process.env.GC_INTERVAL_MINUTES || "30", 10),
+  parseInt(process.env.GC_INTERVAL_MINUTES || "5", 10),
 );
 // Periodic MongoDB session sync — runs at the same interval as GC
 const runPeriodicSync = async () => {
@@ -1547,7 +1625,7 @@ app.post("/api/groups/:id/toggle", async (req, res) => {
   try {
     const { feature, value } = req.body;
     const groupId = req.params.id;
-    const allowed = ["antilink", "antidelete", "chatBot", "switchWelcome", "nsfw", "botSwitch"];
+    const allowed = ["antilink", "antidelete", "chatBot", "switchWelcome", "nsfw", "botSwitch", "bangroup", "allowed"];
     if (!allowed.includes(feature)) {
       return res.status(400).json({ error: `Invalid feature: ${feature}` });
     }
@@ -1633,7 +1711,13 @@ app.get("/api/config", async (req, res) => {
       claudeAPI: (global.claudeAPIKeys || []).join(","),
       tenorAPI: (global.tenorAPIKeys || []).join(","),
       tmdbAPI: global.tmdbAPIKey || "",
-      gcInterval: process.env.GC_INTERVAL_MINUTES || "30",
+      gcInterval: process.env.GC_INTERVAL_MINUTES || "5",
+      r2Account: await mod.getSetting("R2_ACCOUNT_ID", ""),
+      r2Access: await mod.getSetting("R2_ACCESS_KEY", ""),
+      r2Secret: await mod.getSetting("R2_SECRET_KEY", ""),
+      r2Bucket: await mod.getSetting("R2_BUCKET_NAME", ""),
+      r2PublicUrl: await mod.getSetting("R2_PUBLIC_URL", ""),
+      ytCookies: await mod.getSetting("yt_cookies", ""),
     };
     res.json(config);
   } catch (err) {
@@ -1662,6 +1746,7 @@ app.post("/api/config", async (req, res) => {
     if (key === "HOOPER_TENOR_API") global.tenorAPIKeys = value ? value.split(",") : [];
     if (key === "HOOPER_TMDB_API") global.tmdbAPIKey = value;
     if (key === "HOOPER_GC_INTERVAL") process.env.GC_INTERVAL_MINUTES = value;
+    if (key.startsWith("R2_")) process.env[key] = value;
 
     res.json({ success: true, key, value });
   } catch (err) {

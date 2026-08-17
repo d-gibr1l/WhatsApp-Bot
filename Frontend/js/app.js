@@ -11,7 +11,9 @@ const featureLabels = {
   antidelete: { name: 'Anti-Delete', desc: 'Forward deleted messages to moderators.' },
   chatbot: { name: 'AI Chatbot', desc: 'Enable Gemini/OpenAI auto-replies.' },
   welcome: { name: 'Welcome Message', desc: 'Send a greeting when a user joins.' },
-  nsfw: { name: 'NSFW Content', desc: 'Allow mature API commands.' }
+  nsfw: { name: 'NSFW Content', desc: 'Allow mature API commands.' },
+  bangroup: { name: 'Mute Bot', desc: 'Disable the bot entirely in this group.' },
+  allowed: { name: 'Force Allow', desc: 'Allow the bot in this group even when in Private/Self mode.' }
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -168,6 +170,12 @@ async function loadSettings() {
     if (document.getElementById('cfg-claude')) document.getElementById('cfg-claude').value = data.claudeAPI || '';
     if (document.getElementById('cfg-tenor')) document.getElementById('cfg-tenor').value = data.tenorAPI || '';
     if (document.getElementById('cfg-gc')) document.getElementById('cfg-gc').value = data.gcInterval || '';
+    if (document.getElementById('cfg-r2-account')) document.getElementById('cfg-r2-account').value = data.r2Account || '';
+    if (document.getElementById('cfg-r2-access')) document.getElementById('cfg-r2-access').value = data.r2Access || '';
+    if (document.getElementById('cfg-r2-secret')) document.getElementById('cfg-r2-secret').value = data.r2Secret || '';
+    if (document.getElementById('cfg-r2-bucket')) document.getElementById('cfg-r2-bucket').value = data.r2Bucket || '';
+    if (document.getElementById('cfg-r2-public')) document.getElementById('cfg-r2-public').value = data.r2PublicUrl || '';
+    if (document.getElementById('cfg-yt-cookies')) document.getElementById('cfg-yt-cookies').value = data.ytCookies || '';
   } catch(e) {
     showToast('Failed to load config', 'error');
   }

@@ -83,10 +83,10 @@ if (USE_MONGO) {
   Models.Radar = mongoose.model("Radar", new mongoose.Schema({ id: { type: String, unique: true }, type: String, target: String, chat_id: String, meta: Object, last_seen: String }));
   
   // Legacy Core Schemas
-  Models.User = mongoose.model("User", new mongoose.Schema({ id: { type: String, unique: true }, ban: { type: Boolean, default: false }, name: String, addedMods: { type: Boolean, default: false } }));
-  Models.BotGroup = mongoose.model("BotGroup", new mongoose.Schema({ id: { type: String, unique: true }, antilink: { type: Boolean, default: false }, antidelete: { type: Boolean, default: false }, nsfw: { type: Boolean, default: false }, bangroup: { type: Boolean, default: false }, chatBot: { type: Boolean, default: false }, botSwitch: { type: Boolean, default: true }, switchNSFW: { type: Boolean, default: false }, switchWelcome: { type: Boolean, default: false } }));
-  Models.System = mongoose.model("System", new mongoose.Schema({ id: { type: String, default: "1" }, seletedCharacter: { type: String, default: "0" }, PMchatBot: { type: Boolean, default: false }, botMode: { type: String, default: "public" } }));
-  Models.Plugin = mongoose.model("Plugin", new mongoose.Schema({ plugin: String, url: String }));
+  Models.User = mongoose.model("User", new mongoose.Schema({ id: { type: String, unique: true }, ban: { type: Boolean, default: false }, name: String, addedMods: { type: Boolean, default: false } }), "userdatas");
+  Models.BotGroup = mongoose.model("BotGroup", new mongoose.Schema({ id: { type: String, unique: true }, antilink: { type: Boolean, default: false }, antidelete: { type: Boolean, default: false }, nsfw: { type: Boolean, default: false }, bangroup: { type: Boolean, default: false }, chatBot: { type: Boolean, default: false }, botSwitch: { type: Boolean, default: true }, switchNSFW: { type: Boolean, default: false }, switchWelcome: { type: Boolean, default: false }, allowed: { type: Boolean, default: false } }), "groupdatas");
+  Models.System = mongoose.model("System", new mongoose.Schema({ id: { type: String, default: "1" }, seletedCharacter: { type: String, default: "0" }, PMchatBot: { type: Boolean, default: false }, botMode: { type: String, default: "public" } }), "systemdatas");
+  Models.Plugin = mongoose.model("Plugin", new mongoose.Schema({ plugin: String, url: String }), "plugindatas");
   Models.Session = mongoose.model("Session", new mongoose.Schema({ sessionId: { type: String, unique: true }, files: Object, lastSync: Date }));
 }
 
@@ -265,6 +265,7 @@ export async function getAllGroups() {
       botSwitch: d.botSwitch,
       switchNSFW: d.switchNSFW,
       switchWelcome: d.switchWelcome,
+      allowed: d.allowed,
     }));
   }
   return Object.values(jsonCache.bot_groups);
