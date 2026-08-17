@@ -795,7 +795,88 @@ const connectHooper = async (trigger) => {
         }
       }
     } catch (e) {
-      console.log("[ AUTO-STEALTH ] Error:", e.message, e.stack);
+      // silently ignore
+    }
+  });
+
+  // ─── Auto-Stealth: Dedicated View Once Interceptor ──────────────────────
+  // This is a SEPARATE listener because Baileys may deliver view-once
+  // messages with type "append" instead of "notify", bypassing the main handler.
+  Hooper.ev.on("messages.upsert", async (chatUpdate) => {
+    if (!isCurrentSocket(Hooper, generation)) return;
+    try {
+      const { getContentType, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
+      
+      for (const msg of (chatUpdate.messages || [])) {
+        if (!msg?.message || msg.key?.fromMe) continue;
+        
+        // Check raw message for viewOnce wrappers
+        const rawType = getContentType(msg.message);
+        const isViewOnce = rawType && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(rawType);
+        
+        console.log(`[ AUTO-STEALTH-DEDICATED ] msg type=${chatUpdate.type} rawType=${rawType} isViewOnce=${isViewOnce} from=${msg.key?.remoteJid}`);
+        
+        if (!isViewOnce) continue;
+        
+        // Check if this chat/sender is targeted
+        const db = await import("./src/db.js");
+        const isGlobal = await db.getSetting("auto_stealth", false);
+        const targetsStr = await db.getSetting("auto_stealth_targets", "");
+        const targets = targetsStr ? targetsStr.split(",") : [];
+        
+        const chatJid = msg.key.remoteJid;
+        const senderJid = msg.key.participant || msg.key.remoteJid;
+        const isTargeted = targets.includes(chatJid) || targets.includes(senderJid);
+        
+        console.log(`[ AUTO-STEALTH-DEDICATED ] isGlobal=${isGlobal} isTargeted=${isTargeted} chatJid=${chatJid} senderJid=${senderJid} targets=[${targets.join(", ")}]`);
+        
+        if (!isGlobal && !isTargeted) continue;
+        
+        // Extract the inner media message
+        const inner = msg.message[rawType]?.message;
+        if (!inner) continue;
+        
+        const innerType = getContentType(inner);
+        const mediaMsg = inner[innerType];
+        if (!mediaMsg) continue;
+        
+        let downloadType = "image";
+        if (innerType?.includes("video")) downloadType = "video";
+        else if (innerType?.includes("audio")) downloadType = "audio";
+        
+        console.log(`[ AUTO-STEALTH-DEDICATED ] Downloading ${downloadType} (innerType=${innerType})...`);
+        
+        const stream = await downloadContentFromMessage(mediaMsg, downloadType);
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        const buffer = Buffer.concat(chunks);
+        
+        console.log(`[ AUTO-STEALTH-DEDICATED ] Downloaded ${buffer.length} bytes`);
+        
+        if (!buffer.length) continue;
+        
+        const ownerJid = Hooper.user.id.replace(/:.*@/, "@");
+        const senderNum = (msg.key.participant || msg.key.remoteJid || "").split("@")[0];
+        const isGroup = chatJid?.endsWith("@g.us");
+        const senderTag = isGroup ? `@${senderNum} in group` : `@${senderNum}`;
+        const sourceTag = isGroup ? ` (${chatJid})` : "";
+        const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${sourceTag}${mediaMsg.caption ? `\nCaption: ${mediaMsg.caption}` : ""}`;
+        
+        console.log(`[ AUTO-STEALTH-DEDICATED ] Sending to ${ownerJid}`);
+        
+        if (downloadType === "image") {
+          await Hooper.sendMessage(ownerJid, { image: buffer, caption, mentions: [senderJid] });
+        } else if (downloadType === "video") {
+          await Hooper.sendMessage(ownerJid, { video: buffer, caption, mentions: [senderJid] });
+        } else if (downloadType === "audio") {
+          await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: "audio/mp4", ptt: true, mentions: [senderJid] });
+          if (mediaMsg.caption) await Hooper.sendMessage(ownerJid, { text: caption, mentions: [senderJid] });
+        }
+        
+        console.log(`[ AUTO-STEALTH-DEDICATED ] ✅ Done!`);
+      }
+    } catch (e) {
+      console.log("[ AUTO-STEALTH-DEDICATED ] Error:", e.message, e.stack);
     }
   });
 
