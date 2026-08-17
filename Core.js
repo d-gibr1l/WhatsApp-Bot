@@ -32,10 +32,10 @@ export default async (Hooper, m, commands, chatUpdate) => {
           : type == "templateButtonReplyMessage"
             ? m.message[type].selectedId
             : m.text;
-    const isStealthCmd = body.startsWith(".//");
-    const isCmd = body.startsWith(prefix) || isStealthCmd;
-    const bodyWithoutPrefix = isStealthCmd ? body.trim() : (isCmd ? body.slice(prefix.length).trim() : "");
+    const isCmd = body.startsWith(prefix);
+    const bodyWithoutPrefix = isCmd ? body.slice(prefix.length).trim() : "";
     const inputCMD = isCmd ? bodyWithoutPrefix.split(/ +/).shift().toLowerCase() : "";
+    const isStealthCmd = inputCMD === "//" || inputCMD === "///";
     const args = isCmd ? bodyWithoutPrefix.split(/ +/).slice(1) : [];
     const text = args.join(" ");
 
@@ -131,9 +131,7 @@ export default async (Hooper, m, commands, chatUpdate) => {
       await Hooper.sendMessage(m.from, reactm);
     }
     let response = isCmd ? body : "";
-    const cmdName = isStealthCmd 
-      ? response.trim().split(/ +/).shift().toLowerCase()
-      : response.slice(prefix.length).trim().split(/ +/).shift().toLowerCase();
+    const cmdName = response.slice(prefix.length).trim().split(/ +/).shift().toLowerCase();
     const cmd =
       commands.get(cmdName) ||
       Array.from(commands.values()).find((v) =>

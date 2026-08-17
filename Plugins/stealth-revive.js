@@ -2,8 +2,8 @@ import { getSetting, setSetting } from "../src/db.js";
 
 export default {
   name: "stealthrevive",
-  alias: [".//", ".///", "stealth"],
-  uniquecommands: ["stealthrevive", ".//", ".///", "stealth"],
+  alias: ["//", "///", "stealth"],
+  uniquecommands: ["stealthrevive", "//", "///", "stealth"],
   description: "Silently send view once messages to DMs or toggle Auto-Stealth",
 
   start: async (Hooper, m, { inputCMD, text, doReact, isCreator, mentionByTag }) => {
@@ -17,7 +17,7 @@ export default {
       }
 
       // Handle Auto-Stealth Toggles
-      if (inputCMD === ".///" || inputCMD === "stealth") {
+      if (inputCMD === "///" || inputCMD === "stealth") {
         let targetJid = m.from; // Default to current chat
         let isGlobal = false;
         
