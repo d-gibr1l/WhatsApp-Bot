@@ -14,6 +14,7 @@ global.groupListMap = global.groupListMap || {};
 export default {
   name: "groups",
   category: "admin",
+  alias: ["groups", "mute", "allow", "antidelete", "mode"],
   uniquecommands: ["groups", "mute", "allow", "antidelete", "mode"],
   description: "Group and mode management system",
   start: async (Hooper, m, { inputCMD, text, prefix, isCreator, isAdmin }) => {

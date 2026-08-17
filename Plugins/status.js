@@ -3,6 +3,7 @@ import { getSetting, setSetting } from "../src/db.js";
 export default {
   name: "status",
   category: "admin",
+  alias: ["status", "auto"],
   uniquecommands: ["status", "auto"],
   description: "WhatsApp Status Saver & Auto-Forwarder",
   start: async (Hooper, m, { inputCMD, text, prefix, isCreator, mentionByTag, args }) => {

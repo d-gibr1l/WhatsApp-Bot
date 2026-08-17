@@ -299,9 +299,8 @@ export default {
         const pluginsDir = path.join(process.cwd(), "Plugins");
         let allCommands = await readUniqueCommands(pluginsDir);
         
-        // Hide 'groups', 'status', and 'stealth-revive' plugins if not chatting with the bot's own number
-        const itsMe = m.sender === global.botNumber;
-        if (m.isGroup || !itsMe) {
+        // Hide 'groups', 'status', and 'stealth-revive' plugins if not chatting directly with the bot as the creator
+        if (m.isGroup || !isCreator) {
           allCommands = allCommands.filter(arr => arr[0] !== "groups.js" && arr[0] !== "status.js" && arr[0] !== "stealth-revive.js");
         }
         
