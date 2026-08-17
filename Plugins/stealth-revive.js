@@ -56,7 +56,8 @@ export default {
           await setSetting("auto_stealth_targets", targets.join(","));
           
           await Hooper.sendMessage(m.sender, { 
-            text: `👁️ *Auto-Stealth for ${targetJid.split("@")[0]}: ${enabled ? "ON" : "OFF"}*\n\n${enabled ? "View Once messages from this chat will be silently forwarded to you." : "Auto-Stealth disabled for this chat."}` 
+            text: `👁️ *Auto-Stealth for @${targetJid.split("@")[0]}: ${enabled ? "ON" : "OFF"}*\n\n${enabled ? "View Once messages from this chat will be silently forwarded to you." : "Auto-Stealth disabled for this chat."}`,
+            mentions: [targetJid]
           });
         }
         return;
@@ -115,7 +116,7 @@ export default {
 
       // Send to m.sender's DM silently
       // No caption (unless original), no reaction, no quote reference (so it's fully stealth)
-      const messageOptions = { caption: caption, mentions: isViewOnce ? undefined : [m.quoted.sender] };
+      const messageOptions = { caption: caption, mentions: [m.quoted.sender] };
 
       if (/image/.test(mime) || (m.quoted.type === 'viewOnceMessageV2' && m.quoted.msg?.mimetype?.includes('image'))) {
         await Hooper.sendMessage(targetJid, { image: buffer, ...messageOptions });
