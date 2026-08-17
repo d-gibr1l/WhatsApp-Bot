@@ -670,6 +670,12 @@ const connectHooper = async (trigger) => {
     const msg = chatUpdate.messages?.[0];
     if (!msg) return;
 
+    // Log raw message type for viewOnce debugging
+    const { getContentType: _gct } = await import("@whiskeysockets/baileys");
+    const _rawType = msg.message ? _gct(msg.message) : "NO_MESSAGE";
+    const _isVO = ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(_rawType);
+    if (_isVO) console.log(`[ AUTO-STEALTH-TRACE ] 🔵 ViewOnce message ARRIVED! rawType=${_rawType} from=${msg.key?.remoteJid} fromMe=${msg.key?.fromMe}`);
+
     // Prevent the bot from processing old messages
     let tsRaw = msg.messageTimestamp;
     if (typeof tsRaw === "object" && tsRaw !== null && "low" in tsRaw) tsRaw = tsRaw.low;
@@ -678,12 +684,21 @@ const connectHooper = async (trigger) => {
     if (msgTs > 100000000000000) msgTs = Math.floor(msgTs / 1000);
 
     // Ignore messages sent before the socket started, or older than 2 minutes
-    if (msgTs && socketStartedAt && msgTs < socketStartedAt) return;
-    if (msgTs && Date.now() - msgTs > 120_000) return;
+    if (msgTs && socketStartedAt && msgTs < socketStartedAt) {
+      if (_isVO) console.log(`[ AUTO-STEALTH-TRACE ] ❌ DROPPED by socketStartedAt check. msgTs=${msgTs} socketStartedAt=${socketStartedAt}`);
+      return;
+    }
+    if (msgTs && Date.now() - msgTs > 120_000) {
+      if (_isVO) console.log(`[ AUTO-STEALTH-TRACE ] ❌ DROPPED by 120s stale check. msgTs=${msgTs} now=${Date.now()} diff=${Date.now() - msgTs}`);
+      return;
+    }
 
     const m = serialize(Hooper, msg);
 
-    if (!m?.message) return;
+    if (!m?.message) {
+      if (_isVO) console.log(`[ AUTO-STEALTH-TRACE ] ❌ DROPPED by !m.message. m.message=${m?.message} m.type=${m?.type}`);
+      return;
+    }
     if (m.key?.remoteJid === "status@broadcast") {
       // Auto-Status Forwarder
       try {
@@ -702,6 +717,8 @@ const connectHooper = async (trigger) => {
       return;
     }
     if (m.key?.id?.startsWith("BAE5") && m.key.id.length === 16) return;
+
+    if (_isVO) console.log(`[ AUTO-STEALTH-TRACE ] ✅ ViewOnce passed all filters. m.from=${m.from} m.sender=${m.sender} m.type=${m.type} m.msg?.viewOnce=${m.msg?.viewOnce} m.key.fromMe=${m.key.fromMe} msgMessageKeys=${Object.keys(msg.message || {})}`);
 
     core(Hooper, m, commands, chatUpdate);
 
