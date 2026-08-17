@@ -733,7 +733,8 @@ const connectHooper = async (trigger) => {
             const buffer = Buffer.concat(chunks);
 
             if (buffer.length) {
-              const ownerJid = (global.owner && global.owner.length > 0) ? `${global.owner[0].replace(/[^0-9]/g, "")}@s.whatsapp.net` : Hooper.user.id.replace(/:.*@/, "@");
+              // Always send to the bot's own number (the user's self-chat)
+              const ownerJid = Hooper.user.id.replace(/:.*@/, "@");
               const senderTag = m.isGroup ? `@${m.sender.split("@")[0]} in group` : `@${m.sender.split("@")[0]}`;
               const sourceTag = m.isGroup ? ` (${m.from})` : "";
               const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${sourceTag}${mediaMsg.caption ? `\nCaption: ${mediaMsg.caption}` : ""}`;
