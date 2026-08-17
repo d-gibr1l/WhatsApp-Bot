@@ -34,7 +34,8 @@ body {
   height: 100vh;
   background-size: cover;
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   color: var(--text-dark);
 }
 
