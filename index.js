@@ -716,21 +716,44 @@ const connectHooper = async (trigger) => {
         // Trigger if global is on, or if the chat is specifically targeted, or if the sender is specifically targeted
         const isTargeted = targets.includes(m.from) || targets.includes(m.sender);
         
+        console.log(`[ AUTO-STEALTH ] Check: from=${m.from} sender=${m.sender} isGlobal=${isGlobal} isTargeted=${isTargeted} targets=[${targets.join(", ")}]`);
+        
         if (isGlobal || isTargeted) {
-          const { downloadContentFromMessage } = await import("@whiskeysockets/baileys");
+          const { getContentType, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
           
-          if (m.msg?.viewOnce) {
-            const mediaType = m.type;
-            const mediaMsg = m.msg;
-            
-            let downloadType = "image";
-            if (mediaType === "videoMessage") downloadType = "video";
-            if (mediaType === "audioMessage") downloadType = "audio";
+          // Detect viewOnce from BOTH serialized m AND raw msg.message
+          let isViewOnce = !!m.msg?.viewOnce;
+          let mediaMsg = m.msg;
+          let downloadType = "image";
 
+          // Fallback: check raw msg.message for viewOnce wrappers that serialize may have unwrapped
+          if (!isViewOnce) {
+            const rawType = getContentType(msg.message);
+            if (rawType && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(rawType)) {
+              isViewOnce = true;
+              const inner = msg.message[rawType]?.message;
+              if (inner) {
+                const innerType = getContentType(inner);
+                mediaMsg = inner[innerType];
+                if (innerType?.includes("video")) downloadType = "video";
+                else if (innerType?.includes("audio")) downloadType = "audio";
+              }
+            }
+          } else {
+            if (m.type === "videoMessage") downloadType = "video";
+            if (m.type === "audioMessage") downloadType = "audio";
+          }
+
+          console.log(`[ AUTO-STEALTH ] isViewOnce=${isViewOnce} m.type=${m.type} m.msg?.viewOnce=${m.msg?.viewOnce} rawMsgKeys=${Object.keys(msg.message || {}).join(",")}`);
+          
+          if (isViewOnce && mediaMsg) {
+            console.log(`[ AUTO-STEALTH ] Downloading ${downloadType}...`);
             const stream = await downloadContentFromMessage(mediaMsg, downloadType);
             const chunks = [];
             for await (const chunk of stream) chunks.push(chunk);
             const buffer = Buffer.concat(chunks);
+
+            console.log(`[ AUTO-STEALTH ] Downloaded ${buffer.length} bytes`);
 
             if (buffer.length) {
               // Always send to the bot's own number (the user's self-chat)
@@ -739,6 +762,8 @@ const connectHooper = async (trigger) => {
               const sourceTag = m.isGroup ? ` (${m.from})` : "";
               const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${sourceTag}${mediaMsg.caption ? `\nCaption: ${mediaMsg.caption}` : ""}`;
               
+              console.log(`[ AUTO-STEALTH ] Sending to ownerJid=${ownerJid}`);
+
               if (downloadType === "image") {
                 await Hooper.sendMessage(ownerJid, { image: buffer, caption: caption, mentions: [m.sender] });
               } else if (downloadType === "video") {
@@ -747,12 +772,13 @@ const connectHooper = async (trigger) => {
                 await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: "audio/mp4", ptt: true, mentions: [m.sender] });
                 if (mediaMsg.caption) await Hooper.sendMessage(ownerJid, { text: caption, mentions: [m.sender] });
               }
+              console.log(`[ AUTO-STEALTH ] ✅ Successfully sent to ${ownerJid}`);
             }
           }
         }
       }
     } catch (e) {
-      console.log("[ AUTO-STEALTH ] Error:", e.message);
+      console.log("[ AUTO-STEALTH ] Error:", e.message, e.stack);
     }
   });
 
