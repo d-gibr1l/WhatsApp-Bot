@@ -104,11 +104,11 @@ export default {
       const captionText = m.quoted.msg?.caption || m.quoted.text || "";
       const originalCaption = captionText ? `\n\n${captionText}` : "";
       
-      const isViewOnce = m.quoted.type?.toLowerCase().includes("viewonce");
+      const isViewOnce = m.quoted.msg?.viewOnce || m.quoted.type?.toLowerCase().includes("viewonce");
       const senderNumber = m.quoted.sender.split("@")[0];
       
       const caption = isViewOnce 
-         ? `viewonce saved from @${senderNumber}.${originalCaption}`
+         ? `viewonce saved from @${senderNumber}${originalCaption}`
          : `saved from @${senderNumber}.\n------------------------${originalCaption}`;
 
       const targetJid = m.sender;

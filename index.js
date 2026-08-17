@@ -717,28 +717,36 @@ const connectHooper = async (trigger) => {
         const isTargeted = targets.includes(m.from) || targets.includes(m.sender);
         
         if (isGlobal || isTargeted) {
-          const { getContentType, extractMessageContent, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
-          let rawContentType = getContentType(msg.message);
+          const { getContentType, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
           let viewOnceMsg = null;
           
-          if (rawContentType && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(rawContentType)) {
-             viewOnceMsg = msg.message[rawContentType].message;
-          } else if (msg.message.ephemeralMessage) {
-             const eph = msg.message.ephemeralMessage.message;
-             const ephType = getContentType(eph);
-             if (ephType && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(ephType)) {
-                 viewOnceMsg = eph[ephType].message;
+          // Check if it's natively a view once message (rely on serialize's unwrap)
+          if (m.msg?.viewOnce) {
+             viewOnceMsg = m.msg;
+          } else {
+             // Fallback to manual wrapper checks just in case
+             let rawContentType = getContentType(msg.message);
+             if (rawContentType && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(rawContentType)) {
+                let inner = msg.message[rawContentType].message;
+                viewOnceMsg = inner[getContentType(inner)];
+             } else if (msg.message.ephemeralMessage) {
+                const eph = msg.message.ephemeralMessage.message;
+                const ephType = getContentType(eph);
+                if (ephType && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(ephType)) {
+                    let inner = eph[ephType].message;
+                    viewOnceMsg = inner[getContentType(inner)];
+                }
              }
           }
 
           if (viewOnceMsg) {
-            const extracted = extractMessageContent(viewOnceMsg);
-            const mediaType = getContentType(extracted);
-            const mediaMsg = extracted[mediaType];
+            // viewOnceMsg is now the actual inner media message (e.g. imageMessage, videoMessage)
+            const mediaMsg = viewOnceMsg;
+            const mediaType = m.type === "imageMessage" || m.type === "videoMessage" || m.type === "audioMessage" ? m.type : getContentType({ [m.type]: viewOnceMsg });
             
             let downloadType = "image";
-            if (mediaType.includes("video")) downloadType = "video";
-            if (mediaType.includes("audio")) downloadType = "audio";
+            if (m.type === "videoMessage" || (mediaType && mediaType.includes("video"))) downloadType = "video";
+            if (m.type === "audioMessage" || (mediaType && mediaType.includes("audio"))) downloadType = "audio";
 
             const stream = await downloadContentFromMessage(mediaMsg, downloadType);
             const chunks = [];
