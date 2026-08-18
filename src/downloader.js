@@ -195,8 +195,14 @@ async function downloadYouTubeApiChain(url, audioOnly) {
       const data = await res.json();
       if (data.status === "ok" && data.results && data.results.length > 0) {
         let bestFormat;
-        if (audioOnly) bestFormat = data.results.find(f => f.has_audio && !f.mime.includes("video")) || data.results.find(f => f.has_audio);
-        else bestFormat = data.results.find(f => f.quality === "720p" && f.has_audio) || data.results.find(f => f.quality === "720p") || data.results.find(f => f.mime.includes("video"));
+        if (audioOnly) {
+          bestFormat = data.results.find(f => f.has_audio && !f.mime.includes("video")) || data.results.find(f => f.has_audio);
+        } else {
+          const merged = data.results.filter(f => f.has_audio && f.mime.includes("video"));
+          if (merged.length > 0) {
+            bestFormat = merged.find(f => f.quality === "720p") || merged.find(f => f.quality === "480p") || merged.find(f => f.quality === "360p") || merged[0];
+          }
+        }
         if (bestFormat && bestFormat.url) {
           console.log("[Downloader] YouTube Downloaded via API 1 (all-media-downloader4)");
           return await downloadGenericApiFile(bestFormat.url, data.title, "YouTube");
