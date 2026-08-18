@@ -15,7 +15,7 @@ const TH = /https?:\/\/(www\.)?threads\.(net|com)\/[^\s]+/gi;
 const MG = /https?:\/\/mega\.nz\/[^\s]+/gi;
 const SC = /(?<!\S)https?:\/\/(www\.|on\.)?soundcloud\.com\/[^\s]+(?=\s|$)/gi;
 const SP = /https?:\/\/open\.spotify\.com\/[^\s]+/gi;
-const YT = /https?:\/\/(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[^\s]+/gi;
+const YT = /https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|shorts\/|live\/)|youtu\.be\/)[^\s]+/gi;
 const SF = /https?:\/\/sfile\.co\/[^\s]+/gi;
 
 /**
@@ -71,7 +71,7 @@ const tt = async (url) => {
   const r = d.data.images?.length
     ? { type: "image", data: d.data.images }
     : { type: "video", data: d.data.play };
-  return { type: r.type, data: r.data };
+  return { type: r.type, data: r.data, music: d.data.music || d.data.music_info?.play };
 };
 
 const ig = async (url) => {
@@ -183,7 +183,7 @@ const sf = async (url) => {
 export default {
   name: "universalDownloader",
   alias: [...mergedCommands],
-  uniquecommands: ["download"],
+  uniquecommands: ["dl", "download"],
   description: "Multi-platform media downloader",
   start: async (Hooper, m, { args, prefix, command, doReact }) => {
     let raw = args.join(" ").trim();
@@ -238,6 +238,17 @@ MediaFire
                 );
               }
             }
+          }
+          if (r.music) {
+             try {
+               await Hooper.sendMessage(
+                 m.from,
+                 { audio: { url: r.music }, mimetype: "audio/mp4", ptt: false },
+                 { quoted: m }
+               );
+             } catch (err) {
+               console.error("Failed to send tiktok audio:", err);
+             }
           }
           break;
         }
