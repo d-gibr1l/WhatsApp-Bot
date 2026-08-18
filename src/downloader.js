@@ -13,6 +13,8 @@ import { heavyQueue } from "./queue.js";
 // ─── yt-dlp Path & Auto-Updater ──────────────────────────────────────────────
 
 export function getYtDlpPath() {
+  const localYtDlp = join(process.cwd(), process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp");
+  if (existsSync(localYtDlp)) return localYtDlp;
   if (process.platform === "win32") return "yt-dlp";
   if (existsSync("/app/yt-dlp")) return "/app/yt-dlp";
   if (existsSync("/usr/local/bin/yt-dlp")) return "/usr/local/bin/yt-dlp";
@@ -25,7 +27,7 @@ export async function updateYtDlp() {
     return;
   }
   console.log("[Downloader] Auto-updating yt-dlp to the latest release...");
-  const targetPath = "/app/yt-dlp";
+  const targetPath = join(process.cwd(), "yt-dlp");
   const url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
 
   return new Promise((resolve) => {
