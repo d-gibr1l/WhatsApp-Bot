@@ -157,7 +157,8 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     "--concurrent-fragments", "10",
     "--downloader", "aria2c,native",
     "--downloader-args", "aria2c:-x 16 -k 1M",
-    "--extractor-args", "youtube:player_client=android_vr,web_embedded;skip=dash,hls",
+    "--extractor-args", "youtube:player_client=android_vr,web_embedded",
+    "--ffmpeg-location", process.env.FFMPEG_PATH || "ffmpeg",
     "--print", "%(title)s",
     "--print", "after_move:filepath",
   ];
@@ -191,7 +192,9 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
   }
 
   return heavyQueue.execute(() => new Promise((resolve, reject) => {
-    const proc = spawn(getYtDlpPath(), args);
+    const proc = spawn(getYtDlpPath(), args, {
+      env: { ...process.env, PATH: `${process.cwd()}:${process.env.PATH}` }
+    });
     let errorLog  = "";
     let stdoutOut = "";
 
