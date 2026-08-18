@@ -104,8 +104,7 @@ export async function getMediaInfo(url) {
   const args = [
     url,
     "--dump-json",
-    "--no-playlist",
-    "--extractor-args", "youtube:player_client=android_vr,web_embedded;skip=dash,hls"
+    "--no-playlist"
   ];
   if (cookiePath) args.push("--cookies", cookiePath);
 
@@ -157,7 +156,6 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     "--concurrent-fragments", "10",
     "--downloader", "aria2c,native",
     "--downloader-args", "aria2c:-x 16 -k 1M",
-    "--extractor-args", "youtube:player_client=android_vr,web_embedded",
     "--ffmpeg-location", process.env.FFMPEG_PATH || "ffmpeg",
     "--print", "%(title)s",
     "--print", "after_move:filepath",
@@ -174,18 +172,16 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
   if (audioOnly) {
     args.push("-x", "--audio-format", "mp3", "--audio-quality", "0", "-o", `${tmpBase}.mp3`);
   } else {
-    // Instagram/Pinterest: use "best" — image posts have no vcodec attributes
-    // Other platforms: prefer H.264 for iPhone compatibility
     const isImagePlatform = platform === "instagram" || platform === "pinterest";
+    
+    // Updated format: strictly demands mp4 video + audio, with safe fallbacks
     const format = isImagePlatform
       ? "best"
-      // Prefer pre-muxed mp4 first (no re-encoding needed = fast)
-      // Fall back to separate streams only if needed
-      : `bestvideo[height<=${quality}][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=${quality}]+bestaudio/best[ext=mp4][height<=${quality}][vcodec!=none]/best[height<=${quality}][vcodec!=none]/best`;
+      : `bestvideo[ext=mp4][height<=${quality}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${quality}]/best[vcodec!=none]/best`;
 
-    args.push("-f", format, "-o", `${tmpBase}.%(ext)s`);
+    // Cap the file size to prevent memory crashes
+    args.push("-f", `${format}[filesize<${maxFilesize}]`, "-o", `${tmpBase}.%(ext)s`);
 
-    // Only apply video post-processing for video platforms
     if (!isImagePlatform) {
       args.push("--merge-output-format", "mp4");
     }
