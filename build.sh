@@ -13,7 +13,7 @@ chmod +x aria2c
 rm -rf aria2-1.36.0-linux-gnu-64bit-build1 aria2.tar.bz2
 
 echo "Downloading wireproxy..."
-curl -L https://github.com/pufferffish/wireproxy/releases/download/v1.0.16/wireproxy_linux_amd64.tar.gz -o wireproxy.tar.gz
+curl -L https://github.com/windtf/wireproxy/releases/download/v1.1.3/wireproxy_linux_amd64.tar.gz -o wireproxy.tar.gz
 tar -xzf wireproxy.tar.gz
 chmod +x wireproxy
 rm wireproxy.tar.gz

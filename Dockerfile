@@ -11,7 +11,7 @@ RUN apk upgrade --no-cache && \
     npm install -g pm2 && \
     curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
     chmod a+rx /usr/local/bin/yt-dlp && \
-    curl -L https://github.com/pufferffish/wireproxy/releases/download/v1.0.16/wireproxy_linux_amd64.tar.gz -o wireproxy.tar.gz && \
+    curl -L https://github.com/windtf/wireproxy/releases/download/v1.1.3/wireproxy_linux_amd64.tar.gz -o wireproxy.tar.gz && \
     tar -xzf wireproxy.tar.gz -C /usr/local/bin && \
     chmod +x /usr/local/bin/wireproxy && \
     rm wireproxy.tar.gz && \
