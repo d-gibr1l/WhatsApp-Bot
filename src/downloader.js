@@ -26,16 +26,14 @@ export async function updateYtDlp() {
     console.log("[Downloader] Windows detected — skipping auto-update of yt-dlp.");
     return;
   }
-  console.log("[Downloader] Auto-updating yt-dlp to the latest release...");
-  const targetPath = join(process.cwd(), "yt-dlp");
-  const url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
+  console.log("[Downloader] Auto-updating yt-dlp to the latest release via pip...");
 
   return new Promise((resolve) => {
-    exec(`curl -L ${url} -o ${targetPath} && chmod a+rx ${targetPath}`, (err) => {
+    exec(`pip install --upgrade --break-system-packages yt-dlp bgutil-ytdlp-pot-provider`, (err) => {
       if (err) {
         console.warn("[Downloader] Failed to update yt-dlp dynamically:", err.message);
       } else {
-        console.log("[Downloader] yt-dlp successfully updated to latest version at:", targetPath);
+        console.log("[Downloader] yt-dlp successfully updated via pip.");
       }
       resolve();
     });
@@ -102,12 +100,10 @@ export async function getMediaInfo(url) {
 
   const cookiePath = await getCookiesPath();
   
-  // FIX 1: Spoof the iOS client to bypass YouTube PO Token blocks on video streams
   const args = [
     url,
     "--dump-json",
-    "--no-playlist",
-    "--extractor-args", "youtube:player_client=ios"
+    "--no-playlist"
   ];
   
   if (cookiePath) args.push("--cookies", cookiePath);
@@ -160,7 +156,6 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     "--concurrent-fragments", "10",
     "--downloader", "aria2c,native",
     "--downloader-args", "aria2c:-x 16 -k 1M",
-    "--extractor-args", "youtube:player_client=ios", // FIX 1: Bypass YouTube 403 Video Error
     "--ffmpeg-location", process.env.FFMPEG_PATH || "ffmpeg",
     "--print", "%(title)s",
     "--print", "after_move:filepath",

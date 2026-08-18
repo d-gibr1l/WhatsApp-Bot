@@ -1,9 +1,8 @@
 #!/bin/bash
 set -e
 
-echo "Downloading latest yt-dlp..."
-curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o yt-dlp
-chmod a+rx yt-dlp
+echo "Installing yt-dlp and PO Token provider via pip..."
+pip install --break-system-packages --upgrade yt-dlp bgutil-ytdlp-pot-provider
 
 echo "Downloading aria2c..."
 curl -L https://github.com/q3aql/aria2-static-builds/releases/download/v1.36.0/aria2-1.36.0-linux-gnu-64bit-build1.tar.bz2 -o aria2.tar.bz2
