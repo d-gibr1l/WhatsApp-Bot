@@ -89,22 +89,6 @@ Example:
           );
         }
 
-        if (data.music_info?.play) {
-          try {
-            const audioRes = await fetch(data.music_info.play);
-            const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
-
-            await Hooper.sendMessage(
-              m.from,
-              {
-                audio: audioBuffer,
-                mimetype: "audio/mpeg",
-                fileName: `${sanitizeFileName(data.title || "tiktok")}.mp3`,
-              },
-              { quoted: m }
-            );
-          } catch {}
-        }
       }
 
       else {

@@ -239,17 +239,6 @@ MediaFire
               }
             }
           }
-          if (r.music) {
-             try {
-               await Hooper.sendMessage(
-                 m.from,
-                 { audio: { url: r.music }, mimetype: "audio/mp4", ptt: false },
-                 { quoted: m }
-               );
-             } catch (err) {
-               console.error("Failed to send tiktok audio:", err);
-             }
-          }
           break;
         }
 
