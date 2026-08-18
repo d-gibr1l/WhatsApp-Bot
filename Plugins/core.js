@@ -193,7 +193,7 @@ export default {
             2,
           )} MB\n*📅 Last Updated:* ${repo.updated_at}\n\n*🔗 Repo Link:* ${
             repo.html_url
-          }\n\n❝ Dont forget to give a Star ⭐ to the repo. It's made with restless hardwork by *YOURS TRULY*. ❞\n\n*©️ YOURS TRULY - ${new Date().getFullYear()}*`;
+          }\n\n*©️ YOURS TRULY - ${new Date().getFullYear()}*`;
           Hooper.sendMessage(m.from, { image: pic, caption: txt }, { quoted: m });
         } catch (e) {
           console.error("Script Command Error:", e.message);
@@ -323,8 +323,6 @@ export default {
           `📦 *ᴄᴏᴍᴍᴀɴᴅꜱ* : *${totalCmds}* ᴀᴠᴀɪʟᴀʙʟᴇ`,
           ``,
           formattedCommands,
-          ``,
-          `❝ Dont forget to give a Star ⭐ to the repo. It's made with restless hardwork by *YOURS TRULY*. ❞`,
           ``,
           `*©️ YOURS TRULY - ${new Date().getFullYear()}*`,
         ].join("\n");
