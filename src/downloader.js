@@ -188,7 +188,7 @@ async function downloadYouTubeApiChain(url, audioOnly) {
   const apiKey = await getApiKey();
 
   try {
-    const res = await fetch("https://all-media-downloader4.p.rapidapi.com/api/youtube/download?id=" + videoId, {
+    const res = await fetch(`https://all-media-downloader4.p.rapidapi.com/api/youtube/download?id=${videoId}`, {
       headers: { "x-rapidapi-host": "all-media-downloader4.p.rapidapi.com", "x-rapidapi-key": apiKey }
     });
     if (res.ok) {
@@ -203,26 +203,37 @@ async function downloadYouTubeApiChain(url, audioOnly) {
         }
       }
     }
-  } catch (e) { console.log("[Downloader] API 1 failed..."); }
+  } catch (e) { console.log("[Downloader] API 1 failed:", e.message); }
 
   try {
-    const res = await fetch("https://social-media-video-downloader.p.rapidapi.com/youtube/v3/video/details?videoId=" + videoId + "&urlAccess=proxied&renderableFormats=720p,highres&getTranscript=false", {
+    const res = await fetch(`https://social-media-video-downloader.p.rapidapi.com/youtube/v3/video/details?videoId=${videoId}&urlAccess=proxied&renderableFormats=720p,highres&getTranscript=false`, {
       headers: { "x-rapidapi-host": "social-media-video-downloader.p.rapidapi.com", "x-rapidapi-key": apiKey }
     });
     if (res.ok) {
       const data = await res.json();
       const videos = data.contents?.[0]?.videos || [];
       const audios = data.contents?.[0]?.audios || [];
-      let targetUrl = audioOnly ? (audios[0]?.url || videos[0]?.url) : (videos.find(v => v.label === "720p")?.url || videos.find(v => v.label === "1080p")?.url || videos[0]?.url);
+      let targetUrl;
+      if (audioOnly) {
+        targetUrl = audios[0]?.url || videos[0]?.url;
+      } else {
+        const merged = videos.filter(v => v.metadata?.has_audio && v.metadata?.has_video);
+        if (merged.length > 0) {
+          const best = merged.find(v => v.label === "720p") || merged.find(v => v.label === "480p") || merged.find(v => v.label === "360p") || merged[0];
+          targetUrl = best.url;
+        } else {
+          targetUrl = videos.find(v => v.label === "720p")?.url || videos[0]?.url;
+        }
+      }
       if (targetUrl) {
         console.log("[Downloader] YouTube Downloaded via API 2 (social-media-video-downloader)");
         return await downloadGenericApiFile(targetUrl, data.contents?.[0]?.title, "YouTube");
       }
     }
-  } catch (e) { console.log("[Downloader] API 2 failed..."); }
+  } catch (e) { console.log("[Downloader] API 2 failed:", e.message); }
 
   try {
-    const res = await fetch("https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=" + (audioOnly ? "mp3" : "720") + "&url=" + encodeURIComponent(url), {
+    const res = await fetch(`https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=${audioOnly ? "mp3" : "720"}&url=${encodeURIComponent(url)}`, {
       headers: { "x-rapidapi-host": "youtube-info-download-api.p.rapidapi.com", "x-rapidapi-key": apiKey }
     });
     if (res.ok) {
@@ -241,10 +252,10 @@ async function downloadYouTubeApiChain(url, audioOnly) {
         }
       }
     }
-  } catch (e) { console.log("[Downloader] API 3 failed..."); }
+  } catch (e) { console.log("[Downloader] API 3 failed:", e.message); }
 
   try {
-    const res = await fetch("https://all-in-one-social-media-saver-api.p.rapidapi.com/smvd/get/all?url=" + encodeURIComponent(url), {
+    const res = await fetch(`https://all-in-one-social-media-saver-api.p.rapidapi.com/smvd/get/all?url=${encodeURIComponent(url)}`, {
       headers: { "x-rapidapi-host": "all-in-one-social-media-saver-api.p.rapidapi.com", "x-rapidapi-key": apiKey }
     });
     if (res.ok) {
