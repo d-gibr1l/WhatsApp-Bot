@@ -1912,6 +1912,7 @@ app.get("/api/config", async (req, res) => {
       r2Bucket: await mod.getSetting("R2_BUCKET_NAME") || "",
       r2PublicUrl: await mod.getSetting("R2_PUBLIC_URL") || "",
       ytCookies: await mod.getSetting("yt_cookies") || "",
+      rapidapiKey: await mod.getSetting("rapidapi_key") || "",
     };
     res.json(config);
   } catch (err) {

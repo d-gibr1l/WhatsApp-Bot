@@ -178,6 +178,7 @@ async function loadSettings() {
     if (document.getElementById('cfg-r2-bucket')) document.getElementById('cfg-r2-bucket').value = data.r2Bucket || '';
     if (document.getElementById('cfg-r2-public')) document.getElementById('cfg-r2-public').value = data.r2PublicUrl || '';
     if (document.getElementById('cfg-yt-cookies')) document.getElementById('cfg-yt-cookies').value = data.ytCookies || '';
+    if (document.getElementById('cfg-rapidapi')) document.getElementById('cfg-rapidapi').value = data.rapidapiKey || '';
   } catch(e) {
     showToast('Failed to load config', 'error');
   }
