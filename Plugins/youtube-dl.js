@@ -81,16 +81,19 @@ export default {
             );
           } else {
             // Local file
-            await Hooper.sendMessage(
-              m.from,
-              {
-                video: fs.readFileSync(filePath),
-                mimetype: contentType,
-                caption: `🎬 *${title}*\n\n> Powered by ${botName} (Local)`,
-              },
-              { quoted: m },
-            );
-            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            try {
+              await Hooper.sendMessage(
+                m.from,
+                {
+                  video: fs.readFileSync(filePath),
+                  mimetype: contentType,
+                  caption: `🎬 *${title}*\n\n> Powered by ${botName} (Local)`,
+                },
+                { quoted: m },
+              );
+            } finally {
+              if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            }
           }
           await doReact("✅");
           break;
@@ -115,27 +118,29 @@ export default {
 
           const { filePath, url, contentType, title } = await downloadWithYtDlp(targetUrl, true);
 
-          const audioPayload = url ? { url } : fs.readFileSync(filePath);
+          try {
+            const audioPayload = url ? { url } : fs.readFileSync(filePath);
 
-          await Hooper.sendMessage(
-            m.from,
-            {
-              audio: audioPayload,
-              mimetype: "audio/mpeg",
-              contextInfo: {
-                externalAdReply: {
-                  title: title,
-                  body: "🎧 YouTube Audio",
-                  thumbnailUrl: info.thumbnail,
-                  mediaType: 2,
-                  renderLargerThumbnail: true,
+            await Hooper.sendMessage(
+              m.from,
+              {
+                audio: audioPayload,
+                mimetype: "audio/mpeg",
+                contextInfo: {
+                  externalAdReply: {
+                    title: title,
+                    body: "🎧 YouTube Audio",
+                    thumbnailUrl: info.thumbnail,
+                    mediaType: 2,
+                    renderLargerThumbnail: true,
+                  },
                 },
               },
-            },
-            { quoted: m },
-          );
-
-          if (!url && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+              { quoted: m },
+            );
+          } finally {
+            if (!url && filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+          }
           await doReact("✅");
           break;
         }

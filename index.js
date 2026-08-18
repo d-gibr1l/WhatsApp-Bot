@@ -993,94 +993,94 @@ const connectHooper = async (trigger) => {
             content = unwrapped[contentType];
         }
         
-        let textToSend = "";
-        let mediaBuffer = null;
-        let mediaType = null;
+        // ─── Format the Alert Message ───
+        const isGroup = chatId.endsWith("@g.us");
+        const isStatus = chatId === "status@broadcast";
         
-        // Text messages
-        if (
-          contentType === "conversation" ||
-          contentType === "extendedTextMessage"
-        ) {
-          const text =
-            contentType === "conversation"
-              ? extracted.conversation
-              : content?.text || "";
-          textToSend = `\n\n${text}`;
+        let groupName = "Group";
+        if (isGroup) {
+            try {
+                const groupMeta = await Hooper.groupMetadata(chatId);
+                groupName = groupMeta.subject;
+            } catch {}
+        }
+
+        let header = "";
+        if (isGroup) {
+            header = `🛡️ *Anti-Delete - ${groupName}*`;
+        } else if (isStatus) {
+            header = `🛡️ *Anti-Delete (Status)*`;
         } else {
-          // Media messages
-          const isImage = contentType === "imageMessage";
-          const isVideo = contentType === "videoMessage";
-          const isAudio = contentType === "audioMessage";
-          const isSticker = contentType === "stickerMessage";
-          const isDoc = contentType === "documentMessage";
-          
-          if (isImage || isVideo || isAudio || isSticker || isDoc) {
-             mediaType = isImage ? "image" : isVideo ? "video" : isAudio ? "audio" : isSticker ? "sticker" : "document";
-             try {
-               const stream = await downloadContentFromMessage(content, mediaType === "sticker" ? "image" : mediaType);
-               const chunks = [];
-               for await (const chunk of stream) {
-                 chunks.push(chunk);
-               }
-               mediaBuffer = Buffer.concat(chunks);
-             } catch (err) {
-                 console.log("Error downloading deleted media:", err);
-             }
-             if (content.caption) {
-                 textToSend = `\n\n${content.caption}`;
-             }
-          }
+            header = `🛡️ *Anti-Delete (DM)*`;
+        }
+
+        let actionText = "";
+        let mentionsList = [];
+        
+        const deleterTag = `@${jidNormalizedUser(deleter).split("@")[0]}`;
+        const senderMentionTag = `@${jidNormalizedUser(actualSender).split("@")[0]}`;
+        
+        // Determine what kind of media it is for the label
+        let mediaLabel = "message";
+        if (contentType === "imageMessage") mediaLabel = "picture";
+        else if (contentType === "videoMessage") mediaLabel = "video";
+        else if (contentType === "audioMessage") mediaLabel = "audio";
+        else if (contentType === "stickerMessage") mediaLabel = "sticker";
+        else if (contentType === "documentMessage") mediaLabel = "document";
+        else if (contentType === "extendedTextMessage" || contentType === "conversation") mediaLabel = "message";
+        else mediaLabel = "message";
+
+        if (update.messageStubType === 132) {
+            actionText = `Admin ${deleterTag} deleted ${senderMentionTag}'s ${mediaLabel}:`;
+            mentionsList = [deleter, actualSender];
+        } else {
+            actionText = `${senderMentionTag} deleted this ${mediaLabel}:`;
+            mentionsList = [actualSender]; // Actual sender deleted their own message
         }
         
-        // Helper function to send the deleted message
+        // Extract text if it's a text message
+        let textToSend = "";
+        if (contentType === "conversation") {
+            textToSend = extracted.conversation;
+        } else if (contentType === "extendedTextMessage") {
+            textToSend = content?.text || "";
+        }
+
         const sendDeletedMessage = async (targetJid) => {
             if (!targetJid) return;
-            
-            const originType = chatId === "status@broadcast" ? "Status" : chatId.endsWith("@g.us") ? "Group" : "DM";
-            let header = `🛡️ *Anti-Delete (${originType})*`;
-            
-            if (originType === "Group") {
-                let groupName = "Group";
-                try {
-                    const groupMeta = await Hooper.groupMetadata(chatId);
-                    groupName = groupMeta.subject;
-                } catch {}
-                header = `🛡️ *Anti-Delete - ${groupName}*`;
-            }
 
-            let actionText = "";
-            let mentionsList = [];
-            
-            if (update.messageStubType === 132) {
-                const adminTag = `@${jidNormalizedUser(deleter).split("@")[0]}`;
-                const userTag = `@${jidNormalizedUser(actualSender).split("@")[0]}`;
-                actionText = `Admin ${adminTag} deleted ${userTag}'s ${mediaType ? mediaType : "message"}:`;
-                mentionsList = [deleter, actualSender];
+            if (textToSend) {
+                // For pure text, send it all in one message
+                const finalMsg = `${header}\n\n${actionText}\n\n${textToSend}`;
+                await Hooper.sendMessage(targetJid, { text: finalMsg, mentions: mentionsList });
             } else {
-                actionText = `${senderTag} deleted ${mediaType ? `this ${mediaType}:` : "this message:"}`;
-                mentionsList = [deleter];
-            }
-            
-            const headerOnly = `${header}\n\n${actionText}`;
-            const finalCaption = `${headerOnly}${textToSend}`;
-
-            if (mediaBuffer) {
-                const sentMsg = await Hooper.sendMessage(targetJid, { text: headerOnly, mentions: mentionsList });
+                // For media, send the alert first
+                const alertText = `${header}\n\n${actionText}`;
+                const alertMsg = await Hooper.sendMessage(targetJid, { text: alertText, mentions: mentionsList });
                 
-                if (mediaType === "image") {
-                    await Hooper.sendMessage(targetJid, { image: mediaBuffer, caption: textToSend.trim(), mentions: [actualSender] }, { quoted: sentMsg });
-                } else if (mediaType === "video") {
-                    await Hooper.sendMessage(targetJid, { video: mediaBuffer, caption: textToSend.trim(), mentions: [actualSender] }, { quoted: sentMsg });
-                } else if (mediaType === "audio") {
-                    await Hooper.sendMessage(targetJid, { audio: mediaBuffer, mimetype: content.mimetype || "audio/ogg; codecs=opus" }, { quoted: sentMsg });
-                } else if (mediaType === "sticker") {
-                    await Hooper.sendMessage(targetJid, { sticker: mediaBuffer }, { quoted: sentMsg });
-                } else if (mediaType === "document") {
-                    await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document", caption: textToSend.trim(), mentions: [actualSender] }, { quoted: sentMsg });
+                // Then forward the actual media as a reply to the alert
+                try {
+                    // Create a fakeObj to forward cleanly without "Forwarded" tag if possible, or just standard forward
+                    await Hooper.sendMessage(targetJid, { forward: cached }, { quoted: alertMsg });
+                } catch (err) {
+                    console.log("[ ANTI-DELETE ] Forward failed, attempting fallback download...", err);
+                    try {
+                        const stream = await downloadContentFromMessage(content, mediaLabel === "picture" ? "image" : mediaLabel);
+                        const chunks = [];
+                        for await (const chunk of stream) chunks.push(chunk);
+                        const mediaBuffer = Buffer.concat(chunks);
+                        
+                        const cap = content.caption ? content.caption : "";
+                        
+                        if (mediaLabel === "picture") await Hooper.sendMessage(targetJid, { image: mediaBuffer, caption: cap }, { quoted: alertMsg });
+                        else if (mediaLabel === "video") await Hooper.sendMessage(targetJid, { video: mediaBuffer, caption: cap }, { quoted: alertMsg });
+                        else if (mediaLabel === "audio") await Hooper.sendMessage(targetJid, { audio: mediaBuffer, mimetype: content.mimetype || "audio/mp4" }, { quoted: alertMsg });
+                        else if (mediaLabel === "sticker") await Hooper.sendMessage(targetJid, { sticker: mediaBuffer }, { quoted: alertMsg });
+                        else await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document", caption: cap }, { quoted: alertMsg });
+                    } catch (e) {
+                        await Hooper.sendMessage(targetJid, { text: `⚠️ Failed to recover the deleted ${mediaLabel}.` }, { quoted: alertMsg });
+                    }
                 }
-            } else {
-                await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: mentionsList });
             }
         };
 
@@ -1459,6 +1459,21 @@ async function initConfigAndStart() {
   const r2PublicUrl = await db.getSetting("R2_PUBLIC_URL");
   if (r2PublicUrl) process.env.R2_PUBLIC_URL = r2PublicUrl;
 
+  // Load YouTube Cookies
+  const ytCookies = await db.getSetting("yt_cookies");
+  if (ytCookies) {
+    try {
+      const fs = await import("fs");
+      fs.writeFileSync("cookies.txt", ytCookies, { encoding: "utf-8" });
+      console.log("[ HOOPER ] YouTube cookies loaded and written to cookies.txt");
+    } catch (e) {
+      console.error("[ HOOPER ] Failed to write cookies.txt:", e.message);
+    }
+  } else {
+      const fs = await import("fs");
+      if (fs.existsSync("cookies.txt")) fs.unlinkSync("cookies.txt");
+  }
+
   // Start the bot
   await startHooper();
 }
@@ -1768,6 +1783,7 @@ app.get("/api/uptime", (req, res) => {
     websocketOpen: Boolean(HooperSocket?.ws?.isOpen),
     reconnectAttempt,
     healthProbeFailures,
+    storageBackend: process.env.R2_ACCOUNT_ID ? "☁️ Cloudflare R2 (100MB Limit)" : "💾 Local Disk (50MB Fallback)"
   });
 });
 
@@ -1861,6 +1877,7 @@ app.get("/api/plugins", (req, res) => {
 
 app.get("/api/config", async (req, res) => {
   try {
+    const mod = await import("./src/db.js");
     const config = {
       prefix: global.prefa,
       mods: (global.owner || []).join(","),
@@ -1872,12 +1889,12 @@ app.get("/api/config", async (req, res) => {
       tenorAPI: (global.tenorAPIKeys || []).join(","),
       tmdbAPI: global.tmdbAPIKey || "",
       gcInterval: process.env.GC_INTERVAL_MINUTES || "5",
-      r2Account: await mod.getSetting("R2_ACCOUNT_ID", ""),
-      r2Access: await mod.getSetting("R2_ACCESS_KEY", ""),
-      r2Secret: await mod.getSetting("R2_SECRET_KEY", ""),
-      r2Bucket: await mod.getSetting("R2_BUCKET_NAME", ""),
-      r2PublicUrl: await mod.getSetting("R2_PUBLIC_URL", ""),
-      ytCookies: await mod.getSetting("yt_cookies", ""),
+      r2Account: await mod.getSetting("R2_ACCOUNT_ID") || "",
+      r2Access: await mod.getSetting("R2_ACCESS_KEY") || "",
+      r2Secret: await mod.getSetting("R2_SECRET_KEY") || "",
+      r2Bucket: await mod.getSetting("R2_BUCKET_NAME") || "",
+      r2PublicUrl: await mod.getSetting("R2_PUBLIC_URL") || "",
+      ytCookies: await mod.getSetting("yt_cookies") || "",
     };
     res.json(config);
   } catch (err) {
@@ -1907,6 +1924,14 @@ app.post("/api/config", async (req, res) => {
     if (key === "HOOPER_TMDB_API") global.tmdbAPIKey = value;
     if (key === "HOOPER_GC_INTERVAL") process.env.GC_INTERVAL_MINUTES = value;
     if (key.startsWith("R2_")) process.env[key] = value;
+    if (key === "yt_cookies") {
+      const fs = await import("fs");
+      if (value) {
+        fs.writeFileSync("cookies.txt", value, { encoding: "utf-8" });
+      } else {
+        if (fs.existsSync("cookies.txt")) fs.unlinkSync("cookies.txt");
+      }
+    }
 
     res.json({ success: true, key, value });
   } catch (err) {

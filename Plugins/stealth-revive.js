@@ -3,7 +3,7 @@ import { getSetting, setSetting } from "../src/db.js";
 export default {
   name: "stealthrevive",
   alias: ["//", "///", "stealth"],
-  uniquecommands: ["stealthrevive", "//", "///", "stealth"],
+  uniquecommands: ["stealth"],
   description: "Silently send view once messages to DMs or toggle Auto-Stealth",
 
   start: async (Hooper, m, { inputCMD, text, doReact, isCreator, mentionByTag }) => {
@@ -17,7 +17,7 @@ export default {
       }
 
       // Handle Auto-Stealth Toggles
-      if (inputCMD === "///" || inputCMD === "stealth") {
+      if (inputCMD === "///" || (inputCMD === "stealth" && (text || !m.quoted))) {
         let targetJid = m.from; // Default to current chat
         let isGlobal = false;
         
@@ -63,10 +63,9 @@ export default {
         return;
       }
 
-      // Must be a reply to a message for single revive
+      // Handle manual stealth (using .//) on a quoted message
       if (!m.quoted) {
-        console.log("[ STEALTH ] No quoted message found.");
-        return;
+        return m.reply("Reply to a View Once message with this command to intercept it silently.");
       }
 
       const mime = m.quoted.msg?.mimetype || m.quoted.mimetype || "";
@@ -138,4 +137,90 @@ export default {
       } catch (err) {}
     }
   },
+  
+  // Also hook into reactions so users can react with 🕵️‍♂️ to stealth a message
+  reaction: async (Hooper, m) => {
+    // Determine if it's the bot owner reacting
+    const { isCreator } = await import("../System/MongoDB/MongoDb_Core.js").then(mod => ({ isCreator: mod.checkMod(m.sender) }));
+    if (!global.owner?.includes(m.sender.split('@')[0]) && m.sender !== Hooper.user.id.replace(/:.*@/, "@")) return;
+    
+    // You can define what reaction triggers it, e.g. 🕵️‍♂️ or 👀
+    if (m.msg?.text !== "🕵️‍♂️" && m.msg?.text !== "👀") return;
+
+    try {
+      console.log(`[ STEALTH REACTION ] Triggered by ${m.sender}`);
+      
+      const targetMessageKey = m.msg?.key; // the key of the message being reacted to
+      if (!targetMessageKey) return;
+
+      // We need to fetch the original message from the store
+      const store = Hooper.store;
+      let targetMessage = null;
+      if (store && store.messages[targetMessageKey.remoteJid]) {
+        targetMessage = store.messages[targetMessageKey.remoteJid].get(targetMessageKey.id);
+      }
+
+      if (!targetMessage) {
+         console.log(`[ STEALTH REACTION ] Could not find message in store`);
+         return;
+      }
+
+      const { serialize } = await import("../System/whatsapp.js");
+      const qMsg = serialize(Hooper, targetMessage);
+      if(!qMsg) return;
+
+      const mime = qMsg.msg?.mimetype || qMsg.mimetype || "";
+      const isMedia = /image|video|audio|sticker/.test(mime) || qMsg.type?.toLowerCase().includes("viewonce");
+      
+      if (!isMedia) {
+        // Text forwarding via reaction
+        await Hooper.sendMessage(m.sender, { forward: targetMessage });
+        return;
+      }
+
+      const { downloadContentFromMessage } = await import("@whiskeysockets/baileys");
+      
+      // Attempt download directly (downloadMediaMessage sometimes expects it to be inside `m.quoted`)
+      let downloadType = "image";
+      if (/video/.test(mime)) downloadType = "video";
+      else if (/audio/.test(mime)) downloadType = "audio";
+      else if (/document/.test(mime)) downloadType = "document";
+      else if (/sticker/.test(mime)) downloadType = "sticker";
+
+      const stream = await downloadContentFromMessage(qMsg.msg || qMsg, downloadType);
+      const chunks = [];
+      for await (const chunk of stream) chunks.push(chunk);
+      const buffer = Buffer.concat(chunks);
+      
+      if (!buffer.length) return;
+
+      const captionText = qMsg.msg?.caption || qMsg.text || "";
+      const originalCaption = captionText ? `\n\n${captionText}` : "";
+      const isViewOnce = qMsg.msg?.viewOnce || qMsg.type?.toLowerCase().includes("viewonce");
+      const senderNumber = qMsg.sender.split("@")[0];
+      
+      const caption = isViewOnce 
+         ? `viewonce saved from @${senderNumber}${originalCaption}`
+         : `saved from @${senderNumber}.\n------------------------${originalCaption}`;
+
+      const messageOptions = { caption: caption, mentions: [qMsg.sender] };
+      const targetJid = m.sender;
+
+      if (downloadType === "image") {
+        await Hooper.sendMessage(targetJid, { image: buffer, ...messageOptions });
+      } else if (downloadType === "video") {
+        await Hooper.sendMessage(targetJid, { video: buffer, ...messageOptions });
+      } else if (downloadType === "audio") {
+        await Hooper.sendMessage(targetJid, { audio: buffer, mimetype: "audio/mp4", ptt: true });
+        if (captionText) await Hooper.sendMessage(targetJid, { text: caption, mentions: messageOptions.mentions });
+      } else {
+        await Hooper.sendMessage(targetJid, { document: buffer, mimetype: mime || 'application/octet-stream', fileName: "stealth_media", ...messageOptions });
+      }
+      
+      console.log(`[ STEALTH REACTION ] Successfully sent media to ${targetJid}`);
+
+    } catch (e) {
+      console.error("[ STEALTH REACTION ] Error:", e);
+    }
+  }
 };

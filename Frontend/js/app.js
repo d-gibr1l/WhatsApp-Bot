@@ -147,6 +147,8 @@ async function loadDashboard() {
     document.getElementById('val-uptime').innerText = formatUptime(localUptimeMs);
     document.getElementById('val-node').innerText = data.nodeVersion || '--';
     document.getElementById('val-bot').innerText = data.botVersion || '--';
+    const storageEl = document.getElementById('val-storage');
+    if (storageEl) storageEl.innerText = data.storageBackend || '--';
 
     if (localUptimeInterval) clearInterval(localUptimeInterval);
     localUptimeInterval = setInterval(() => {

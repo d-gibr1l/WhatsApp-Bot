@@ -3,7 +3,7 @@ import yts from "youtube-yts";
 import { searchit } from "@fantox01/search-it";
 import { ringtone } from "../System/Scrapers.js";
 import { Sticker, StickerTypes } from "wa-sticker-formatter";
-import { getLyrics } from "@fantox01/lyrics-scraper";
+
 
 let mergedCommands = [
   "google",
@@ -147,19 +147,26 @@ export default {
         await doReact("📃");
         await Hooper.sendPresenceUpdate('composing', m.from);
         try {
-          let result = await getLyrics(text);
-          if (
-            result &&
-            result.status !== 500 &&
-            result.lyrics &&
-            result.thumbnail
-          ) {
-            let resText2 = `  *『  ⚡️ Lyrics Search Engine ⚡️  』*\n\n\n_Search Term:_ *${text}*\n\n\n*📍 Lyrics:* \n\n${result.lyrics}\n\n\n_*Powered by:*_ *Lyrics Scraper - by FantoX*\n\n_*Url:*_ https://github.com/FantoX/lyrics-scraper \n`;
+          const { Client } = await import("genius-lyrics");
+          const ClientGL = new Client();
+          const searches = await ClientGL.songs.search(text);
+          
+          if (searches.length === 0) {
+            await doReact("❌");
+            await Hooper.sendPresenceUpdate("paused", m.from);
+            return m.reply(`Unable to find lyrics for the song: *${text}*`);
+          }
+
+          const firstSong = searches[0];
+          const lyrics = await firstSong.lyrics();
+          
+          if (lyrics) {
+            let resText2 = `  *『  ⚡️ Lyrics Search Engine ⚡️  』*\n\n\n_Search Term:_ *${text}*\n\n\n*📍 Lyrics:* \n\n${lyrics}\n\n\n_*Powered by:*_ *Genius*\n`;
             await Hooper.sendMessage(
               m.from,
               {
                 image: {
-                  url: result.thumbnail,
+                  url: firstSong.image || firstSong.thumbnail,
                 },
                 caption: resText2,
               },
@@ -169,10 +176,7 @@ export default {
           } else {
             await doReact("❌");
             await Hooper.sendPresenceUpdate("paused", m.from);
-            return m.reply(
-              result?.message ||
-                `Unable to find lyrics for the song: *${text}*`,
-            );
+            return m.reply(`Unable to find lyrics for the song: *${text}*`);
           }
         } catch (err) {
           console.error("Lyrics Error:", err.message);
@@ -292,10 +296,10 @@ export default {
         await doReact("🧧");
         try {
           let gif = await axios.get(
-            `https://tenor.googleapis.com/v2/search?q=${text}&key=${tenorApiKey}&client_key=my_project&limit=8&media_filter=gif`,
+            `https://api.tenor.com/v1/search?q=${text}&key=LIVDSRZULELA&limit=8&media_filter=minimal`,
           );
           let resultst = Math.floor(Math.random() * 8);
-          let gifUrl = gif.data.results[resultst].media_formats.gif.url;
+          let gifUrl = gif.data.results[resultst].media[0].gif.url;
 
           let response = await axios.get(gifUrl, {
             responseType: "arraybuffer",

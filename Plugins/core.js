@@ -8,16 +8,11 @@ let mergedCommands = [
   "h",
   "menu",
   "sc",
-  "support",
-  "supportgc",
   "script",
   "alive",
-  "uptime",
   "runtime",
   "ping",
-  "status",
   "info",
-  "sys",
   "restart",
   "reboot",
 ];
@@ -179,11 +174,17 @@ export default {
       case "sc":
         await doReact("🧣");
         try {
-          let repoInfo = await axios.get(
-            "https://api.github.com/repos/d-gibr1l/WhatsApp-Bot",
-            { headers: { "User-Agent": "Hooper-Bot/1.0" } }
-          );
-          let repo = repoInfo.data;
+          let repo;
+          try {
+            let repoInfo = await axios.get(
+              "https://api.github.com/repos/d-gibr1l/WhatsApp-Bot",
+              { headers: { "User-Agent": "Hooper-Bot/1.0" } }
+            );
+            repo = repoInfo.data;
+          } catch (apiError) {
+             // Fallback if API fails (403 rate limit or private repo)
+             repo = { forks_count: "Hidden", stargazers_count: "Hidden", license: { name: "Private" }, size: 0, updated_at: "Unknown", html_url: "https://github.com/d-gibr1l/WhatsApp-Bot" };
+          }
           let txt = `            🧣 *${botName}'s Script* 🧣\n\n*🎀 Total Forks:* ${
             repo.forks_count
           }\n*⭐ Total Stars:* ${repo.stargazers_count}\n*📜 License:* ${
@@ -192,7 +193,7 @@ export default {
             2,
           )} MB\n*📅 Last Updated:* ${repo.updated_at}\n\n*🔗 Repo Link:* ${
             repo.html_url
-          }\n\n❝ Dont forget to give a Star ⭐ to the repo. It's made with restless hardwork by *Team HOOPER*. ❞\n\n*©️ Team HOOPER- ${new Date().getFullYear()}*`;
+          }\n\n❝ Dont forget to give a Star ⭐ to the repo. It's made with restless hardwork by *YOURS TRULY*. ❞\n\n*©️ YOURS TRULY - ${new Date().getFullYear()}*`;
           Hooper.sendMessage(m.from, { image: pic, caption: txt }, { quoted: m });
         } catch (e) {
           console.error("Script Command Error:", e.message);
@@ -251,7 +252,6 @@ export default {
           search: { icon: "🔍", label: "ꜱᴇᴀʀᴄʜ" },
           pictures: { icon: "🖼️", label: "ᴘɪᴄᴛᴜʀᴇꜱ" },
           sticker: { icon: "🎨", label: "ꜱᴛɪᴄᴋᴇʀ" },
-          reactions: { icon: "🎭", label: "ʀᴇᴀᴄᴛɪᴏɴꜱ" },
           downloader: { icon: "📥", label: "ᴅᴏᴡɴʟᴏᴀᴅᴇʀ" },
           "youtube-dl": { icon: "🎬", label: "ʏᴏᴜᴛᴜʙᴇ ᴅʟ" },
           tiktokdl: { icon: "🎵", label: "ᴛɪᴋᴛᴏᴋ ᴅʟ" },
@@ -259,13 +259,11 @@ export default {
           fun: { icon: "🎮", label: "ꜰᴜɴ & ᴍᴇᴅɪᴀ" },
           others: { icon: "✨", label: "ᴏᴛʜᴇʀꜱ" },
           plugin: { icon: "🔌", label: "ᴘʟᴜɢɪɴ" },
-
-          "logo-maker": { icon: "🎨", label: "ʟᴏɢᴏ ᴍᴀᴋᴇʀ" },
-          logo: { icon: "🖼️", label: "ʟᴏɢᴏ ꜱᴛʏʟᴇꜱ" },
           systemcommands: { icon: "⚙️", label: "ꜱʏꜱᴛᴇᴍ" },
           hidden: { icon: "🕵️‍♂️", label: "ʜɪᴅᴅᴇɴ ᴄᴏᴍᴍᴀɴᴅꜱ" },
           revive: { icon: "👁️", label: "ᴠɪᴇᴡ ᴏɴᴄᴇ" },
           tools: { icon: "🧰", label: "ᴛᴏᴏʟꜱ" },
+          tweet: { icon: "🐦", label: "ᴛᴡᴇᴇᴛ" },
         };
 
         function formatCommands(allCommands) {
@@ -302,7 +300,7 @@ export default {
         
         // Hide 'groups', 'status', and 'stealth-revive' plugins if not chatting directly with the bot as the creator
         if (m.isGroup || !isCreator) {
-          allCommands = allCommands.filter(arr => arr[0] !== "groups.js" && arr[0] !== "status.js" && arr[0] !== "stealth-revive.js");
+          allCommands = allCommands.filter(arr => arr[0] !== "groups.js" && arr[0] !== "status.js" && arr[0] !== "stealth-revive.js" && arr[0] !== "revive.js");
         }
         
         // Hide moderator commands if it's a group chat OR if the user is not a mod (prevents leaking admin commands in public)
@@ -326,7 +324,9 @@ export default {
           ``,
           formattedCommands,
           ``,
-          `ᴘᴏᴡᴇʀᴇᴅ ʙʏ: *YOURS TRULY*`,
+          `❝ Dont forget to give a Star ⭐ to the repo. It's made with restless hardwork by *YOURS TRULY*. ❞`,
+          ``,
+          `*©️ YOURS TRULY - ${new Date().getFullYear()}*`,
         ].join("\n");
 
         await Hooper.sendMessage(

@@ -105,10 +105,10 @@ export default {
         await doReact("🎴");
         try {
           let resGif = await axios.get(
-            `https://tenor.googleapis.com/v2/search?q=${text}&key=${tenorApiKey}&client_key=my_project&limit=12&media_filter=mp4`,
+            `https://api.tenor.com/v1/search?q=${text}&key=LIVDSRZULELA&limit=12&media_filter=mp4`,
           );
           let resultGif = Math.floor(Math.random() * 12);
-          let gifUrl = resGif.data.results[resultGif].media_formats.mp4.url;
+          let gifUrl = resGif.data.results[resultGif].media[0].mp4.url;
           await Hooper.sendMessage(
             m.from,
             {

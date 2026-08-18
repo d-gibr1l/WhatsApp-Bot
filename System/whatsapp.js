@@ -79,7 +79,10 @@ class WAConnection {
     }
     let buffer = Buffer.concat(chunks);
     let type = await fileTypeFromBuffer(buffer);
-    let trueFileName = attachExtension ? filename + "." + type.ext : filename;
+    
+    let baseName = filename || (Date.now() + Math.random().toString(36).substring(7));
+    let trueFileName = attachExtension ? baseName + "." + type.ext : baseName;
+    
     // save to file
     await fs.writeFileSync(trueFileName, buffer);
     return trueFileName;

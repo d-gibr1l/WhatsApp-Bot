@@ -166,7 +166,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     args.push("--proxy", "socks5://127.0.0.1:1080");
   }
 
-  const maxFilesize = (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY) ? "100M" : "55M";
+  const maxFilesize = (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY) ? "100M" : "50M";
 
   if (audioOnly) {
     args.push("-x", "--audio-format", "mp3", "--audio-quality", "0", "-o", `${tmpBase}.mp3`);
