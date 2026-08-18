@@ -604,6 +604,14 @@ const connectHooper = async (trigger) => {
 
   await readcommands();
 
+  // Auto-update yt-dlp every 24 hours to prevent "Sign in to confirm" errors
+  import("./src/downloader.js").then(({ updateYtDlp }) => {
+    updateYtDlp().catch(() => {});
+    setInterval(() => {
+      updateYtDlp().catch(() => {});
+    }, 24 * 60 * 60 * 1000);
+  }).catch(() => {});
+
   Hooper.ev.on("creds.update", saveCreds);
   Hooper.serializeM = (m) => smsg(Hooper, m, store);
   Hooper.store = store;
