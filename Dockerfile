@@ -9,7 +9,7 @@ FROM node:24.11.1-alpine
 RUN apk upgrade --no-cache && \
     apk add --no-cache ffmpeg imagemagick python3 py3-pip curl unzip bash aria2 && \
     npm install -g pm2 && \
-    pip install --break-system-packages yt-dlp bgutil-ytdlp-pot-provider && \
+    pip install --break-system-packages yt-dlp && \
     curl -L https://github.com/windtf/wireproxy/releases/download/v1.1.3/wireproxy_linux_amd64.tar.gz -o wireproxy.tar.gz && \
     tar -xzf wireproxy.tar.gz -C /usr/local/bin && \
     chmod +x /usr/local/bin/wireproxy && \

@@ -449,16 +449,26 @@ MediaFire
         }
 
         case "yt": {
-          const r = await yt(url.url);
-          await Hooper.sendMessage(
-            m.from,
-            {
-              audio: { url: r.url },
-              mimetype: "audio/mpeg",
-              fileName: `${r.title}.mp3`,
-            },
-            { quoted: m },
-          );
+          const { downloadWithYtDlp } = await import("../src/downloader.js");
+          const { filePath, url: ytUrl, contentType, title } = await downloadWithYtDlp(url.url, false, "720");
+          if (ytUrl) {
+            await Hooper.sendMessage(
+              m.from,
+              { video: { url: ytUrl }, mimetype: contentType, caption: `🎬 *${title}*` },
+              { quoted: m }
+            );
+          } else {
+            const fs = await import("fs");
+            try {
+              await Hooper.sendMessage(
+                m.from,
+                { video: fs.readFileSync(filePath), mimetype: contentType, caption: `🎬 *${title}*` },
+                { quoted: m }
+              );
+            } finally {
+              if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            }
+          }
           break;
         }
 
