@@ -7,11 +7,16 @@ RUN npm i --omit=dev --legacy-peer-deps
 
 FROM node:24.11.1-alpine
 RUN apk upgrade --no-cache && \
-    apk add --no-cache ffmpeg imagemagick python3 curl unzip bash && \
+    apk add --no-cache ffmpeg imagemagick python3 curl unzip bash aria2 && \
     npm install -g pm2 && \
+    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
+    chmod a+rx /usr/local/bin/yt-dlp && \
+    curl -L https://github.com/pufferffish/wireproxy/releases/download/v1.0.16/wireproxy_linux_amd64.tar.gz -o wireproxy.tar.gz && \
+    tar -xzf wireproxy.tar.gz -C /usr/local/bin && \
+    chmod +x /usr/local/bin/wireproxy && \
+    rm wireproxy.tar.gz && \
     curl -fsSL https://bun.sh/install | bash && \
     ln -s /root/.bun/bin/bun /usr/local/bin/bun && \
-    apk del curl unzip bash && \
     rm -rf /root/.bun/install/cache /root/.npm/_cacache
 ENV PATH="/root/.bun/bin:$PATH"
 WORKDIR /app

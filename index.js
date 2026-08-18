@@ -110,6 +110,13 @@ import {
   checkMod,
 } from "./System/MongoDB/MongoDb_Core.js";
 import chalk from "chalk";
+import { spawn } from "child_process";
+
+if (fs.existsSync("./wireproxy.conf")) {
+  console.log(chalk.cyan("[ HOOPER ] Starting Wireproxy SOCKS5 proxy..."));
+  const wp = spawn("wireproxy", ["-c", "wireproxy.conf"], { stdio: "inherit" });
+  wp.on("error", (e) => console.log(chalk.red("[ HOOPER ] Wireproxy start failed: " + e.message)));
+}
 
 app.use(express.json());
 
