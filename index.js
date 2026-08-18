@@ -674,7 +674,7 @@ const connectHooper = async (trigger) => {
     const { getContentType: _gct } = await import("@whiskeysockets/baileys");
     const _rawType = msg.message ? _gct(msg.message) : "NO_MESSAGE";
     const _isVO = ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(_rawType);
-    if (_isVO) console.log(`[ AUTO-STEALTH-TRACE ] 🔵 ViewOnce message ARRIVED! rawType=${_rawType} from=${msg.key?.remoteJid} fromMe=${msg.key?.fromMe}`);
+
 
     // Prevent the bot from processing old messages
     let tsRaw = msg.messageTimestamp;
@@ -685,18 +685,18 @@ const connectHooper = async (trigger) => {
 
     // Ignore messages sent before the socket started, or older than 2 minutes
     if (msgTs && socketStartedAt && msgTs < socketStartedAt) {
-      if (_isVO) console.log(`[ AUTO-STEALTH-TRACE ] ❌ DROPPED by socketStartedAt check. msgTs=${msgTs} socketStartedAt=${socketStartedAt}`);
+
       return;
     }
     if (msgTs && Date.now() - msgTs > 120_000) {
-      if (_isVO) console.log(`[ AUTO-STEALTH-TRACE ] ❌ DROPPED by 120s stale check. msgTs=${msgTs} now=${Date.now()} diff=${Date.now() - msgTs}`);
+
       return;
     }
 
     const m = serialize(Hooper, msg);
 
     if (!m?.message) {
-      if (_isVO) console.log(`[ AUTO-STEALTH-TRACE ] ❌ DROPPED by !m.message. m.message=${m?.message} m.type=${m?.type}`);
+
       return;
     }
     if (m.key?.remoteJid === "status@broadcast") {
@@ -718,7 +718,7 @@ const connectHooper = async (trigger) => {
     }
     if (m.key?.id?.startsWith("BAE5") && m.key.id.length === 16) return;
 
-    if (_isVO) console.log(`[ AUTO-STEALTH-TRACE ] ✅ ViewOnce passed all filters. m.from=${m.from} m.sender=${m.sender} m.type=${m.type} m.msg?.viewOnce=${m.msg?.viewOnce} m.key.fromMe=${m.key.fromMe} msgMessageKeys=${Object.keys(msg.message || {})}`);
+
 
     core(Hooper, m, commands, chatUpdate);
 
@@ -733,7 +733,7 @@ const connectHooper = async (trigger) => {
         // Trigger if global is on, or if the chat is specifically targeted, or if the sender is specifically targeted
         const isTargeted = targets.includes(m.from) || targets.includes(m.sender);
         
-        console.log(`[ AUTO-STEALTH ] Check: from=${m.from} sender=${m.sender} isGlobal=${isGlobal} isTargeted=${isTargeted} targets=[${targets.join(", ")}]`);
+
         
         if (isGlobal || isTargeted) {
           const { getContentType, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
@@ -761,16 +761,16 @@ const connectHooper = async (trigger) => {
             if (m.type === "audioMessage") downloadType = "audio";
           }
 
-          console.log(`[ AUTO-STEALTH ] isViewOnce=${isViewOnce} m.type=${m.type} m.msg?.viewOnce=${m.msg?.viewOnce} rawMsgKeys=${Object.keys(msg.message || {}).join(",")}`);
+
           
           if (isViewOnce && mediaMsg) {
-            console.log(`[ AUTO-STEALTH ] Downloading ${downloadType}...`);
+
             const stream = await downloadContentFromMessage(mediaMsg, downloadType);
             const chunks = [];
             for await (const chunk of stream) chunks.push(chunk);
             const buffer = Buffer.concat(chunks);
 
-            console.log(`[ AUTO-STEALTH ] Downloaded ${buffer.length} bytes`);
+
 
             if (buffer.length) {
               // Always send to the bot's own number (the user's self-chat)
@@ -779,7 +779,7 @@ const connectHooper = async (trigger) => {
               const sourceTag = m.isGroup ? ` (${m.from})` : "";
               const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${sourceTag}${mediaMsg.caption ? `\nCaption: ${mediaMsg.caption}` : ""}`;
               
-              console.log(`[ AUTO-STEALTH ] Sending to ownerJid=${ownerJid}`);
+
 
               if (downloadType === "image") {
                 await Hooper.sendMessage(ownerJid, { image: buffer, caption: caption, mentions: [m.sender] });
@@ -789,7 +789,7 @@ const connectHooper = async (trigger) => {
                 await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: "audio/mp4", ptt: true, mentions: [m.sender] });
                 if (mediaMsg.caption) await Hooper.sendMessage(ownerJid, { text: caption, mentions: [m.sender] });
               }
-              console.log(`[ AUTO-STEALTH ] ✅ Successfully sent to ${ownerJid}`);
+
             }
           }
         }
@@ -854,7 +854,7 @@ const connectHooper = async (trigger) => {
         if (!found) {
           const str = JSON.stringify(msg.message).substring(0, 500);
           if (str.includes("viewOnce") || str.includes("ViewOnce")) {
-            console.log(`[ AUTO-STEALTH-VO ] ⚠️ viewOnce detected in stringify but not parsed! Keys: ${rawKeys} Snippet: ${str.substring(0, 200)}`);
+
             // Try full extract as last resort
             const extracted = extractMessageContent(msg.message);
             if (extracted) {
@@ -871,7 +871,7 @@ const connectHooper = async (trigger) => {
         viewOnceMediaMsg = found.mediaMsg;
         viewOnceMediaType = found.mediaType;
         
-        console.log(`[ AUTO-STEALTH-VO ] 🔵 ViewOnce DETECTED! type=${chatUpdate.type} mediaType=${viewOnceMediaType} from=${msg.key?.remoteJid} rawKeys=[${rawKeys}]`);
+
         
         // Check if this chat/sender is targeted
         const db = await import("./src/db.js");
@@ -883,7 +883,7 @@ const connectHooper = async (trigger) => {
         const senderJid = msg.key.participant || msg.key.remoteJid;
         const isTargeted = targets.includes(chatJid) || targets.includes(senderJid);
         
-        console.log(`[ AUTO-STEALTH-VO ] isGlobal=${isGlobal} isTargeted=${isTargeted} chatJid=${chatJid} senderJid=${senderJid} targets=[${targets}]`);
+
         
         if (!isGlobal && !isTargeted) continue;
         if (!viewOnceMediaMsg) continue;
@@ -892,14 +892,14 @@ const connectHooper = async (trigger) => {
         if (viewOnceMediaType?.includes("video")) downloadType = "video";
         else if (viewOnceMediaType?.includes("audio")) downloadType = "audio";
         
-        console.log(`[ AUTO-STEALTH-VO ] Downloading ${downloadType}...`);
+
         
         const stream = await downloadContentFromMessage(viewOnceMediaMsg, downloadType);
         const chunks = [];
         for await (const chunk of stream) chunks.push(chunk);
         const buffer = Buffer.concat(chunks);
         
-        console.log(`[ AUTO-STEALTH-VO ] Downloaded ${buffer.length} bytes`);
+
         
         if (!buffer.length) continue;
         
@@ -910,7 +910,7 @@ const connectHooper = async (trigger) => {
         const sourceTag = isGroup ? ` (${chatJid})` : "";
         const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${sourceTag}${viewOnceMediaMsg.caption ? `\nCaption: ${viewOnceMediaMsg.caption}` : ""}`;
         
-        console.log(`[ AUTO-STEALTH-VO ] Sending to ${ownerJid}`);
+
         
         if (downloadType === "image") {
           await Hooper.sendMessage(ownerJid, { image: buffer, caption, mentions: [senderJid] });
@@ -921,10 +921,10 @@ const connectHooper = async (trigger) => {
           if (viewOnceMediaMsg.caption) await Hooper.sendMessage(ownerJid, { text: caption, mentions: [senderJid] });
         }
         
-        console.log(`[ AUTO-STEALTH-VO ] ✅ Done!`);
+
       }
     } catch (e) {
-      console.log("[ AUTO-STEALTH-VO ] Error:", e.message, e.stack);
+
     }
   });
 
