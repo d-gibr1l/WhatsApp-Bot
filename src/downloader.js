@@ -212,7 +212,7 @@ async function downloadYouTubeApiChain(url, audioOnly) {
   } catch (e) { console.log("[Downloader] API 1 failed:", e.message); }
 
   try {
-    const res = await fetch(`https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=${audioOnly ? "mp3" : "720"}&url=${encodeURIComponent(url)}`, {
+    const res = await fetch(`https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=${audioOnly ? "mp3" : "720"}&allow_extended_duration=false&url=${encodeURIComponent(url)}`, {
       headers: { "x-rapidapi-host": "youtube-info-download-api.p.rapidapi.com", "x-rapidapi-key": apiKey }
     });
     if (res.ok) {
