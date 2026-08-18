@@ -101,11 +101,15 @@ export async function getMediaInfo(url) {
   if (!platform) throw new Error("Unsupported platform.");
 
   const cookiePath = await getCookiesPath();
+  
+  // FIX 1: Spoof the iOS client to bypass YouTube PO Token blocks on video streams
   const args = [
     url,
     "--dump-json",
-    "--no-playlist"
+    "--no-playlist",
+    "--extractor-args", "youtube:player_client=ios"
   ];
+  
   if (cookiePath) args.push("--cookies", cookiePath);
 
   return new Promise((resolve, reject) => {
@@ -156,6 +160,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     "--concurrent-fragments", "10",
     "--downloader", "aria2c,native",
     "--downloader-args", "aria2c:-x 16 -k 1M",
+    "--extractor-args", "youtube:player_client=ios", // FIX 1: Bypass YouTube 403 Video Error
     "--ffmpeg-location", process.env.FFMPEG_PATH || "ffmpeg",
     "--print", "%(title)s",
     "--print", "after_move:filepath",
@@ -174,13 +179,12 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
   } else {
     const isImagePlatform = platform === "instagram" || platform === "pinterest";
     
-    // Updated format: strictly demands mp4 video + audio, with safe fallbacks
+    // Explicitly demand an mp4 video track, with safe fallback formats
     const format = isImagePlatform
       ? "best"
-      : `bestvideo[ext=mp4][height<=${quality}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${quality}]/best[vcodec!=none]/best`;
+      : `bestvideo[ext=mp4][height<=${quality}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${quality}]/best`;
 
-    // Cap the file size to prevent memory crashes
-    args.push("-f", `${format}[filesize<${maxFilesize}]`, "-o", `${tmpBase}.%(ext)s`);
+    args.push("-f", format, "-o", `${tmpBase}.%(ext)s`);
 
     if (!isImagePlatform) {
       args.push("--merge-output-format", "mp4");
@@ -224,11 +228,21 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
           }
         }
 
+        // FIX 2: Advanced Fallback Sorter
         if (!finalPath || !existsSync(finalPath)) {
           const dir    = dirname(tmpBase);
           const prefix = basename(tmpBase);
           const files  = (await fsPromises.readdir(dir)).filter(f => f.startsWith(prefix));
+          
           if (files.length === 0) throw new Error("yt-dlp produced no output file.");
+          
+          // Force it to pick the video file over the audio file if ffmpeg failed to merge them
+          files.sort((a, b) => {
+            const isVideoA = a.match(/\.(mp4|mkv|webm)$/i) ? -1 : 1;
+            const isVideoB = b.match(/\.(mp4|mkv|webm)$/i) ? -1 : 1;
+            return isVideoA - isVideoB;
+          });
+          
           finalPath = join(dir, files[0]);
         }
 
@@ -277,7 +291,6 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
             return resolve({ filePath: null, url: publicUrl, contentType, title });
           } catch (uploadErr) {
             console.error("[Downloader] R2 Upload failed:", uploadErr);
-            // Fallback to local file if upload fails
           }
         }
 
@@ -291,7 +304,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
   }));
 }
 
-// ─── Legacy YouTube buffer export (used by mp3.js, sticker.js etc) ───────────
+// ─── Legacy YouTube buffer export ────────────────────────────────────────────
 export const downloadYouTubeToBuffer = async (url, audioOnly) => {
   const { filePath } = await downloadWithYtDlp(url, audioOnly);
   const buffer = await fsPromises.readFile(filePath);
@@ -366,10 +379,8 @@ export async function downloadToBuffer(url) {
 const IMAGE_SEARCH_TIMEOUT = 15_000;
 const IMAGE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-// Search Pinterest directly using their hidden JSON API
 export async function searchImages(query, count = 3) {
   try {
-    // We first need a guest cookie to use the Pinterest API
     const homeRes = await fetch("https://www.pinterest.com/");
     const cookies = homeRes.headers.get("set-cookie") || "";
 
@@ -378,7 +389,7 @@ export async function searchImages(query, count = 3) {
       appliedProductFilters: "---",
       auto_correction_disabled: false,
       bookmarks: [""],
-      page_size: count + 5, // fetch a few extra in case some don't have orig URLs
+      page_size: count + 5,
       query: query,
       redux_normalize_feed: true,
       rs: "typed",
@@ -419,7 +430,6 @@ export async function searchImages(query, count = 3) {
   }
 }
 
-// Download a single image URL to a buffer
 export async function downloadImageUrl(url) {
   const res = await fetch(url, {
     headers: { "User-Agent": IMAGE_USER_AGENT },
@@ -437,7 +447,6 @@ export async function downloadImageUrl(url) {
   const arrayBuffer = await res.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
-  // Reject tracking pixels and placeholder images
   if (buffer.length < 5000) throw new Error("Image too small (likely a placeholder)");
 
   return { buffer, contentType };
@@ -454,8 +463,6 @@ export async function searchGifs(query, limit = 5) {
     
     if (!data.results || data.results.length === 0) return [];
     
-    // Extract mp4 URL for better WhatsApp compatibility (smaller, auto-plays as gif)
-    // or fallback to actual gif url
     return data.results.map(r => {
       const media = r.media[0];
       return media.mp4 ? media.mp4.url : media.gif.url;
