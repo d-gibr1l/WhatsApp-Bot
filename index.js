@@ -1,6 +1,8 @@
 import "./Configurations.js";
 import ffmpegStatic from "ffmpeg-static";
-process.env.FFMPEG_PATH = ffmpegStatic;
+if (process.platform === "win32") {
+  process.env.FFMPEG_PATH = ffmpegStatic;
+}
 import {
   makeWASocket,
   DisconnectReason,
