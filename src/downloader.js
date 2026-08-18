@@ -181,7 +181,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
       ? "best"
       // Prefer pre-muxed mp4 first (no re-encoding needed = fast)
       // Fall back to separate streams only if needed
-      : `best[ext=mp4][filesize<=${maxFilesize}][height<=${quality}]/bestvideo[height<=${quality}][vcodec^=avc]+bestaudio[acodec^=mp4a]/best[height<=${quality}]/best`;
+      : `bestvideo[height<=${quality}][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=${quality}]+bestaudio/best[ext=mp4][height<=${quality}][vcodec!=none]/best[height<=${quality}][vcodec!=none]/best`;
 
     args.push("-f", format, "-o", `${tmpBase}.%(ext)s`);
 
