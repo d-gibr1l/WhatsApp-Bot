@@ -212,6 +212,28 @@ async function downloadYouTubeApiChain(url, audioOnly) {
   } catch (e) { console.log("[Downloader] API 1 failed:", e.message); }
 
   try {
+    const res = await fetch(`https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=${audioOnly ? "mp3" : "720"}&url=${encodeURIComponent(url)}`, {
+      headers: { "x-rapidapi-host": "youtube-info-download-api.p.rapidapi.com", "x-rapidapi-key": apiKey }
+    });
+    if (res.ok) {
+      const initial = await res.json();
+      if (initial.progress_url) {
+        for (let i = 0; i < 15; i++) {
+          await new Promise(r => setTimeout(r, 2000));
+          const pollRes = await fetch(initial.progress_url);
+          if (pollRes.ok) {
+            const poll = await pollRes.json();
+            if (poll.download_url || poll.url) {
+              console.log("[Downloader] YouTube Downloaded via API 3 (youtube-info-download-api)");
+              return await downloadGenericApiFile(poll.download_url || poll.url, poll.title || initial.title, "YouTube");
+            }
+          }
+        }
+      }
+    }
+  } catch (e) { console.log("[Downloader] API 3 failed:", e.message); }
+
+  try {
     const res = await fetch(`https://social-media-video-downloader.p.rapidapi.com/youtube/v3/video/details?videoId=${videoId}&urlAccess=proxied&renderableFormats=720p,highres&getTranscript=false`, {
       headers: { "x-rapidapi-host": "social-media-video-downloader.p.rapidapi.com", "x-rapidapi-key": apiKey }
     });
@@ -237,28 +259,6 @@ async function downloadYouTubeApiChain(url, audioOnly) {
       }
     }
   } catch (e) { console.log("[Downloader] API 2 failed:", e.message); }
-
-  try {
-    const res = await fetch(`https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=${audioOnly ? "mp3" : "720"}&url=${encodeURIComponent(url)}`, {
-      headers: { "x-rapidapi-host": "youtube-info-download-api.p.rapidapi.com", "x-rapidapi-key": apiKey }
-    });
-    if (res.ok) {
-      const initial = await res.json();
-      if (initial.progress_url) {
-        for (let i = 0; i < 15; i++) {
-          await new Promise(r => setTimeout(r, 2000));
-          const pollRes = await fetch(initial.progress_url);
-          if (pollRes.ok) {
-            const poll = await pollRes.json();
-            if (poll.download_url || poll.url) {
-              console.log("[Downloader] YouTube Downloaded via API 3 (youtube-info-download-api)");
-              return await downloadGenericApiFile(poll.download_url || poll.url, poll.title || initial.title, "YouTube");
-            }
-          }
-        }
-      }
-    }
-  } catch (e) { console.log("[Downloader] API 3 failed:", e.message); }
 
   try {
     const res = await fetch(`https://all-in-one-social-media-saver-api.p.rapidapi.com/smvd/get/all?url=${encodeURIComponent(url)}`, {
