@@ -9,11 +9,7 @@ FROM node:24.11.1-alpine
 RUN apk upgrade --no-cache && \
     apk add --no-cache ffmpeg imagemagick python3 py3-pip curl unzip bash aria2 && \
     npm install -g pm2 && \
-    pip install --break-system-packages yt-dlp && \
-    curl -fsSL https://bun.sh/install | bash && \
-    ln -s /root/.bun/bin/bun /usr/local/bin/bun && \
-    rm -rf /root/.bun/install/cache /root/.npm/_cacache
-ENV PATH="/root/.bun/bin:$PATH"
+    pip install --break-system-packages yt-dlp
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .

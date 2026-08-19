@@ -212,7 +212,7 @@ async function downloadYouTubeApiChain(url, audioOnly) {
   } catch (e) { console.log("[Downloader] API 1 failed:", e.message); }
 
   try {
-    const res = await fetch(`https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=${audioOnly ? "mp3" : "720"}&allow_extended_duration=false&url=${encodeURIComponent(url)}`, {
+    const res = await fetch(`https://youtube-info-download-api.p.rapidapi.com/ajax/download.php?format=${audioOnly ? "mp3" : "1080"}&allow_extended_duration=false&url=${encodeURIComponent(url)}`, {
       headers: { "x-rapidapi-host": "youtube-info-download-api.p.rapidapi.com", "x-rapidapi-key": apiKey }
     });
     if (res.ok) {
@@ -351,7 +351,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     // Explicitly demand an mp4 video track, with safe fallback formats
     const format = isImagePlatform
       ? "best"
-      : `bestvideo[ext=mp4][height<=${quality}]+bestaudio[ext=m4a]/best[ext=mp4][height<=${quality}]/best`;
+      : `bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[ext=mp4][height<=720]/best[height<=720]`;
 
     args.push("-f", format, "-o", `${tmpBase}.%(ext)s`);
 
