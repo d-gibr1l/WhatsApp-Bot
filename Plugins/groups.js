@@ -27,25 +27,21 @@ export default {
          return;
       }
 
-      const groups = await Hooper.groupFetchAllParticipating();
-      const groupArray = Object.values(groups);
+      const { getAllGroups } = await import("../src/db.js");
+      const dbGroups = await getAllGroups();
       
-      let replyText = `🛡️ _HOOPER BOT | GROUPS_ 🛡️\n~ ───────────────────── ~\n📊 _Total Groups:_ ${groupArray.length}\n`;
+      let replyText = `🌟 _HOOPER BOT | GROUPS_ 🌟\n~ ────────── ~\n📂 _Total Groups:_ ${dbGroups.length}\n`;
       
       global.groupListMap = {}; // Reset the mapping cache
       
-      for (let i = 0; i < groupArray.length; i++) {
-        const group = groupArray[i];
+      for (let i = 0; i < dbGroups.length; i++) {
+        const group = dbGroups[i];
         const jid = group.id;
         global.groupListMap[i + 1] = jid;
         
-        const isBanned = await checkBanGroup(jid);
-        const hasAntiDelete = await checkAntidelete(jid);
-        
-        replyText += `_${i + 1}. ${group.subject}_\n`;
-        replyText += ` 👥 _Members:_ ${group.participants.length}\n`;
-        replyText += ` 👑 _Bot Active:_ ${isBanned ? "❌" : "✔️"}\n`;
-        replyText += ` 🗑️ _Antidelete:_ ${hasAntiDelete ? "✔️" : "❌"}\n`;
+        replyText += `_${i + 1}. ${group.name || jid}_\n`;
+        replyText += ` 🤖 _Bot Active:_ ${group.bangroup ? "❌" : "✅"}\n`;
+        replyText += ` 🗑️ _Antidelete:_ ${group.antidelete ? "✅" : "❌"}\n`;
       }
       
       replyText += `~ ───────────────────── ~\n⚙️ _Group Management Shortcuts:_\n`;

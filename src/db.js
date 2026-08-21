@@ -84,7 +84,7 @@ if (USE_MONGO) {
   
   // Legacy Core Schemas
   Models.User = mongoose.model("User", new mongoose.Schema({ id: { type: String, unique: true }, ban: { type: Boolean, default: false }, name: String, addedMods: { type: Boolean, default: false } }), "userdatas");
-  Models.BotGroup = mongoose.model("BotGroup", new mongoose.Schema({ id: { type: String, unique: true }, antilink: { type: Boolean, default: false }, antidelete: { type: Boolean, default: false }, nsfw: { type: Boolean, default: false }, bangroup: { type: Boolean, default: false }, chatBot: { type: Boolean, default: false }, botSwitch: { type: Boolean, default: true }, switchNSFW: { type: Boolean, default: false }, switchWelcome: { type: Boolean, default: false }, allowed: { type: Boolean, default: false } }), "groupdatas");
+  Models.BotGroup = mongoose.model("BotGroup", new mongoose.Schema({ id: { type: String, unique: true }, name: { type: String, default: "" }, in_group: { type: Boolean, default: true }, antilink: { type: Boolean, default: false }, antidelete: { type: Boolean, default: false }, nsfw: { type: Boolean, default: false }, bangroup: { type: Boolean, default: false }, chatBot: { type: Boolean, default: false }, botSwitch: { type: Boolean, default: true }, switchNSFW: { type: Boolean, default: false }, switchWelcome: { type: Boolean, default: false }, allowed: { type: Boolean, default: false } }), "groupdatas");
   Models.System = mongoose.model("System", new mongoose.Schema({ id: { type: String, default: "1" }, seletedCharacter: { type: String, default: "0" }, PMchatBot: { type: Boolean, default: false }, botMode: { type: String, default: "public" } }), "systemdatas");
   Models.Plugin = mongoose.model("Plugin", new mongoose.Schema({ plugin: String, url: String }), "plugindatas");
   Models.Session = mongoose.model("Session", new mongoose.Schema({ sessionId: { type: String, unique: true }, files: Object, lastSync: Date }));
@@ -254,9 +254,10 @@ export async function clearWarnings(number) {
 
 export async function getAllGroups() {
   if (USE_MONGO) {
-    const docs = await Models.BotGroup.find();
+    const docs = await Models.BotGroup.find({ in_group: { $ne: false } });
     return docs.map(d => ({
       id: d.id,
+      name: d.name || "",
       antilink: d.antilink,
       antidelete: d.antidelete,
       nsfw: d.nsfw,
@@ -268,7 +269,7 @@ export async function getAllGroups() {
       allowed: d.allowed,
     }));
   }
-  return Object.values(jsonCache.bot_groups);
+  return Object.values(jsonCache.bot_groups || jsonCache.groups).filter(g => g.in_group !== false);
 }
 
 export async function updateGroupFeature(groupId, feature, value) {
@@ -481,6 +482,14 @@ async function updateGroup(id, payload) {
     jsonCache.groups[id] = { ...jsonCache.groups[id], ...payload };
     await saveJSON();
   }
+}
+
+export async function updateGroupName(id, name) {
+  await updateGroup(id, { name, in_group: true });
+}
+
+export async function setGroupStatus(id, inGroup) {
+  await updateGroup(id, { in_group: inGroup });
 }
 
 export const checkWelcome = async (id) => (await getGroup(id)).switchWelcome || false;

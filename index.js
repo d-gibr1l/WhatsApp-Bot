@@ -643,6 +643,22 @@ const connectHooper = async (trigger) => {
       QR_GENERATE = "invalid";
       healthProbeFailures = 0;
       markConnectionStableLater(Hooper, generation);
+
+      // Background sync group names
+      (async () => {
+        try {
+          if (!isCurrentSocket(Hooper, generation)) return;
+          const groups = await Hooper.groupFetchAllParticipating();
+          const { updateGroupName } = await import("./src/db.js");
+          for (const jid in groups) {
+            if (groups[jid].subject) {
+              await updateGroupName(jid, groups[jid].subject);
+            }
+          }
+        } catch(e) {
+          console.error("[ HOOPER ] Failed to sync group names:", e.message);
+        }
+      })();
     }
 
     if (connection === "close") {
@@ -679,6 +695,32 @@ const connectHooper = async (trigger) => {
   Hooper.ev.on("group-participants.update", async (m) => {
     if (!isCurrentSocket(Hooper, generation)) return;
     welcomeLeft(Hooper, m);
+    
+    const botJid = Hooper.user.id.split(":")[0] + "@s.whatsapp.net";
+    if ((m.action === "remove" || m.action === "leave") && m.participants.includes(botJid)) {
+      const { setGroupStatus } = await import("./src/db.js");
+      await setGroupStatus(m.id, false);
+    }
+  });
+
+  Hooper.ev.on("groups.upsert", async (groups) => {
+    if (!isCurrentSocket(Hooper, generation)) return;
+    const { updateGroupName } = await import("./src/db.js");
+    for (const group of groups) {
+      if (group.id && group.subject) {
+        await updateGroupName(group.id, group.subject);
+      }
+    }
+  });
+
+  Hooper.ev.on("groups.update", async (groups) => {
+    if (!isCurrentSocket(Hooper, generation)) return;
+    const { updateGroupName } = await import("./src/db.js");
+    for (const group of groups) {
+      if (group.id && group.subject) {
+        await updateGroupName(group.id, group.subject);
+      }
+    }
   });
 
   Hooper.ev.on("messages.upsert", async (chatUpdate) => {
