@@ -206,12 +206,12 @@ async function processMessage(sock, msg) {
   if (msg.key.fromMe && !text) return;
 
   if (cachedIsBanned(sender)) return;
-  if (isGrp && cachedHasAllowedGroups() && !cachedIsGroupAllowed(from)) return;
-
+  
   const botActiveGlobal = cachedGetSetting("bot_active", "true");
   const botActiveLocal = cachedGetSetting(`bot_active_${from}`, "true");
 
   if (!userIsAdmin) {
+    if (isGrp && cachedHasAllowedGroups() && !cachedIsGroupAllowed(from)) return;
     if (botActiveGlobal !== "true") return; 
     if (botActiveLocal === "false") return; 
   }

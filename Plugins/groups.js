@@ -54,51 +54,55 @@ export default {
 
     if (inputCMD === "mute") {
       if (!canManageGroup) return;
-      if (!text && !m.isGroup) return m.reply(`Usage: ${prefix}mute <numbers>\nExample: ${prefix}mute 1 2`);
       
       let jidsToMute = [];
-      if (m.isGroup && !text) {
+      if (!text) {
          jidsToMute.push(m.from);
       } else {
+         const { getAllGroups } = await import("../src/db.js");
+         const dbGroups = await getAllGroups();
          const numbers = text.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
          for (const num of numbers) {
-           const jid = global.groupListMap[num];
-           if (jid) jidsToMute.push(jid);
+           const idx = parseInt(num) - 1;
+           if (dbGroups[idx]) jidsToMute.push(dbGroups[idx].id);
          }
       }
       
-      if (jidsToMute.length === 0) return m.reply("No valid groups found to mute.");
+      if (jidsToMute.length === 0) return m.reply("No valid groups/chats found to mute.");
       
       for (const jid of jidsToMute) {
         await banGroup(jid);
       }
-      return m.reply(`✔️ Disabled bot in ${jidsToMute.length} group(s).`);
+      return m.reply(`✔️ Disabled bot in ${jidsToMute.length} chat(s).`);
     }
 
     if (inputCMD === "allow") {
       if (!canManageGroup) return;
-      if (!text && !m.isGroup) return m.reply(`Usage: ${prefix}allow <numbers|all>\nExample: ${prefix}allow 1 2`);
       
       let jidsToAllow = [];
-      if (text.toLowerCase() === "all" && !m.isGroup) {
-         jidsToAllow = Object.values(global.groupListMap);
-      } else if (m.isGroup && !text) {
+      if (!text) {
          jidsToAllow.push(m.from);
+      } else if (text.toLowerCase() === "all") {
+         const { getAllGroups } = await import("../src/db.js");
+         const dbGroups = await getAllGroups();
+         jidsToAllow = dbGroups.map(g => g.id);
       } else {
+         const { getAllGroups } = await import("../src/db.js");
+         const dbGroups = await getAllGroups();
          const numbers = text.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
          for (const num of numbers) {
-           const jid = global.groupListMap[num];
-           if (jid) jidsToAllow.push(jid);
+           const idx = parseInt(num) - 1;
+           if (dbGroups[idx]) jidsToAllow.push(dbGroups[idx].id);
          }
       }
       
-      if (jidsToAllow.length === 0) return m.reply("No valid groups found to allow.");
+      if (jidsToAllow.length === 0) return m.reply("No valid groups/chats found to allow.");
       
       for (const jid of jidsToAllow) {
         await unbanGroup(jid);
         await setAllowedChat(jid); // Explicitly allow it in DB
       }
-      return m.reply(`✔️ Allowed bot in ${jidsToAllow.length} group(s).`);
+      return m.reply(`✔️ Allowed bot in ${jidsToAllow.length} chat(s).`);
     }
 
     if (inputCMD === "antidelete") {
@@ -112,28 +116,30 @@ export default {
       let jidsToToggle = [];
       const targetStr = args.slice(1).join(" ").trim();
       
-      if (targetStr === "all") {
-         jidsToToggle = Object.values(global.groupListMap);
-      } else if (targetStr) {
+      if (!targetStr) {
+         jidsToToggle.push(m.from);
+      } else if (targetStr === "all") {
+         const { getAllGroups } = await import("../src/db.js");
+         const dbGroups = await getAllGroups();
+         jidsToToggle = dbGroups.map(g => g.id);
+      } else {
+         const { getAllGroups } = await import("../src/db.js");
+         const dbGroups = await getAllGroups();
          const numbers = targetStr.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
          for (const num of numbers) {
-           const jid = global.groupListMap[num];
-           if (jid) jidsToToggle.push(jid);
+           const idx = parseInt(num) - 1;
+           if (dbGroups[idx]) jidsToToggle.push(dbGroups[idx].id);
          }
-      } else if (m.isGroup) {
-         jidsToToggle.push(m.from);
-      } else {
-         return m.reply("Please specify 'all' or provide group numbers.");
       }
       
-      if (jidsToToggle.length === 0) return m.reply("No valid groups found to toggle antidelete.");
+      if (jidsToToggle.length === 0) return m.reply("No valid groups/chats found to toggle antidelete.");
       
       for (const jid of jidsToToggle) {
         if (action === "on") await setAntidelete(jid);
         else await delAntidelete(jid);
       }
       
-      return m.reply(`✔️ Antidelete turned ${action.toUpperCase()} for ${jidsToToggle.length} group(s).`);
+      return m.reply(`✔️ Antidelete turned ${action.toUpperCase()} for ${jidsToToggle.length} chat(s).`);
     }
 
     if (inputCMD === "mode") {
