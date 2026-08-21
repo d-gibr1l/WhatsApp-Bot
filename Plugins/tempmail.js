@@ -112,11 +112,11 @@ async function pollInbox(Hooper, from, jid) {
 }
 
 export default {
-  name: "tempmail",
-  alias: ["tm", "tempemail"],
+  name: "tammail",
+  alias: ["tm", "tempmail"],
   category: "Utility",
   desc: "Generate a disposable email and forward incoming messages to WhatsApp",
-  usage: "tempmail [stop]",
+  usage: "tammail [stop]",
   run: async (Hooper, m, { args, command, prefix }) => {
     const senderJid = m.sender;
     const from = m.from;
@@ -133,7 +133,7 @@ export default {
 
     if (activeSessions.has(senderJid)) {
       const session = activeSessions.get(senderJid);
-      return m.reply(`⚠️ You already have an active temporary email!\n\n📧 *${session.address}*\n\nInbox is being monitored. Use *${prefix}tempmail stop* to discard it.`);
+      return m.reply(`⚠️ You already have an active temporary email!\n\n📧 *${session.address}*\n\nInbox is being monitored. Use *${prefix}tammail stop* to discard it.`);
     }
 
     await Hooper.sendMessage(from, { react: { text: "⏳", key: m.key } });
@@ -166,7 +166,7 @@ export default {
       });
 
       await Hooper.sendMessage(from, { react: { text: "✅", key: m.key } });
-      const replyText = `✅ *Temporary Email Created!*\n\n📧 *Address:* \`${address}\`\n\nI will monitor this inbox for the next 45 minutes and forward any emails and attachments directly to this chat.\n\n_To discard early, type *${prefix}tempmail stop*_`;
+      const replyText = `✅ *Temporary Email Created!*\n\n📧 *Address:* \`${address}\`\n\nI will monitor this inbox for the next 45 minutes and forward any emails and attachments directly to this chat.\n\n_To discard early, type *${prefix}tammail stop*_`;
       
       return m.reply(replyText);
 
