@@ -27,8 +27,9 @@ export default {
          return;
       }
 
-      const { getAllGroups } = await import("../src/db.js");
+      const { getAllGroups, getBotMode } = await import("../src/db.js");
       const dbGroups = await getAllGroups();
+      const botMode = await getBotMode();
       
       let replyText = `🌟 _HOOPER BOT | GROUPS_ 🌟\n~ ────────── ~\n📂 _Total Groups:_ ${dbGroups.length}\n`;
       
@@ -39,8 +40,13 @@ export default {
         const jid = group.id;
         global.groupListMap[i + 1] = jid;
         
+        let isActive = !group.bangroup;
+        if ((botMode === "private" || botMode === "self") && !group.allowed) {
+            isActive = false;
+        }
+        
         replyText += `_${i + 1}. ${group.name || jid}_\n`;
-        replyText += ` 🤖 _Bot Active:_ ${group.bangroup ? "❌" : "✅"}\n`;
+        replyText += ` 🤖 _Bot Active:_ ${isActive ? "✅" : "❌"}\n`;
         replyText += ` 🗑️ _Antidelete:_ ${group.antidelete ? "✅" : "❌"}\n`;
       }
       
