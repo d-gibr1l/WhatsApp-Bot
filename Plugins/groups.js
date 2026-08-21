@@ -150,13 +150,23 @@ export default {
 
     if (inputCMD === "mode") {
       if (!isCreator) return;
-      if (!text) return m.reply(`Usage: ${prefix}mode <public|private|self>`);
-      const newMode = text.toLowerCase().trim();
-      if (!["public", "private", "self"].includes(newMode)) {
-        return m.reply(`Invalid mode. Use public, private, or self.`);
+      const { getBotMode } = await import("../src/db.js");
+      const currentMode = await getBotMode();
+
+      if (!text || !["public", "private", "self"].includes(text.toLowerCase().trim())) {
+        let helpText = `⚙️ *Bot Mode Configuration*\n\n`;
+        helpText += `*Current Mode:* \`${currentMode.toUpperCase()}\`\n\n`;
+        helpText += `*Available Modes:*\n`;
+        helpText += `🌎 *Public* - The bot replies to everyone in all groups and private chats.\n`;
+        helpText += `🔒 *Private* - The bot ignores all groups unless explicitly allowed via \`.allow\`. It still replies to private DMs.\n`;
+        helpText += `👤 *Self* - The bot completely ignores everyone except you (the owner) in all chats, unless explicitly allowed.\n\n`;
+        helpText += `*Usage:* \`${prefix}mode <public|private|self>\``;
+        return m.reply(helpText);
       }
+      
+      const newMode = text.toLowerCase().trim();
       await setBotMode(newMode);
-      return m.reply(`✔️ Bot mode successfully set to *${newMode}*.`);
+      return m.reply(`✔️ Bot mode successfully changed from *${currentMode}* to *${newMode}*.`);
     }
   }
 };
