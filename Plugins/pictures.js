@@ -146,8 +146,7 @@ export default {
             }
           );
           const pinUrls = [...pinHtml.matchAll(/&quot;murl&quot;:&quot;(https?:\/\/[^&]+)&quot;/g)]
-            .map((m) => m[1])
-            .filter((u) => u.includes("pinimg.com"));
+            .map((m) => m[1]);
           if (!pinUrls.length) {
             await doReact("❌");
             return m.reply(`No Pinterest images found for: *${text}*`);
