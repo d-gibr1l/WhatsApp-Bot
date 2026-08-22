@@ -815,8 +815,24 @@ const connectHooper = async (trigger) => {
 
           // Check if global is on, or if the normalized chat/sender is targeted
           const isTargeted = targets.some(t => {
-             const tNorm = jidNormalizedUser(t);
-             return tNorm === normChat || tNorm === normSender || t === rawChatJid || t === rawSenderJid;
+             // 1. Resolve Target if it is a LID
+             let resolvedT = t;
+             if (t.endsWith("@lid") && global.lidToJidMap?.has(t)) {
+                 resolvedT = global.lidToJidMap.get(t);
+             }
+             
+             // 2. Resolve Incoming Message JIDs if they are LIDs
+             let rChat = rawChatJid;
+             if (rChat.endsWith("@lid") && global.lidToJidMap?.has(rChat)) rChat = global.lidToJidMap.get(rChat);
+             
+             let rSender = rawSenderJid;
+             if (rSender.endsWith("@lid") && global.lidToJidMap?.has(rSender)) rSender = global.lidToJidMap.get(rSender);
+
+             const tNorm = jidNormalizedUser(resolvedT);
+             const nChat = jidNormalizedUser(rChat);
+             const nSender = jidNormalizedUser(rSender);
+
+             return tNorm === nChat || tNorm === nSender || resolvedT === rChat || resolvedT === rSender;
           });
 
           if (isGlobal || isTargeted) {
