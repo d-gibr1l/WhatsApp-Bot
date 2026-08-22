@@ -52,25 +52,9 @@ export default async (Hooper, m, commands, chatUpdate) => {
     const botNumber = await Hooper.decodeJid(Hooper.user.id);
     const botIdClean = sanitize(botNumber);
     const botLid = Hooper.user?.lid ? sanitize(Hooper.user.lid) : botIdClean;
-    const groupAdmins = m.isGroup
-      ? participants
-          .filter((p) => p.admin === "admin" || p.admin === "superadmin")
-          .map((p) => p.id)
-      : [];
-    const isBotAdmin = m.isGroup
-      ? groupAdmins.includes(botIdClean) ||
-        groupAdmins.includes(botLid) ||
-        groupAdmins.some((admin) => sanitize(admin) === botIdClean)
-      : false;
-    const isAdmin = m.isGroup
-      ? groupAdmins.includes(m.sender) ||
-        groupAdmins.includes(sanitize(m.sender))
-      : false;
+
     // Baileys v7 LID resolution: m.sender is a LID (@lid).
-    // The phone JID is available from:
-    //   1. m.key.participantAlt (set by Baileys on every group message)
-    //   2. participant.phoneNumber (in group metadata)
-    //   3. Hooper.user.id (if sender is the bot itself)
+    // Resolve it early so isAdmin and isCreator checks can use the resolved phone number.
     let resolvedSender = m.sender;
     if (m.sender.endsWith("@lid")) {
       // 1. Check cached LID→phone mapping first
@@ -96,12 +80,32 @@ export default async (Hooper, m, commands, chatUpdate) => {
         global.lidToJidMap.set(sanitize(m.sender), resolvedSender);
       }
     }
+
+    const groupAdmins = m.isGroup
+      ? participants
+          .filter((p) => p.admin === "admin" || p.admin === "superadmin")
+          .map((p) => p.id)
+      : [];
+    const isBotAdmin = m.isGroup
+      ? groupAdmins.includes(botIdClean) ||
+        groupAdmins.includes(botLid) ||
+        groupAdmins.some((admin) => sanitize(admin) === botIdClean)
+      : false;
+      
     const ownerDigits = new Set(
       [botIdClean, ...global.owner].map((v) => v.replace(/[^0-9]/g, ""))
     );
     const isCreator =
       ownerDigits.has(resolvedSender.replace(/[^0-9]/g, "")) ||
       ownerDigits.has(m.sender.replace(/[^0-9]/g, ""));
+      
+    const isAdmin = m.isGroup
+      ? groupAdmins.includes(m.sender) ||
+        groupAdmins.includes(sanitize(m.sender)) ||
+        groupAdmins.includes(resolvedSender) ||
+        groupAdmins.includes(sanitize(resolvedSender)) ||
+        isCreator
+      : isCreator;
     const messSender = m.sender;
     const itsMe = m.sender.includes(botIdClean.split("@")[0]);
     const groupAdmin = groupAdmins;

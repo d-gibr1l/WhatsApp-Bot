@@ -285,25 +285,38 @@ export default {
 
       case "gclink":
       case "grouplink": {
+        if (!m.isGroup) {
+          await doReact("❌");
+          return m.reply(`*This command can only be used in groups!*`);
+        }
         if (!isBotAdmin) {
           await doReact("❌");
           return m.reply(`*Bot* must be *Admin* in order to use this Command!`);
         }
         await doReact("🧩");
-        const link = await Hooper.groupInviteCode(m.from);
+        
+        let link;
+        try {
+          link = await Hooper.groupInviteCode(m.from);
+        } catch (err) {
+          return m.reply(`*Error:* Failed to generate group link. Ensure the bot is an admin and the link hasn't been recently reset.\n\n_Details: ${err.message}_`);
+        }
+        
         const linkcode = `https://chat.whatsapp.com/${link}`;
         let ppgc;
+        let isLocal = false;
         try {
           ppgc = await Hooper.profilePictureUrl(m.from, "image");
         } catch {
-          ppgc = botImage1;
+          ppgc = "./Assets/gclink.png";
+          isLocal = true;
         }
         try {
           await Hooper.sendMessage(
             m.from,
             {
-              image: { url: ppgc },
-              caption: `\n_🎀 Group Name:_ *${metadata.subject}*\n\n_🧩 Group Link:_\n${linkcode}\n`,
+              image: isLocal ? fs.readFileSync(ppgc) : { url: ppgc },
+              caption: `\n_🎀 Group Name:_ *${metadata.subject || "Unknown"}*\n\n_🧩 Group Link:_\n${linkcode}\n`,
             },
             { quoted: m },
           );
