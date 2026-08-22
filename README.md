@@ -37,44 +37,13 @@
 
 ---
 
-## 🚀 One-Click Deploy
-
-<p align="center">
-
-| Platform    | Deploy                                                                                                                                                                                                                                                                                                                                                                                       | Tutorial                                |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| **Repl.it** | <a href="https://repl.it/github/d-gibr1l/WhatsApp-Bot"><img src="https://i.ibb.co/zrB5kMh/deploy-on-repl.jpg" alt="Deploy on Repl.it" height="32"></a>                                                                                                                                                                                                                                       | [▶ Watch](https://youtu.be/R-_DU73UH8Q) |
-| **Railway** | <a href="https://railway.app/new/template/Gts2Zx?referralCode=f3gg2m"><img src="https://railway.app/button.svg" alt="Deploy on Railway" height="32"></a>                                                                                                                                                                                                                                     | [▶ Watch](https://youtu.be/Qs6ryWnEtu8) |
-| **Render**  | <a href="https://render.com/deploy?repo=https://github.com/d-gibr1l/WhatsApp-Bot"><img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" height="32"></a>                                                                                                                                                                                                   | —                                       |
-| **Heroku**  | <a href="https://heroku.com/deploy?template=https://github.com/d-gibr1l/WhatsApp-Bot"><img src="https://www.herokucdn.com/deploy/button.png" alt="Deploy on Heroku" height="32"></a>                                                                                                                                                                                                         | —                                       |
-
-</p>
-
----
-
 ## ⚙️ Environment Variables
 
 > Set these in `.env` (local) or as Environment Variables on your hosting platform.  
 > Multiple API keys can be comma-separated — the bot picks one randomly per request.
 
 | Variable              | Description                                                                                   | Required    |
-| --------------------- | --------------------------------------------------------------------------------------------- | ----------- |
-| `PREFIX`              | Command prefix (e.g. `-`, `.`, `!`)                                                           | ✅          |
-| `MODS`                | Owner phone numbers without `+` or spaces, comma-separated (e.g. `9181011xxxxx,9198XXXXXXXX`) | ✅          |
 | `MONGODB`             | Your MongoDB connection URL                                                                   | ✅          |
-| `SESSION_ID`          | Any random string — acts as the bot session key                                               | ✅          |
-| `TENOR_API_KEY`       | Tenor API key(s) for GIF commands, comma-separated                                            | ✅ for GIFs |
-| `TMDB_API_KEY`        | The Movie Database API key (for `.movie` command)                                             | Optional    |
-| `GEMINI_API`          | Google Gemini API key(s), comma-separated                                                     | Optional    |
-| `OPENAI_API`          | OpenAI API key(s) starting with `sk-`, comma-separated                                        | Optional    |
-| `CLAUDE_API`          | Anthropic Claude API key(s), comma-separated                                                  | Optional    |
-| `PACKNAME`            | Sticker pack name (default: `Hooper Bot`)                                                     | Optional    |
-| `AUTHOR`              | Sticker author name (default: `by: Team Hooper`)                                              | Optional    |
-| `PORT`                | Server port (default: `10000`)                                                                | Optional    |
-| `GC_INTERVAL_MINUTES` | MongoDB garbage collection interval in minutes (default: `5`)                                 | Optional    |
-| `WATCHDOG_INTERVAL_SECONDS` | WhatsApp server health-probe interval in seconds (default: `60`)                        | Optional    |
-| `MESSAGE_CACHE_TTL_MINUTES` | Anti-delete message retention in minutes (default: `360`, minimum: `30`)                | Optional    |
-| `MESSAGE_CACHE_MAX_PER_CHAT` | Maximum anti-delete messages retained per chat (default: `500`, minimum: `50`)         | Optional    |
 
 ---
 
