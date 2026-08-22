@@ -983,12 +983,34 @@ const connectHooper = async (trigger) => {
                 // For pure text, send it all in one message
                 const finalMsg = `${header}\n${actionText}\n\n${textToSend}`;
                 await Hooper.sendMessage(targetJid, { text: finalMsg, mentions: mentionsList });
+            } else if (mediaLabel === "picture" || mediaLabel === "video") {
+                // For picture/video, embed the alert into the caption! (Also avoids the 'forwarded from group' bug for statuses)
+                const origCaption = content.caption ? `\n\n> ${content.caption}` : "";
+                const finalCaption = `${header}\n${actionText}${origCaption}`;
+                
+                try {
+                    // Try downloading and resending directly to set the custom caption
+                    const stream = await downloadContentFromMessage(content, mediaLabel === "picture" ? "image" : "video");
+                    const chunks = [];
+                    for await (const chunk of stream) chunks.push(chunk);
+                    const mediaBuffer = Buffer.concat(chunks);
+                    
+                    if (mediaLabel === "picture") {
+                        await Hooper.sendMessage(targetJid, { image: mediaBuffer, caption: finalCaption, mentions: mentionsList });
+                    } else {
+                        await Hooper.sendMessage(targetJid, { video: mediaBuffer, caption: finalCaption, mentions: mentionsList });
+                    }
+                } catch (e) {
+                    console.log("[ ANTI-DELETE ] Media download failed:", e);
+                    // Fallback: Send alert separately, then forward
+                    const alertMsg = await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: mentionsList });
+                    await Hooper.sendMessage(targetJid, { forward: cached }, { quoted: alertMsg });
+                }
             } else {
-                // For media, send the alert first
+                // For audio, sticker, document, send the alert first
                 const alertText = `${header}\n${actionText}`;
                 const alertMsg = await Hooper.sendMessage(targetJid, { text: alertText, mentions: mentionsList });
                 
-                // Then forward the actual media as a reply to the alert ONLY if it's audio or sticker
                 try {
                     const quoteOpt = (contentType === "audioMessage" || contentType === "stickerMessage") ? { quoted: alertMsg } : {};
                     await Hooper.sendMessage(targetJid, { forward: cached }, quoteOpt);
@@ -1000,13 +1022,9 @@ const connectHooper = async (trigger) => {
                         for await (const chunk of stream) chunks.push(chunk);
                         const mediaBuffer = Buffer.concat(chunks);
                         
-                        const cap = content.caption ? content.caption : "";
-                        
-                        if (mediaLabel === "picture") await Hooper.sendMessage(targetJid, { image: mediaBuffer, caption: cap }, { quoted: alertMsg });
-                        else if (mediaLabel === "video") await Hooper.sendMessage(targetJid, { video: mediaBuffer, caption: cap }, { quoted: alertMsg });
-                        else if (mediaLabel === "audio") await Hooper.sendMessage(targetJid, { audio: mediaBuffer, mimetype: content.mimetype || "audio/mp4" }, { quoted: alertMsg });
+                        if (mediaLabel === "audio") await Hooper.sendMessage(targetJid, { audio: mediaBuffer, mimetype: content.mimetype || "audio/mp4" }, { quoted: alertMsg });
                         else if (mediaLabel === "sticker") await Hooper.sendMessage(targetJid, { sticker: mediaBuffer }, { quoted: alertMsg });
-                        else await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document", caption: cap }, { quoted: alertMsg });
+                        else await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document" }, { quoted: alertMsg });
                     } catch (e) {
                         await Hooper.sendMessage(targetJid, { text: `⚠️ Failed to recover the deleted ${mediaLabel}.` }, { quoted: alertMsg });
                     }
