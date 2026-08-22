@@ -113,6 +113,25 @@ pm2 start ecosystem.config.cjs
 
 ---
 
+## 🆕 Recent Updates & Optimizations
+
+We've recently overhauled Hooper MD to be faster, lighter, and more reliable:
+
+### ✨ Added & Optimized
+- **MongoDB Caching Layer:** Message and contact caches have been completely migrated from RAM to MongoDB. This drastically reduces the bot's memory footprint and allows for persistent cache storage with automatic TTL cleanup.
+- **Flawless Auto-Stealth:** Rebuilt the View Once interceptor to accurately handle multi-device JIDs (LID resolutions) and intelligently download media buffers natively using Baileys.
+- **Upgraded Anti-Delete:** The Anti-Delete listener now pulls historic deleted messages and media seamlessly from MongoDB, automatically reconstructing BSON Binary buffers for reliable alert forwarding.
+- **Supercharged Pinterest Search:** The `.pin` command now queries Pinterest's native JSON API using in-memory cached guest cookies, entirely bypassing slow web scraping for instant image results.
+- **`.status` Command:** Added a robust command to instantly retrieve and forward any contact's recent statuses directly from the database cache.
+- **Zero-Latency `.help`:** The interactive help menu video is now permanently cached in RAM on startup, resulting in instant replies.
+- **Docker & CI Upgrades:** Added `--legacy-peer-deps` to GitHub Actions and Dockerfile to permanently resolve `jimp` / `baileys` installation conflicts.
+
+### 🗑️ Removed
+- Deprecated buggy commands and bloated search plugins that were causing memory leaks and boot loops (cleaned up obsolete logic in `search.js` and `group.js`).
+- Stripped away legacy RAM storage `store.messages` arrays that were blowing up server memory instances, migrating all storage cleanly to MongoDB.
+
+---
+
 ## 🎭 Bot Characters
 
 Switch the bot's personality and profile picture with `-setchar <ID>`. Use `-charlist` to see all.
