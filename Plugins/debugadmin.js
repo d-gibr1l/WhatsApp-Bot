@@ -1,9 +1,9 @@
-import { m } from '../Core.js';
-
 export default {
   name: "debugadmin",
+  alias: ["debugadmin"],
+  uniquecommands: ["debugadmin"],
   description: "Debug admin privileges",
-  run: async (Hooper, m, { isAdmin, isBotAdmin, groupAdmin, isCreator, participants, botNumber }) => {
+  start: async (Hooper, m, { isAdmin, isBotAdmin, groupAdmin, isCreator, participants, botNumber }) => {
     
     const sanitize = (jid) => {
       if (!jid) return "";

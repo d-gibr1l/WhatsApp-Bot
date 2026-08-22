@@ -327,18 +327,36 @@ export default {
         var helpText = [
           `Yo @${m.sender.split("@")[0]}`,
           ``,
-          `🎀 *ᴘʀᴇꜰɪx* : \`${prefix}\``,
-          `📦 *ᴄᴏᴍᴍᴀɴᴅꜱ* : *${totalCmds}* ᴀᴠᴀɪʟᴀʙʟᴇ`,
+          `🎯 *𝗣𝗿𝗲𝗳𝗶𝘅* : \`${prefix}\``,
+          `🔖 *𝗖𝗼𝗺𝗺𝗮𝗻𝗱𝘀* : *${totalCmds}* 𝗮𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲`,
           ``,
           formattedCommands,
           ``,
-          `*©️ YOURS TRULY - ${new Date().getFullYear()}*`,
+          `*c© YOURS TRULY - ${new Date().getFullYear()}*`,
         ].join("\n");
+
+        if (!global.botVideoCache) global.botVideoCache = {};
+        let vidToSend = { url: botVideo };
+        if (botVideo.startsWith("http")) {
+            if (global.botVideoCache[botVideo]) {
+                vidToSend = global.botVideoCache[botVideo];
+            } else {
+                try {
+                    const { data } = await axios.get(botVideo, { responseType: "arraybuffer", timeout: 15000 });
+                    global.botVideoCache[botVideo] = Buffer.from(data);
+                    vidToSend = global.botVideoCache[botVideo];
+                } catch (e) {
+                    console.log("Failed to cache botVideo:", e.message);
+                }
+            }
+        } else if (fs.existsSync(botVideo)) {
+            vidToSend = fs.readFileSync(botVideo);
+        }
 
         await Hooper.sendMessage(
           m.from,
           {
-            video: { url: botVideo },
+            video: vidToSend,
             gifPlayback: true,
             gifAttribution: 1, // Fix for Android playback
             mimetype: "video/mp4", // Explicit mimetype for Android

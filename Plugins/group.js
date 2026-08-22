@@ -231,7 +231,6 @@ export default {
       }
 
 
-      case:
       case "htag": {
         if (!isAdmin) {
           await doReact("❌");

@@ -1052,32 +1052,13 @@ const connectHooper = async (trigger) => {
             content = unwrapped[contentType];
         }
         
-        // ─── Format the Alert Message ───
-        const isGroup = chatId.endsWith("@g.us");
-        const isStatus = chatId === "status@broadcast";
-        
-        let groupName = "Group";
-        if (isGroup) {
-            try {
-                const groupMeta = await Hooper.groupMetadata(chatId);
-                groupName = groupMeta.subject;
-            } catch {}
-        }
-
-        let header = "";
-        if (isGroup) {
-            header = `🛡️ *Anti-Delete - ${groupName}*`;
-        } else if (isStatus) {
-            header = `🛡️ *Anti-Delete (Status)*`;
-        } else {
-            header = `🛡️ *Anti-Delete (DM)*`;
-        }
+        const header = `🛡️ *Anti-Delete - C.U.N.T.S🐦*\n----------------------------------------------`;
 
         let actionText = "";
         let mentionsList = [];
         
-        const deleterTag = `@${jidNormalizedUser(deleter).split("@")[0]}`;
-        const senderMentionTag = `@${jidNormalizedUser(actualSender).split("@")[0]}`;
+        const deleterTag = jidNormalizedUser(deleter).split("@")[0];
+        const senderMentionTag = jidNormalizedUser(actualSender).split("@")[0];
         
         // Determine what kind of media it is for the label
         let mediaLabel = "message";
@@ -1090,10 +1071,10 @@ const connectHooper = async (trigger) => {
         else mediaLabel = "message";
 
         if (update.messageStubType === 132) {
-            actionText = `Admin ${deleterTag} deleted ${senderMentionTag}'s ${mediaLabel}:`;
+            actionText = `Admin @${deleterTag} deleted @${senderMentionTag}'s ${mediaLabel}:`;
             mentionsList = [deleter, actualSender];
         } else {
-            actionText = `${senderMentionTag} deleted this ${mediaLabel}:`;
+            actionText = `@${senderMentionTag} deleted this ${mediaLabel}:`;
             mentionsList = [actualSender]; // Actual sender deleted their own message
         }
         
@@ -1110,17 +1091,17 @@ const connectHooper = async (trigger) => {
 
             if (textToSend) {
                 // For pure text, send it all in one message
-                const finalMsg = `${header}\n\n${actionText}\n\n${textToSend}`;
+                const finalMsg = `${header}\n${actionText}\n\n${textToSend}`;
                 await Hooper.sendMessage(targetJid, { text: finalMsg, mentions: mentionsList });
             } else {
                 // For media, send the alert first
-                const alertText = `${header}\n\n${actionText}`;
+                const alertText = `${header}\n${actionText}`;
                 const alertMsg = await Hooper.sendMessage(targetJid, { text: alertText, mentions: mentionsList });
                 
-                // Then forward the actual media as a reply to the alert
+                // Then forward the actual media as a reply to the alert ONLY if it's audio or sticker
                 try {
-                    // Create a fakeObj to forward cleanly without "Forwarded" tag if possible, or just standard forward
-                    await Hooper.sendMessage(targetJid, { forward: cached }, { quoted: alertMsg });
+                    const quoteOpt = (contentType === "audioMessage" || contentType === "stickerMessage") ? { quoted: alertMsg } : {};
+                    await Hooper.sendMessage(targetJid, { forward: cached }, quoteOpt);
                 } catch (err) {
                     console.log("[ ANTI-DELETE ] Forward failed, attempting fallback download...", err);
                     try {
