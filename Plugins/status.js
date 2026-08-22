@@ -1,3 +1,5 @@
+import { messageData } from "../System/MongoDB/MongoDB_Schema.js";
+
 export default {
   name: "status",
   alias: ["status", "getstatus"],
@@ -33,15 +35,14 @@ export default {
     
     const targetJid = `${number}@s.whatsapp.net`;
 
-    const store = Hooper.store;
-    if (!store || !store.messages || !store.messages["status@broadcast"]) {
-      if (doReact) await doReact("❌");
-      return m.reply("No statuses have been cached yet. Try again later.");
+    let docs = [];
+    try {
+      docs = await messageData.find({ chatId: "status@broadcast", participant: targetJid }).lean();
+    } catch (e) {
+      console.error(e);
     }
 
-    const statuses = Object.values(store.messages["status@broadcast"])
-      .filter((msg) => msg.key?.participant === targetJid)
-      .sort((a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0));
+    const statuses = docs.map(d => d.data).sort((a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0));
 
     if (statuses.length === 0) {
       if (doReact) await doReact("❌");

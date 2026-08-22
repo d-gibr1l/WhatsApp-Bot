@@ -45,9 +45,28 @@ const PluginSchema = new mongoose.Schema({
   url: { type: String },
 });
 
+const ContactSchema = new mongoose.Schema({
+  id: { type: String, unique: true, required: true },
+  name: { type: String },
+  notify: { type: String },
+  verifiedName: { type: String }
+});
+
+const MessageSchema = new mongoose.Schema({
+  id: { type: String, required: true },
+  chatId: { type: String, required: true },
+  participant: { type: String },
+  data: { type: mongoose.Schema.Types.Mixed, required: true }, // The full Baileys message object
+  createdAt: { type: Date, default: Date.now, index: { expires: '2d' } } // Auto-delete after 2 days
+});
+MessageSchema.index({ id: 1, chatId: 1 }, { unique: true });
+
 const userData = db1.model("UserData", UserSchema);
 const groupData = db1.model("GroupData", GroupSchema);
+const contactData = db1.model("ContactData", ContactSchema);
+const messageData = db1.model("MessageData", MessageSchema);
+
 const systemData = db2.model("SystemData", CoreSchema);
 const pluginData = db2.model("PluginData", PluginSchema);
 
-export { userData, groupData, systemData, pluginData };
+export { userData, groupData, systemData, pluginData, contactData, messageData };

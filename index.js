@@ -136,112 +136,86 @@ const MESSAGE_CACHE_MAX_PER_CHAT = Math.max(
   parseInt(process.env.MESSAGE_CACHE_MAX_PER_CHAT || "500", 10) || 500,
 );
 
+import { messageData, contactData } from "./System/MongoDB/MongoDB_Schema.js";
+
 const store = {
-  contacts: {},
-  messages: {},
-  messageTimes: {},
-  messageQueue: {},
-  pruneMessages(now = Date.now()) {
-    for (const [jid, queue] of Object.entries(store.messageQueue)) {
-      const messages = store.messages[jid];
-      const messageTimes = store.messageTimes[jid];
-      if (!messages || !messageTimes) {
-        delete store.messageQueue[jid];
-        delete store.messages[jid];
-        delete store.messageTimes[jid];
-        continue;
-      }
-
-      while (
-        queue.length > 0 &&
-        (queue.length > MESSAGE_CACHE_MAX_PER_CHAT ||
-          now - queue[0].cachedAt > MESSAGE_CACHE_TTL_MS)
-      ) {
-        const oldest = queue.shift();
-        if (messageTimes[oldest.id] === oldest.cachedAt) {
-          delete messages[oldest.id];
-          delete messageTimes[oldest.id];
-        }
-      }
-
-      if (queue.length === 0) {
-        delete store.messageQueue[jid];
-        delete store.messages[jid];
-        delete store.messageTimes[jid];
-      }
-    }
-  },
   bind(ev) {
     let _lidLogTimer = null;
-    ev.on("contacts.upsert", (contacts) => {
+    ev.on("contacts.upsert", async (contacts) => {
+      const ops = [];
       for (const contact of contacts) {
-        store.contacts[contact.id] = contact;
-        const phoneJid = contact.id?.endsWith("@s.whatsapp.net")
-          ? contact.id
-          : null;
-        const lidJid = contact.id?.endsWith("@lid")
-          ? contact.id
-          : contact.lid?.endsWith("@lid")
-            ? contact.lid
-            : null;
+        ops.push({
+          updateOne: {
+            filter: { id: contact.id },
+            update: { $set: contact },
+            upsert: true
+          }
+        });
+        const phoneJid = contact.id?.endsWith("@s.whatsapp.net") ? contact.id : null;
+        const lidJid = contact.id?.endsWith("@lid") ? contact.id : contact.lid?.endsWith("@lid") ? contact.lid : null;
         if (phoneJid && lidJid) {
           global.lidToJidMap.set(lidJid, phoneJid);
           global.lidToJidMap.set(phoneJid, lidJid);
         }
       }
-      // Debounce: print one summary line after the batch settles
+      if (ops.length > 0) {
+        try { await contactData.bulkWrite(ops, { ordered: false }); } catch (e) {}
+      }
+      
       clearTimeout(_lidLogTimer);
       _lidLogTimer = setTimeout(() => {
         if (global.lidToJidMap.size > 0)
-          _origLog(
-            `[ HOOPER ] LID map ready: ${global.lidToJidMap.size / 2} contact(s) mapped`,
-          );
+          _origLog(`[ HOOPER ] LID map ready: ${global.lidToJidMap.size / 2} contact(s) mapped`);
       }, 300);
     });
-    ev.on("contacts.update", (updates) => {
+    
+    ev.on("contacts.update", async (updates) => {
+      const ops = [];
       for (const update of updates) {
-        if (store.contacts[update.id])
-          Object.assign(store.contacts[update.id], update);
-        else store.contacts[update.id] = update;
-        const phoneJid = update.id?.endsWith("@s.whatsapp.net")
-          ? update.id
-          : store.contacts[update.id]?.id?.endsWith("@s.whatsapp.net")
-            ? store.contacts[update.id].id
-            : null;
-        const lidJid = update.lid?.endsWith("@lid")
-          ? update.lid
-          : update.id?.endsWith("@lid")
-            ? update.id
-            : null;
+        ops.push({
+          updateOne: {
+            filter: { id: update.id },
+            update: { $set: update },
+            upsert: true
+          }
+        });
+        const phoneJid = update.id?.endsWith("@s.whatsapp.net") ? update.id : null;
+        const lidJid = update.lid?.endsWith("@lid") ? update.lid : update.id?.endsWith("@lid") ? update.id : null;
         if (phoneJid && lidJid) {
           global.lidToJidMap.set(lidJid, phoneJid);
           global.lidToJidMap.set(phoneJid, lidJid);
         }
       }
+      if (ops.length > 0) {
+        try { await contactData.bulkWrite(ops, { ordered: false }); } catch (e) {}
+      }
     });
-    ev.on("messages.upsert", ({ messages }) => {
+
+    ev.on("messages.upsert", async ({ messages }) => {
+      const ops = [];
       for (const msg of messages) {
         if (!msg.key?.remoteJid || !msg.key?.id) continue;
-        const jid = msg.key.remoteJid;
-        const cachedAt = Date.now();
-        if (!store.messages[jid]) store.messages[jid] = {};
-        if (!store.messageTimes[jid]) store.messageTimes[jid] = {};
-        if (!store.messageQueue[jid]) store.messageQueue[jid] = [];
-        store.messages[jid][msg.key.id] = msg;
-        store.messageTimes[jid][msg.key.id] = cachedAt;
-        store.messageQueue[jid].push({ id: msg.key.id, cachedAt });
-
-        while (store.messageQueue[jid].length > MESSAGE_CACHE_MAX_PER_CHAT) {
-          const oldest = store.messageQueue[jid].shift();
-          if (store.messageTimes[jid][oldest.id] === oldest.cachedAt) {
-            delete store.messages[jid][oldest.id];
-            delete store.messageTimes[jid][oldest.id];
+        ops.push({
+          updateOne: {
+            filter: { id: msg.key.id, chatId: msg.key.remoteJid },
+            update: { $set: { participant: msg.key.participant || null, data: msg } },
+            upsert: true
           }
-        }
+        });
+      }
+      if (ops.length > 0) {
+        try { await messageData.bulkWrite(ops, { ordered: false }); } catch (e) {}
       }
     });
   },
-  loadMessage: async (jid, id) => store.messages[jid]?.[id],
+  loadMessage: async (jid, id) => {
+    try {
+      const doc = await messageData.findOne({ id, chatId: jid });
+      return doc ? doc.data : null;
+    } catch {
+      return null;
+    }
+  }
 };
 
 // Hooper Server configuration
@@ -1011,7 +985,8 @@ const connectHooper = async (trigger) => {
         }
 
         // Look up the original message from store cache
-        const cached = store.messages[chatId]?.[key.id];
+        const doc = await messageData.findOne({ id: key.id, chatId });
+        const cached = doc ? doc.data : null;
         if (!cached) continue;
 
         const {
@@ -1167,40 +1142,22 @@ const connectHooper = async (trigger) => {
     }
   });
 
-  Hooper.getName = (jid, withoutContact = false) => {
+  Hooper.getName = async (jid, withoutContact = false) => {
     let id = Hooper.decodeJid(jid);
     withoutContact = Hooper.withoutContact || withoutContact;
-    let v;
-    if (id.endsWith("@g.us"))
-      return new Promise(async (resolve) => {
-        v = store.contacts[id] || {};
-        if (!(v.name || v.subject)) v = Hooper.groupMetadata(id) || {};
-        resolve(
-          v.name ||
-            v.subject ||
-            PhoneNumber("+" + id.replace("@s.whatsapp.net", "")).getNumber(
-              "international",
-            ),
-        );
-      });
-    else
-      v =
-        id === "0@s.whatsapp.net"
-          ? {
-              id,
-              name: "WhatsApp",
-            }
+    let v = {};
+    if (id.endsWith("@g.us")) {
+      v = (await contactData.findOne({ id })) || {};
+      if (!(v.name || v.subject)) v = (await Hooper.groupMetadata(id).catch(()=>{})) || {};
+      return v.name || v.subject || PhoneNumber("+" + id.replace("@s.whatsapp.net", "")).getNumber("international");
+    } else {
+      v = id === "0@s.whatsapp.net"
+          ? { id, name: "WhatsApp" }
           : id === Hooper.decodeJid(Hooper.user.id)
             ? Hooper.user
-            : store.contacts[id] || {};
-    return (
-      (withoutContact ? "" : v.name) ||
-      v.subject ||
-      v.verifiedName ||
-      PhoneNumber("+" + jid.replace("@s.whatsapp.net", "")).getNumber(
-        "international",
-      )
-    );
+            : (await contactData.findOne({ id })) || {};
+      return (withoutContact ? "" : v.name) || v.subject || v.verifiedName || PhoneNumber("+" + jid.replace("@s.whatsapp.net", "")).getNumber("international");
+    }
   };
 
   Hooper.decodeJid = (jid) => {
@@ -1214,15 +1171,21 @@ const connectHooper = async (trigger) => {
     } else return jid;
   };
 
-  Hooper.ev.on("contacts.update", (update) => {
+  Hooper.ev.on("contacts.update", async (update) => {
     if (!isCurrentSocket(Hooper, generation)) return;
+    const ops = [];
     for (let contact of update) {
       let id = Hooper.decodeJid(contact.id);
-      if (store && store.contacts)
-        store.contacts[id] = {
-          id,
-          name: contact.notify,
-        };
+      ops.push({
+        updateOne: {
+          filter: { id },
+          update: { $set: { id, name: contact.notify } },
+          upsert: true
+        }
+      });
+    }
+    if (ops.length > 0) {
+      try { await contactData.bulkWrite(ops, { ordered: false }); } catch(e) {}
     }
   });
 
