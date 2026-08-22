@@ -316,19 +316,23 @@ export async function downloadToBuffer(url) {
 const IMAGE_SEARCH_TIMEOUT = 15_000;
 const IMAGE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-// Search Pinterest directly using their hidden JSON API
+// 🚀 SPEED OPTIMIZATION: Cache the cookie in RAM so we don't load the homepage every search
+let cachedPinterestCookie = null;
+
 export async function searchImages(query, count = 3) {
   try {
-    // We first need a guest cookie to use the Pinterest API
-    const homeRes = await fetch("https://www.pinterest.com/");
-    const cookies = homeRes.headers.get("set-cookie") || "";
+    // Only fetch a new cookie if we don't have one yet
+    if (!cachedPinterestCookie) {
+        const homeRes = await fetch("https://www.pinterest.com/");
+        cachedPinterestCookie = homeRes.headers.get("set-cookie") || "";
+    }
 
     const endpoint = "https://www.pinterest.com/resource/BaseSearchResource/get/";
     const options = {
       appliedProductFilters: "---",
       auto_correction_disabled: false,
       bookmarks: [""],
-      page_size: count + 5, // fetch a few extra in case some don't have orig URLs
+      page_size: count + 5, // fetch extras in case of dead links
       query: query,
       redux_normalize_feed: true,
       rs: "typed",
@@ -346,10 +350,16 @@ export async function searchImages(query, count = 3) {
       headers: {
         "User-Agent": IMAGE_USER_AGENT,
         "x-pinterest-pws-handler": "www/search/pins/?q=[q]&rs=[rs].js",
-        "Cookie": cookies
+        "Cookie": cachedPinterestCookie
       },
       signal: AbortSignal.timeout(IMAGE_SEARCH_TIMEOUT),
     });
+
+    // If Pinterest rejects the cached cookie, clear it so it refreshes next time
+    if (res.status === 401 || res.status === 403) {
+        cachedPinterestCookie = null;
+        throw new Error("Pinterest session refreshed. Please try the command again.");
+    }
 
     if (!res.ok) throw new Error(`Pinterest search failed: ${res.status}`);
 

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { searchImages } from "../src/downloader.js";
 let mergedCommands = [
   "gig",
   "gimage",
@@ -124,48 +125,38 @@ export default {
         }
         break;
 
-            case "pin":
+      case "pin":
       case "pinterest":
         if (!text) {
           await doReact("❔");
           return m.reply(
-            `Please provide an Pinterest image Search Term !\n\nExample: *${prefix}pin cheems*`,
+            `*Usage:* ${prefix}pin <search query>\n*Example:* ${prefix}pin cyberpunk cars`,
           );
         }
-        await doReact("📍");
+        await doReact("🔍");
         try {
-          const { data: pinHtml } = await axios.get(
-            `https://www.bing.com/images/search?q=site:pinterest.com+${encodeURIComponent(text)}&first=1&count=20`,
-            {
-              headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-              },
-              timeout: 10000,
-            }
-          );
-          const pinUrls = [...pinHtml.matchAll(/&quot;murl&quot;:&quot;(https?:\/\/[^&]+)&quot;/g)]
-            .map((m) => m[1]);
-          if (!pinUrls.length) {
-            await doReact("❌");
-            return m.reply(`No Pinterest images found for: *${text}*`);
+          const images = await searchImages(text, 3);
+          
+          if (images.length === 0) {
+              await doReact("❌");
+              return m.reply("❌ No images found on Pinterest for that query.");
           }
-          const pool = pinUrls.slice(0, 10);
-          const imgnyee = pool[Math.floor(Math.random() * pool.length)];
-
-          await Hooper.sendMessage(
-            m.from,
-            {
-              image: { url: imgnyee },
-              caption: `\n_📍 Pinterest Search:_ *${text}*\n\n_🧩 Powered by_ *${botName}*\n`,
-            },
-            { quoted: m },
-          );
+    
+          for (let i = 0; i < images.length; i++) {
+            await Hooper.sendMessage(
+                m.from, 
+                { 
+                    image: { url: images[i] }, 
+                    caption: `📌 Pinterest Result ${i + 1}/${images.length}\n_Powered by_ *${botName}*` 
+                }, 
+                { quoted: m }
+            );
+          }
+          await doReact("✅");
         } catch (e) {
           console.error("Pin Error:", e.message);
           await doReact("❌");
-          return m.reply(`An error occurred: ${e.message}`);
+          return m.reply(`❌ Search Error: ${e.message}`);
         }
         break;
       case "tweet": {
