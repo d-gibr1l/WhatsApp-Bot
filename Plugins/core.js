@@ -296,7 +296,10 @@ export default {
         const uptimeStr = `${upH}h ${upM}m ${upS}s`;
 
         const pluginsDir = path.join(process.cwd(), "Plugins");
-        let allCommands = await readUniqueCommands(pluginsDir);
+        if (!global.cachedCommands) {
+          global.cachedCommands = await readUniqueCommands(pluginsDir);
+        }
+        let allCommands = [...global.cachedCommands];
         
         // Hide 'groups', 'status', and 'stealth-revive' plugins if not chatting directly with the bot as the creator
         if (m.isGroup || !isCreator) {

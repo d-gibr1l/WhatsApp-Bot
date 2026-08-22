@@ -13,6 +13,7 @@ let mergedCommands = [
   "toimg",
   "toimage",
   "togif",
+  "gif",
   "tomp4",
   "tomp3",
   "toaudio",
@@ -28,6 +29,7 @@ export default {
   uniquecommands: [
     "toimg",
     "togif",
+    "gif",
     "tomp4",
     "tomp3",
     "toaudio",
@@ -106,6 +108,7 @@ export default {
         break;
 
       case "togif":
+      case "gif":
         if (!m.quoted && !/webp/.test(mime)) {
           await doReact("❔");
           return m.reply(
@@ -214,7 +217,19 @@ export default {
           let media5;
           try {
             media5 = await Hooper.downloadAndSaveMediaMessage(quoted);
-            let url = await CatboxUpload(media5);
+            let url;
+            try {
+              url = await CatboxUpload(media5);
+            } catch (catboxErr) {
+              console.log("Catbox failed, trying fallback...", catboxErr.message);
+              // Fallback to GraphOrg or Uguu (we import GraphOrg in Uploader, wait, let's use UploadFileUgu? No, Ugu is imported?)
+              // Uploader.js exports GraphOrg, CatboxUpload, UploadFileUgu, webp2mp4File
+            }
+            if (!url) {
+                const { UploadFileUgu } = await import("../System/Uploader.js");
+                url = await UploadFileUgu(media5);
+            }
+
             let mediaType = /image/.test(mime)
               ? "Image"
               : /video/.test(mime)

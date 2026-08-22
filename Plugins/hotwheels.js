@@ -6,7 +6,7 @@ const hotWheelsCollection = [
     model: "HW Dream Garage",
     series: "2024 Mainline",
     year: "2024",
-    imgUrl: "https://static.wikia.nocookie.net/hotwheels/images/0/07/Bone_Shaker_2024.jpg/revision/latest?cb=20240101000000"
+    imgUrl: "https://i.imgur.com/L1d4TOn.jpeg"
   },
   {
     name: "Twin Mill",

@@ -17,29 +17,17 @@ import {
 } from "../System/MongoDB/MongoDb_Core.js";
 
 const mergedCommands = [
-  "admins",
-  "admin",
-  "setgcname",
-  "delete",
   "antilink",
   "welcome",
-  "del",
   "demote",
   "gclink",
   "grouplink",
   "group",
   "gc",
-  "groupinfo",
-  "gcinfo",
-  "hidetag",
   "htag",
-  "leave",
   "promote",
   "remove",
   "revoke",
-  "setgcdesc",
-  "setppgc",
-  "tagall",
   "chatbotgc",
   "antidel",
   "antidelete",
@@ -49,23 +37,14 @@ export default {
   name: "groupanagement",
   alias: [...mergedCommands],
   uniquecommands: [
-    "admins",
-    "setgcname",
-    "delete",
     "demote",
     "gclink",
     "antilink",
     "welcome",
     "group",
-    "gcinfo",
-    "tagall",
-    "hidetag",
-    "leave",
     "promote",
     "remove",
     "revoke",
-    "setgcdesc",
-    "setppgc",
     "chatbotgc",
     "antidel",
   ],
@@ -105,115 +84,6 @@ export default {
       return false;
     };
     switch (inputCMD) {
-      case "admins":
-      case "admin": {
-        let message;
-        if (!isMedia) {
-          if (m.quoted) {
-            message = m.quoted.msg || "『 *Attention Admins* 』";
-          } else if (args.length) {
-            message = `『 *Attention Admins* 』\n\n*🎀 Message:* ${args.join(" ")}`;
-          } else {
-            message = "『 *Attention Admins* 』";
-          }
-        } else {
-          // Capture caption from the quoted media or from args
-          const caption = m.quoted?.msg?.caption || m.msg?.caption || (args.length ? args.join(" ") : "");
-          message = caption
-            ? `『 *Attention Admins* 』\n\n*🎀 Message:* ${caption}`
-            : "『 *Attention Admins* 』\n\n*🎀 Message:* Check this Out !";
-        }
-        await doReact("🏅");
-        Hooper.sendMessage(
-          m.from,
-          { text: message, mentions: groupAdmin },
-          { quoted: m },
-        );
-        break;
-      }
-
-      case "setgcname": {
-        if (!isAdmin) {
-          await doReact("❌");
-          return m.reply(`*You* must be *Admin* in order to use this Command!`);
-        }
-        if (!isBotAdmin) {
-          await doReact("❌");
-          return m.reply(`*Bot* must be *Admin* in order to use this Command!`);
-        }
-        if (!text) {
-          await doReact("❔");
-          return m.reply(
-            `Please provide a new group name !\n\nExample: *${prefix}setgcname Bot Testing*`,
-          );
-        }
-        await doReact("🎐");
-        const oldGCName = metadata.subject;
-        let ppgc;
-        try {
-          ppgc = await Hooper.profilePictureUrl(m.from, "image");
-        } catch {
-          ppgc = botImage1;
-        }
-        try {
-          await Hooper.groupUpdateSubject(m.from, text);
-          await Hooper.sendMessage(
-            m.from,
-            {
-              image: { url: ppgc },
-              caption: `*『 Group Name Updated 』*\n\n_🔶 Old Name:_\n*${oldGCName}*\n\n_🔷 New Name:_\n*${text}*\n`,
-            },
-            { quoted: m },
-          );
-        } catch (err) {
-          await m.reply(`Failed to update group name: ${err.message}`);
-        }
-        break;
-      }
-
-      case "delete":
-      case "del": {
-        if (!isAdmin) {
-          await doReact("❌");
-          return m.reply(`*You* must be *Admin* in order to use this Command!`);
-        }
-        if (!m.quoted) {
-          await doReact("❔");
-          return m.reply(`Please *Reply* to a message to delete it !`);
-        }
-        if (!isBotAdmin) {
-          if (!m.quoted.sender.includes(botNumber)) {
-            await doReact("❌");
-            return m.reply(
-              `Sorry, Without *Admin* permission, I can only delete my own messages !`,
-            );
-          }
-          const key = { remoteJid: m.from, fromMe: true, id: m.quoted.id };
-          if (!global.botDeletedMsgIds) global.botDeletedMsgIds = new Set();
-          global.botDeletedMsgIds.add(m.quoted.id);
-          setTimeout(() => global.botDeletedMsgIds?.delete(m.quoted.id), 300000);
-          await doReact("📛");
-          await Hooper.sendMessage(m.from, { delete: key });
-        } else {
-          if (!isAdmin) {
-            await doReact("❌");
-            return m.reply(
-              `Sorry, only *Admins* can delete other's messages !`,
-            );
-          }
-          const key = {
-            remoteJid: m.from,
-            fromMe: false,
-            id: m.quoted.id,
-            participant: m.quoted.sender,
-          };
-          if (!global.botDeletedMsgIds) global.botDeletedMsgIds = new Set();
-          global.botDeletedMsgIds.add(m.quoted.id);
-          setTimeout(() => global.botDeletedMsgIds?.delete(m.quoted.id), 300000);
-          await Hooper.sendMessage(m.from, { delete: key });
-        }
-        break;
-      }
 
       case "demote": {
         if (!isAdmin) {
@@ -360,47 +230,8 @@ export default {
         break;
       }
 
-      case "groupinfo":
-      case "gcinfo": {
-        if (!m.isGroup) {
-          await doReact("❌");
-          return m.reply(`This command can only be used in groups!`);
-        }
-        await doReact("🎊");
-        let ppgc;
-        try {
-          ppgc = await Hooper.profilePictureUrl(m.from, "image");
-        } catch {
-          ppgc = botImage1;
-        }
-        const groupParticipants = m.isGroup ? await metadata.participants : "";
-        const groupAdmins = m.isGroup
-          ? groupParticipants.filter((v) => v.admin !== null).map((v) => v.id)
-          : "";
-        const desc = metadata.desc ? metadata.desc : "No Description";
-        const txt = `                 *『 Group Info 』*\n\n_🎀 Group Name:_ *${
-          metadata.subject
-        }*\n\n_🧩 Group Description:_\n${desc}\n\n_👑 Group Owner:_ @${
-          metadata.owner.split("@")[0]
-        }\n_💫 Group Created on:_ *${moment(`${metadata.creation}` * 1000)
-          .tz("Asia/Kolkata")
-          .format("DD/MM/YYYY")}*\n_📛 Total Admins:_ *${
-          groupAdmins.length
-        }*\n_🎈 Total Participants:_ *${metadata.participants.length}*\n`;
 
-        await Hooper.sendMessage(
-          m.from,
-          {
-            image: { url: ppgc },
-            caption: txt,
-            mentions: [metadata.owner],
-          },
-          { quoted: m },
-        );
-        break;
-      }
-
-      case "hidetag":
+      case:
       case "htag": {
         if (!isAdmin) {
           await doReact("❌");
@@ -430,34 +261,7 @@ export default {
         break;
       }
 
-      case "leave": {
-        // Only bot owners and mods can force the bot to leave
-        const isOwnerForLeave = (global.owner || []).some(
-          (o) => o.replace(/[^0-9]/g, "") === m.sender.replace(/[^0-9]/g, ""),
-        );
-        const isModForLeave = await checkMod(m.sender);
-        if (!isOwnerForLeave && !isModForLeave) {
-          await doReact("❌");
-          return m.reply(`Only *Bot Owners* and *Mods* can use this command !`);
-        }
-        await doReact("👋");
-        try {
-          await Hooper.sendMessage(m.from, {
-            image: { url: "https://wallpapercave.com/wp/wp9667218.png" },
-            caption: `I'm Leaving this group on request... \n\nTake care everyone :)`,
-            mentions: participants.map((a) => a.id),
-            quoted: m,
-          });
-          await Hooper.groupLeave(m.from);
-        } catch (e) {
-          await Hooper.sendMessage(
-            m.from,
-            { text: `An error occurred !` },
-            { quoted: m },
-          );
-        }
-        break;
-      }
+
 
       case "promote": {
         if (!isAdmin) {
@@ -581,94 +385,7 @@ export default {
         break;
       }
 
-      case "setppgc": {
-        if (!isAdmin) {
-          await doReact("❌");
-          return m.reply(`*You* must be *Admin* in order to use this Command!`);
-        }
-        if (!isBotAdmin) {
-          await doReact("❌");
-          return m.reply(`*Bot* must be *Admin* in order to use this Command!`);
-        }
-        if (!/image/.test(mime)) {
-          await doReact("❌");
-          return Hooper.sendMessage(
-            m.from,
-            {
-              text: `Send/reply Image With Caption ${prefix + "setgcpp"} to change the Profile Pic of this group.`,
-            },
-            { quoted: m },
-          );
-        }
-        await doReact("🎴");
-        const quotedimage = await Hooper.downloadAndSaveMediaMessage(quoted);
-        try {
-          await Hooper.updateProfilePicture(m.from, { url: quotedimage });
-        } catch (error) {
-          await m.reply(
-            `*Error:* Failed to update profile picture. Ensure the bot has proper admin permissions.`,
-          );
-        } finally {
-          fs.unlinkSync(quotedimage);
-        }
-        let ppgc;
-        try {
-          ppgc = await Hooper.profilePictureUrl(m.from, "image");
-        } catch {
-          ppgc = botImage1;
-        }
-        Hooper.sendMessage(
-          m.from,
-          {
-            image: { url: ppgc },
-            caption: `\nGroup Profile Picture has been updated Successfully by @${messageSender.split("@")[0]} !`,
-            mentions: [messageSender],
-          },
-          { quoted: m },
-        );
-        break;
-      }
 
-      case "setgcdesc": {
-        if (!isAdmin) {
-          await doReact("❌");
-          return m.reply(`*You* must be *Admin* in order to use this Command!`);
-        }
-        if (!isBotAdmin) {
-          await doReact("❌");
-          return m.reply(`*Bot* must be *Admin* in order to use this Command!`);
-        }
-        if (!text && !m.quoted) {
-          await doReact("❔");
-          return Hooper.sendMessage(
-            m.from,
-            { text: `Please provide a new group description !` },
-            { quoted: m },
-          );
-        }
-        await doReact("📑");
-        let ppgc;
-        try {
-          ppgc = await Hooper.profilePictureUrl(m.from, "image");
-        } catch {
-          ppgc = botImage1;
-        }
-        const newGCdesc = m.quoted ? m.quoted.msg : text;
-        try {
-          await Hooper.groupUpdateDescription(m.from, newGCdesc);
-          await Hooper.sendMessage(
-            m.from,
-            {
-              image: { url: ppgc },
-              caption: `*『 Group Description Changed 』*\n\n_🧩 New Description:_\n*${newGCdesc}*`,
-            },
-            { quoted: m },
-          );
-        } catch (err) {
-          await m.reply(`Failed to update description: ${err.message}`);
-        }
-        break;
-      }
 
       case "revoke": {
         if (!isAdmin) {
@@ -699,45 +416,7 @@ export default {
         break;
       }
 
-      case "tagall": {
-        if (!isAdmin) {
-          await doReact("❌");
-          return m.reply(`*You* must be *Admin* in order to use this Command!`);
-        }
-        if (!isBotAdmin) {
-          await doReact("❌");
-          return m.reply(`*Bot* must be *Admin* in order to use this Command!`);
-        }
-        let message2;
-        if (!isMedia) {
-          message2 = m.quoted
-            ? (m.quoted.msg || "No message")
-            : args[0]
-              ? args.join(" ")
-              : "No message";
-        } else {
-          const caption = m.quoted?.msg?.caption || m.msg?.caption || (args.length ? args.join(" ") : "");
-          message2 = caption || "Check this Out !";
-        }
 
-        let mess = `            『 *Attention Everybody* 』
-
-*⚜️ Tagged by:* @${m.sender.split("@")[0]}
-
-*🧩 Message:* ${message2};
-│\n`;
-        for (const mem of participants) {
-          mess += `┟ @${mem.id.split("@")[0]}\n`;
-        }
-        mess += `╰────────────⊰\n\n                    *Thank You*\n`;
-        await doReact("〽️");
-        Hooper.sendMessage(
-          m.from,
-          { text: mess, mentions: participants.map((a) => a.id) },
-          { quoted: m },
-        );
-        break;
-      }
 
       case "chatbotgc": {
         if (!isAdmin) {

@@ -8,12 +8,8 @@ import { Sticker, StickerTypes } from "wa-sticker-formatter";
 let mergedCommands = [
   "google",
   "search",
-  "lyrics",
-  "yts",
   "youtubesearch",
   "ringtone",
-  "stickersearch",
-  "getsticker",
   "weather",
   "github",
   "gh",
@@ -28,10 +24,7 @@ export default {
   alias: [...mergedCommands],
   uniquecommands: [
     "google",
-    "lyrics",
-    "yts",
     "ringtone",
-    "stickersearch",
     "weather",
     "github",
     "wikipedia",
@@ -137,105 +130,9 @@ export default {
         }
         break;
 
-      case "lyrics":
-        if (!text) {
-          await doReact("❔");
-          return m.reply(
-            `Please provide an lyrics Search Term !\n\nExample: *${prefix}lyrics Heat waves*`,
-          );
-        }
-        await doReact("📃");
-        await Hooper.sendPresenceUpdate('composing', m.from);
-        try {
-          const { Client } = await import("genius-lyrics");
-          const ClientGL = new Client();
-          const searches = await ClientGL.songs.search(text);
-          
-          if (searches.length === 0) {
-            await doReact("❌");
-            await Hooper.sendPresenceUpdate("paused", m.from);
-            return m.reply(`Unable to find lyrics for the song: *${text}*`);
-          }
+      
 
-          const firstSong = searches[0];
-          const lyrics = await firstSong.lyrics();
-          
-          if (lyrics) {
-            let resText2 = `  *『  ⚡️ Lyrics Search Engine ⚡️  』*\n\n\n_Search Term:_ *${text}*\n\n\n*📍 Lyrics:* \n\n${lyrics}\n\n\n_*Powered by:*_ *Genius*\n`;
-            await Hooper.sendMessage(
-              m.from,
-              {
-                image: {
-                  url: firstSong.image || firstSong.thumbnail,
-                },
-                caption: resText2,
-              },
-              { quoted: m },
-            );
-            await Hooper.sendPresenceUpdate("paused", m.from);
-          } else {
-            await doReact("❌");
-            await Hooper.sendPresenceUpdate("paused", m.from);
-            return m.reply(`Unable to find lyrics for the song: *${text}*`);
-          }
-        } catch (err) {
-          console.error("Lyrics Error:", err.message);
-          await doReact("❌");
-          await Hooper.sendPresenceUpdate("paused", m.from);
-          return m.reply(
-            `An error occurred while fetching lyrics for: *${text}*`,
-          );
-        }
-
-        break;
-
-      case "yts":
-      case "youtubesearch":
-        if (!text) {
-          await doReact("❔");
-          return m.reply(
-            `Please provide an Youtube Search Term !\n\nExample: *${prefix}yts Despacito*`,
-          );
-        }
-        await doReact("📜");
-        let search = await yts(text);
-        let thumbnail2 = search.all[0].thumbnail;
-        let num = 1;
-
-        let txt2 = `*🏮 YouTube Search Engine 🏮*\n\n_🧩 Search Term:_ *${text}*\n\n*📌 Total Results:* *${search.all.length}*\n`;
-        for (let i of search.all) {
-          txt2 += `\n_Result:_ *${num++}*\n_🎀 Title:_ *${
-            i.title
-          }*\n_🔶 Duration:_ *${i.timestamp}*\n_🔷 Link:_ ${i.url}\n\n`;
-        }
-
-        /*let nums =1;
-        let sections = [];
-    for (let i of search.all) {
-      let list = {
-        title: `Result: ${nums++}`,
-        rows: [
-          {
-            title: `${i.title}`,
-            rowId: `${prefix}play ${i.title}`,
-            description: `Duration: ${i.timestamp}`,
-          },
-        ],
-      };
-      sections.push(list);
-    }
-    var txt2 = `*🏮 YouTube Search Engine 🏮*\n\n_🧩 Search Term:_ *${text}*\n\n*📌 Total Results:* *${search.all.length}*\n`;*/
-
-        let buttonMessage = {
-          image: { url: thumbnail2 },
-          caption: txt2,
-          //footer: `*${botName}*`,
-          //buttonText: "Choose Song",
-          //sections,
-        };
-
-        Hooper.sendMessage(m.from, buttonMessage, { quoted: m });
-        break;
+      
 
       case "ringtone":
         if (!text) {
@@ -285,46 +182,8 @@ export default {
         );
         break;
 
-      case "stickersearch":
-      case "getsticker":
-        if (!text) {
-          await doReact("❔");
-          return m.reply(
-            `Please provide a sticker Search Term !\n\n*${prefix}stickersearch Cheems bonk*`,
-          );
-        }
-        await doReact("🧧");
-        try {
-          let gif = await axios.get(
-            `https://api.tenor.com/v1/search?q=${text}&key=LIVDSRZULELA&limit=8&media_filter=minimal`,
-          );
-          let resultst = Math.floor(Math.random() * 8);
-          let gifUrl = gif.data.results[resultst].media[0].gif.url;
-
-          let response = await axios.get(gifUrl, {
-            responseType: "arraybuffer",
-          });
-          let buffer = Buffer.from(response.data, "utf-8");
-
-          let stickerMess = new Sticker(buffer, {
-            pack: packname,
-            author: pushName,
-            type: StickerTypes.FULL,
-            categories: ["🤩", "🎉"],
-            id: "12345",
-            quality: 60,
-            background: "transparent",
-          });
-          let stickerBuffer2 = await stickerMess.toBuffer();
-          Hooper.sendMessage(
-            m.from,
-            { sticker: stickerBuffer2 },
-            { quoted: m },
-          );
-        } catch (e) {
-          console.error("Stickersearch Error:", e.message);
-          m.reply("⚠️ Sticker search failed. The API key might be expired or invalid.");
-        }break;
+      case:
+      
 
       case "gh":
       case "github":
