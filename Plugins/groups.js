@@ -160,7 +160,7 @@ export default {
         helpText += `🌎 *Public* - The bot replies to everyone in all groups and private chats.\n`;
         helpText += `🔒 *Private* - The bot ignores all groups unless explicitly allowed via \`.allow\`. It still replies to private DMs.\n`;
         helpText += `👤 *Self* - The bot completely ignores everyone except you (the owner) in all chats, unless explicitly allowed.\n\n`;
-        helpText += `*Usage:* \`${prefix}mode <public|private|self>\``;
+        helpText += `*Usage:* \`${prefix}mode < public, private, self >\``;
         return m.reply(helpText);
       }
       
