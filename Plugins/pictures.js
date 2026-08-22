@@ -124,34 +124,18 @@ export default {
         }
         break;
 
-      case "pin":
-      case "pinterest": {
+            case "pin":
+      case "pinterest":
         if (!text) {
           await doReact("❔");
           return m.reply(
-            `Please provide a search term.\n\n*Usage:*\n• \`${prefix}pin cheems\` — sends 1 image\n• \`${prefix}pin cheems 5\` — sends 5 images (max 10)`
+            `Please provide an Pinterest image Search Term !\n\nExample: *${prefix}pin cheems*`,
           );
         }
         await doReact("📍");
-        
-        let queryParts = [...args];
-        let count = 1;
-        const lastArg = queryParts[queryParts.length - 1];
-        if (/^\d+$/.test(lastArg)) {
-          count = Math.min(Math.max(parseInt(lastArg, 10), 1), 10);
-          queryParts.pop();
-        }
-        const query = queryParts.join(" ").trim();
-        
-        if (!query) {
-          await doReact("❔");
-          return m.reply(`Please provide a search term.\n\nExample: *${prefix}pin cheems 5*`);
-        }
-        
         try {
-          const bingQuery = `site:pinterest.com ${query}`;
           const { data: pinHtml } = await axios.get(
-            `https://www.bing.com/images/search?q=${encodeURIComponent(bingQuery)}&first=1&count=25`,
+            `https://www.bing.com/images/search?q=site:pinterest.com+${encodeURIComponent(text)}&first=1&count=20`,
             {
               headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -164,30 +148,27 @@ export default {
           const pinUrls = [...pinHtml.matchAll(/&quot;murl&quot;:&quot;(https?:\/\/[^&]+)&quot;/g)]
             .map((m) => m[1])
             .filter((u) => u.includes("pinimg.com"));
-            
           if (!pinUrls.length) {
             await doReact("❌");
-            return m.reply(`No Pinterest images found for: *${query}*`);
+            return m.reply(`No Pinterest images found for: *${text}*`);
           }
-          
-          // Randomize the pool slightly to get different results for same queries
-          const shuffled = pinUrls.sort(() => 0.5 - Math.random());
-          const selected = shuffled.slice(0, count);
-          
-          for (let i = 0; i < selected.length; i++) {
-            const imgUrl = selected[i];
-            const txt = i === 0 ? `\n_📍 Pinterest Search:_ *${query}*\n\n_🧩 Powered by_ *${botName}*\n` : "";
-            await Hooper.sendMessage(m.from, { image: { url: imgUrl }, caption: txt }, { quoted: m });
-            if (i < selected.length - 1) {
-              await new Promise((resolve) => setTimeout(resolve, 600)); // Delay to prevent spam
-            }
-          }
+          const pool = pinUrls.slice(0, 10);
+          const imgnyee = pool[Math.floor(Math.random() * pool.length)];
+
+          await Hooper.sendMessage(
+            m.from,
+            {
+              image: { url: imgnyee },
+              caption: `\n_📍 Pinterest Search:_ *${text}*\n\n_🧩 Powered by_ *${botName}*\n`,
+            },
+            { quoted: m },
+          );
         } catch (e) {
+          console.error("Pin Error:", e.message);
           await doReact("❌");
-          m.reply(`Pinterest search failed: ${e.message}`);
+          return m.reply(`An error occurred: ${e.message}`);
         }
         break;
-      }
       case "tweet": {
         let tweetText = text;
         

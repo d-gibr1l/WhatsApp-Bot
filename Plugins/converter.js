@@ -315,19 +315,24 @@ export default {
         if (!text) {
           await doReact("❔");
           return m.reply(
-            `Please provide an URL to convert into QR code!\n\nExample: *${prefix}toqr https://github.com/FantoX001*`,
+            `Please provide text or a URL to convert into a QR code!\n\nExample:\n*${prefix}toqr https://github.com*\n*${prefix}toqr Hello World*`,
           );
         }
 
         await doReact("✅");
-        const res = await getBuffer(
-          `https://www.qrtag.net/api/qr_8.png?url=${text}`,
-        );
-        await Hooper.sendMessage(
-          m.from,
-          { image: res, caption: `\n*Source:* ${text}` },
-          { quoted: m },
-        );
+        try {
+          const res = await getBuffer(
+            `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(text)}`
+          );
+          await Hooper.sendMessage(
+            m.from,
+            { image: res, caption: `\n*Source:* ${text}` },
+            { quoted: m },
+          );
+        } catch (e) {
+          await doReact("❌");
+          return m.reply("❌ Failed to generate QR code.");
+        }
         break;
 
       default:

@@ -35,6 +35,9 @@ const CoreSchema = new mongoose.Schema({
   seletedCharacter: { type: String, default: "0" },
   PMchatBot: { type: Boolean, default: false },
   botMode: { type: String, default: "public" },
+  aiActive: { type: Boolean, default: true },
+  groqKey: { type: String, default: "" },
+  aiPrompt: { type: String, default: "You are a helpful WhatsApp bot assistant. Be concise, friendly, and helpful. Keep responses brief and suitable for WhatsApp." }
 });
 
 const PluginSchema = new mongoose.Schema({
