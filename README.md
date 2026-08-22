@@ -10,8 +10,6 @@
   <i>An Opensource WhatsApp bot by <a href="https://github.com/d-gibr1l">d-gibr1l</a> & Team Hooper — built with Baileys Multi-Device for maximum features, stability and compatibility.</i>
 </p>
 
-
-
 ---
 
 ## 🎀 Key Features at a Glance
@@ -23,7 +21,7 @@
 | 💬 **Chatbot**              | Group chatbot (replies to @mentions) + DM chatbot (toggleable)                                                                      |
 | 📥 **Universal Downloader** | TikTok · Instagram · Pinterest · Facebook · Twitter/X · Threads · Videy · Mega · SoundCloud · Spotify · YouTube · Sfile · MediaFire |
 | 🎬 **Movie Search**         | Integrated TMDB plugin to search and find movies & TV shows directly in chat.                                                       |
-| 🎭 **26 Anime Reactions**   | bite, bonk, hug, kiss, slap, pat, cry... all as animated GIFs                                                                       |
+
 | 🎨 **20 Bot Characters**    | Switch personality: Hooper, Power, Makima, Zero Two, Miku, Rem & 14 more                                                            |
 | 🛡️ **Full Moderation**      | Silent ban (user & group), role hierarchy, bot mode (Self/Private/Public), and Advanced Anti-Delete System.                         |
 | 👥 **Group Management**     | Promote, demote, tagall, antilink, welcome/goodbye, info, link & more                                                               |
@@ -43,7 +41,15 @@
 > Multiple API keys can be comma-separated — the bot picks one randomly per request.
 
 | Variable              | Description                                                                                   | Required    |
-| `MONGODB`             | Your MongoDB connection URL                                                                   | ✅          |
+| `MONGODB`             | Your MongoDB connection URL                                                                   | 🟢          |
+| `GROQ_API`            | Groq API key for Llama 3.1 AI integration                                                     | Optional    |
+| `PACKNAME`            | Sticker pack name (default: `Hooper Bot`)                                                     | Optional    |
+| `AUTHOR`              | Sticker author name (default: `by: Team Hooper`)                                              | Optional    |
+| `PORT`                | Server port (default: `10000`)                                                                | Optional    |
+| `GC_INTERVAL_MINUTES` | MongoDB garbage collection interval in minutes (default: `5`)                                 | Optional    |
+| `WATCHDOG_INTERVAL_SECONDS` | WhatsApp server health-probe interval in seconds (default: `60`)                        | Optional    |
+| `MESSAGE_CACHE_TTL_MINUTES` | Anti-delete message retention in minutes (default: `360`, minimum: `30`)                | Optional    |
+| `MESSAGE_CACHE_MAX_PER_CHAT` | Maximum anti-delete messages retained per chat (default: `500`, minimum: `50`)         | Optional    |
 
 ---
 
@@ -101,13 +107,13 @@ pm2 start ecosystem.config.cjs
 
 **Hooper MD** comes packed with a robust set of features to power your groups and DMs. Instead of a massive list of commands, here are the top capabilities you get out-of-the-box:
 
-- 🤖 **Advanced AI Integrations**: Seamlessly chat with Gemini, ChatGPT, and Claude. Built-in multi-key pools ensure you don't hit rate limits, and the AI can remember context for conversational interactions.
+- 🤖 **Advanced AI Integrations**: Seamlessly chat with the blazing fast Groq AI (Llama 3.1). Built-in prompt management and conversational memory keep your AI interactions contextual and lightning fast.
 - 🛠️ **Group Moderation & Management**: Take full control of your groups. Features include silent bans (users are ignored by the bot), anti-link protection, customizable welcome/goodbye messages, tagging all members, and managing admin roles fluidly.
 - 📥 **Universal Downloader**: Simply send a link from TikTok, Instagram, YouTube, X (Twitter), Pinterest, Spotify, Facebook, or SoundCloud, and the bot will instantly recognize and download the media or audio for you.
 - 🖼️ **Media & Sticker Toolkit**: Create static, animated, or meme stickers directly from images and videos. Convert media between formats (MP4 to MP3, Image to PDF, Sticker to Video) with ease. Includes built-in Google Emoji Kitchen mixing!
 - 🧩 **Live Plugin Architecture**: Expand the bot's functionality without ever shutting it down. Use `-install` to add new commands directly from GitHub gists or URLs on the fly.
 - 🔍 **Search & Utilities**: Built-in Google searches, YouTube scraping, lyrics fetcher, HD wallpapers, Pinterest images, GitHub profiling, and real-time weather information.
-- 🎭 **Anime Reactions & Characters**: Pick from 20 different anime bot personalities (like Power, Makima, Zero Two) and express yourself with dozens of high-quality animated reaction GIFs (bite, hug, slap, etc.).
+- 🌸 **Anime Characters**: Pick from 20 different anime bot personalities (like Power, Makima, Zero Two) to act as your assistant.
 
 > **Tip:** You can view the full list of available commands anytime by typing `-help` in your chat!
 
@@ -159,9 +165,6 @@ Switch the bot's personality and profile picture with `-setchar <ID>`. Use `-cha
 | [MongoDB](https://www.mongodb.com/)                                        | Database for all persistent settings |
 | [ffmpeg-static](https://www.npmjs.com/package/ffmpeg-static)               | Bundled FFmpeg — no manual install   |
 | [wa-sticker-formatter](https://www.npmjs.com/package/wa-sticker-formatter) | Sticker creation and conversion      |
-| [@google/genai](https://www.npmjs.com/package/@google/genai)               | Official Google Gemini AI SDK        |
-| [@anthropic-ai/sdk](https://www.npmjs.com/package/@anthropic-ai/sdk)       | Official Anthropic Claude AI SDK     |
-| [openai](https://www.npmjs.com/package/openai)                             | Official OpenAI SDK                  |
 
 ---
 
@@ -169,7 +172,7 @@ Switch the bot's personality and profile picture with `-setchar <ID>`. Use `-cha
 
 - **100% Open Source** — MIT license, fork and modify freely.
 - **300+ Commands** across all plugins, plus a live plugin store for extending without restart.
-- **Triple AI** (ChatGPT + Claude + Gemini) built-in with multi-key pools for rate-limit resilience.
+- **Lightning Fast Groq AI** (Llama 3.1) built-in with conversation memory.
 - **Universal 13-Platform Downloader** — one command, any link.
 - **Silent Banning** — banned users and groups receive zero response; bot acts as if it doesn't exist.
 - **No local session storage** — session is stored in MongoDB for privacy and security.
