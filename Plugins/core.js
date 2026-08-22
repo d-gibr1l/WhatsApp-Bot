@@ -303,9 +303,14 @@ export default {
           allCommands = allCommands.filter(arr => arr[0] !== "groups.js" && arr[0] !== "status.js" && arr[0] !== "stealth-revive.js" && arr[0] !== "revive.js");
         }
         
-        // Hide moderator commands if it's a group chat OR if the user is not a mod (prevents leaking admin commands in public)
+        // Hide moderator and admin-only commands if user is not authorized
         const { checkMod } = await import("../System/MongoDB/MongoDb_Core.js");
         const isMod = isCreator || await checkMod(m.sender);
+        const canSeeAdminCmds = isMod || (m.isGroup && isAdmin);
+
+        if (!canSeeAdminCmds) {
+           allCommands = allCommands.filter(arr => arr[0] !== "wordfilter.js");
+        }
         if (m.isGroup || !isMod) {
            allCommands = allCommands.filter(arr => arr[0] !== "moderator.js" && arr[0] !== "systemcommands.js" && arr[0] !== "hidden.js");
         }

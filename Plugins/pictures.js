@@ -187,6 +187,7 @@ export default {
           m.reply(`Pinterest search failed: ${e.message}`);
         }
         break;
+      }
       case "tweet": {
         let tweetText = text;
         
@@ -213,11 +214,89 @@ export default {
           // Fallback
         }
 
-        const apiUrl = `https://some-random-api.com/canvas/misc/tweet?avatar=${encodeURIComponent(avatarUrl)}&comment=${encodeURIComponent(tweetText)}&displayname=${encodeURIComponent(pushName2)}&username=${encodeURIComponent(username)}`;
-
         try {
-          const response = await axios.get(apiUrl, { responseType: "arraybuffer" });
-          const buffer = Buffer.from(response.data, "binary");
+          const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+
+          const width = 800;
+          const height = 400;
+          const canvas = createCanvas(width, height);
+          const ctx = canvas.getContext("2d");
+
+          // Background - Dark Mode Twitter (#15202B)
+          ctx.fillStyle = "#15202B";
+          ctx.fillRect(0, 0, width, height);
+
+          // Inner Card Container (#192734)
+          ctx.fillStyle = "#192734";
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(20, 20, width - 40, height - 40, 16);
+            ctx.fill();
+          } else {
+            ctx.fillRect(20, 20, width - 40, height - 40);
+          }
+
+          // Avatar Image
+          let avatarImg;
+          try {
+            avatarImg = await loadImage(avatarUrl);
+          } catch {}
+
+          if (avatarImg) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(80, 80, 35, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.clip();
+            ctx.drawImage(avatarImg, 45, 45, 70, 70);
+            ctx.restore();
+          } else {
+            ctx.fillStyle = "#1DA1F2";
+            ctx.beginPath();
+            ctx.arc(80, 80, 35, 0, Math.PI * 2, true);
+            ctx.fill();
+          }
+
+          // Display Name
+          ctx.fillStyle = "#FFFFFF";
+          ctx.font = "bold 24px sans-serif";
+          ctx.fillText(pushName2.slice(0, 25), 135, 72);
+
+          // Username
+          ctx.fillStyle = "#8899A6";
+          ctx.font = "20px sans-serif";
+          ctx.fillText(`@${username.slice(0, 20)}`, 135, 100);
+
+          // Tweet Text Formatting & Word Wrap
+          ctx.fillStyle = "#FFFFFF";
+          ctx.font = "22px sans-serif";
+          
+          const words = tweetText.split(" ");
+          let line = "";
+          let y = 160;
+          const maxWidth = width - 100;
+          const lineHeight = 32;
+
+          for (let n = 0; n < words.length; n++) {
+            const testLine = line + words[n] + " ";
+            const metrics = ctx.measureText(testLine);
+            if (metrics.width > maxWidth && n > 0) {
+              ctx.fillText(line, 50, y);
+              line = words[n] + " ";
+              y += lineHeight;
+              if (y > height - 80) break; // Don't overflow canvas
+            } else {
+              line = testLine;
+            }
+          }
+          ctx.fillText(line, 50, y);
+
+          // Twitter Footer
+          ctx.fillStyle = "#1DA1F2";
+          ctx.font = "bold 18px sans-serif";
+          ctx.fillText("🐦 Twitter for WhatsApp", 50, height - 40);
+
+          const buffer = canvas.toBuffer("image/png");
 
           await Hooper.sendMessage(m.from, {
             image: buffer,
