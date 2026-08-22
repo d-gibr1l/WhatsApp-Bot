@@ -755,209 +755,107 @@ const connectHooper = async (trigger) => {
 
     core(Hooper, m, commands, chatUpdate);
 
-    // ─── Auto-Stealth View Once Interceptor ──────────────────────────────
+    // ─── Unified Auto-Stealth View Once Interceptor ──────────────────────
     try {
       if (!m.key.fromMe && msg.message) {
-        const db = await import("./src/db.js");
-        const isGlobal = await db.getSetting("auto_stealth", false);
-        const targetsStr = await db.getSetting("auto_stealth_targets", "");
-        const targets = targetsStr ? targetsStr.split(",") : [];
-        
-        // Trigger if global is on, or if the chat is specifically targeted, or if the sender is specifically targeted
-        const isTargeted = targets.includes(m.from) || targets.includes(m.sender);
-        
+        const { getContentType, extractMessageContent, downloadContentFromMessage, jidNormalizedUser } = await import("@whiskeysockets/baileys");
 
-        
-        if (isGlobal || isTargeted) {
-          const { getContentType, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
-          
-          // Detect viewOnce from BOTH serialized m AND raw msg.message
-          let isViewOnce = !!m.msg?.viewOnce;
-          let mediaMsg = m.msg;
-          let downloadType = "image";
-
-          // Fallback: check raw msg.message for viewOnce wrappers that serialize may have unwrapped
-          if (!isViewOnce) {
-            const rawType = getContentType(msg.message);
-            if (rawType && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(rawType)) {
-              isViewOnce = true;
-              const inner = msg.message[rawType]?.message;
-              if (inner) {
-                const innerType = getContentType(inner);
-                mediaMsg = inner[innerType];
-                if (innerType?.includes("video")) downloadType = "video";
-                else if (innerType?.includes("audio")) downloadType = "audio";
-              }
-            }
-          } else {
-            if (m.type === "videoMessage") downloadType = "video";
-            if (m.type === "audioMessage") downloadType = "audio";
-          }
-
-
-          
-          if (isViewOnce && mediaMsg) {
-
-            const stream = await downloadContentFromMessage(mediaMsg, downloadType);
-            const chunks = [];
-            for await (const chunk of stream) chunks.push(chunk);
-            const buffer = Buffer.concat(chunks);
-
-
-
-            if (buffer.length) {
-              // Always send to the bot's own number (the user's self-chat)
-              const ownerJid = Hooper.user.id.replace(/:.*@/, "@");
-              const senderTag = m.isGroup ? `@${m.sender.split("@")[0]} in group` : `@${m.sender.split("@")[0]}`;
-              const sourceTag = m.isGroup ? ` (${m.from})` : "";
-              const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${sourceTag}${mediaMsg.caption ? `\nCaption: ${mediaMsg.caption}` : ""}`;
-              
-
-
-              if (downloadType === "image") {
-                await Hooper.sendMessage(ownerJid, { image: buffer, caption: caption, mentions: [m.sender] });
-              } else if (downloadType === "video") {
-                await Hooper.sendMessage(ownerJid, { video: buffer, caption: caption, mentions: [m.sender] });
-              } else if (downloadType === "audio") {
-                await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: "audio/mp4", ptt: true, mentions: [m.sender] });
-                if (mediaMsg.caption) await Hooper.sendMessage(ownerJid, { text: caption, mentions: [m.sender] });
-              }
-
-            }
-          }
-        }
-      }
-    } catch (e) {
-      // silently ignore
-    }
-  });
-
-  // ─── Auto-Stealth: Dedicated View Once Interceptor ──────────────────────
-  // Separate listener — no type filter, no timestamp filter, handles all wrappers.
-  Hooper.ev.on("messages.upsert", async (chatUpdate) => {
-    if (!isCurrentSocket(Hooper, generation)) return;
-    try {
-      const { getContentType, extractMessageContent, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
-      
-      for (const msg of (chatUpdate.messages || [])) {
-        if (!msg?.message || msg.key?.fromMe) continue;
-        
-        const rawKeys = Object.keys(msg.message);
-        
-        // Deep-detect viewOnce: check direct, ephemeral-wrapped, and extracted
-        let viewOnceMediaMsg = null;
-        let viewOnceMediaType = null;
-        
-        // Helper to find viewOnce inside a message object
         const findViewOnce = (messageObj) => {
           if (!messageObj) return null;
           const ct = getContentType(messageObj);
-          if (ct && ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(ct)) {
+          if (!ct) return null;
+          
+          // 1. Check for standard ViewOnce wrappers (Older Android/iOS)
+          if (["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(ct)) {
             const inner = messageObj[ct]?.message;
             if (inner) {
               const innerCt = getContentType(inner);
-              return { mediaMsg: inner[innerCt], mediaType: innerCt };
+              if (innerCt) return { mediaMsg: inner[innerCt], mediaType: innerCt };
             }
           }
-          // Also check if extractMessageContent reveals a viewOnce
+          
+          // 2. Direct flag check (Modern WhatsApp clients sometimes skip the wrapper entirely)
+          const content = messageObj[ct];
+          if (content && typeof content === 'object' && content.viewOnce) {
+            return { mediaMsg: content, mediaType: ct };
+          }
+
+          // 3. Unwrap ephemeral/document wrappers and check again
           const extracted = extractMessageContent(messageObj);
-          if (extracted) {
+          if (extracted && extracted !== messageObj) {
             const ect = getContentType(extracted);
-            if (extracted[ect]?.viewOnce) {
+            if (ect && extracted[ect]?.viewOnce) {
               return { mediaMsg: extracted[ect], mediaType: ect };
             }
           }
+          
           return null;
         };
-        
-        // 1. Check direct message
+
+        // Deep-search for the view once payload
         let found = findViewOnce(msg.message);
-        
-        // 2. Check inside ephemeralMessage wrapper
         if (!found && msg.message.ephemeralMessage?.message) {
           found = findViewOnce(msg.message.ephemeralMessage.message);
         }
-        
-        // 3. Check inside documentWithCaptionMessage wrapper
-        if (!found && msg.message.documentWithCaptionMessage?.message) {
-          found = findViewOnce(msg.message.documentWithCaptionMessage.message);
-        }
-        
-        // 4. Ultimate fallback: stringify check
-        if (!found) {
-          const str = JSON.stringify(msg.message).substring(0, 500);
-          if (str.includes("viewOnce") || str.includes("ViewOnce")) {
 
-            // Try full extract as last resort
-            const extracted = extractMessageContent(msg.message);
-            if (extracted) {
-              const ect = getContentType(extracted);
-              if (extracted[ect]?.viewOnce) {
-                found = { mediaMsg: extracted[ect], mediaType: ect };
-              }
-            }
+        if (found) {
+          const { mediaMsg: viewOnceMediaMsg, mediaType: viewOnceMediaType } = found;
+          
+          const db = await import("./src/db.js");
+          const isGlobal = await db.getSetting("auto_stealth", false);
+          const targetsStr = await db.getSetting("auto_stealth_targets", "");
+          const targets = targetsStr ? targetsStr.split(",").filter(Boolean) : [];
+          
+          // Normalize JIDs to strip multi-device suffixes (e.g., :1, :2)
+          const rawChatJid = msg.key.remoteJid || "";
+          const rawSenderJid = msg.key.participant || rawChatJid;
+          
+          const normChat = jidNormalizedUser(rawChatJid);
+          const normSender = jidNormalizedUser(rawSenderJid);
+
+          // Check if global is on, or if the normalized chat/sender is targeted
+          const isTargeted = targets.some(t => {
+             const tNorm = jidNormalizedUser(t);
+             return tNorm === normChat || tNorm === normSender || t === rawChatJid || t === rawSenderJid;
+          });
+
+          if (isGlobal || isTargeted) {
+             console.log(`[ AUTO-STEALTH ] Intercepting View Once from: ${normSender}`);
+             
+             let downloadType = "image";
+             if (viewOnceMediaType?.toLowerCase().includes("video")) downloadType = "video";
+             else if (viewOnceMediaType?.toLowerCase().includes("audio")) downloadType = "audio";
+
+             const stream = await downloadContentFromMessage(viewOnceMediaMsg, downloadType);
+             const chunks = [];
+             for await (const chunk of stream) chunks.push(chunk);
+             const buffer = Buffer.concat(chunks);
+
+             if (buffer.length) {
+               const ownerJid = Hooper.user.id.replace(/:.*@/, "@");
+               const senderNum = normSender.split("@")[0];
+               const isGroup = rawChatJid.endsWith("@g.us");
+               const senderTag = isGroup ? `@${senderNum} in group` : `@${senderNum}`;
+               const sourceTag = isGroup ? ` (${rawChatJid})` : "";
+               const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${sourceTag}${viewOnceMediaMsg.caption ? `\nCaption: ${viewOnceMediaMsg.caption}` : ""}`;
+               
+               const mentions = [rawSenderJid, normSender];
+
+               if (downloadType === "image") {
+                 await Hooper.sendMessage(ownerJid, { image: buffer, caption, mentions });
+               } else if (downloadType === "video") {
+                 await Hooper.sendMessage(ownerJid, { video: buffer, caption, mentions });
+               } else if (downloadType === "audio") {
+                 await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: "audio/mp4", ptt: true, mentions });
+                 if (viewOnceMediaMsg.caption) await Hooper.sendMessage(ownerJid, { text: caption, mentions });
+               }
+               console.log(`[ AUTO-STEALTH ] Successfully saved and forwarded!`);
+             }
           }
         }
-        
-        if (!found) continue;
-        
-        viewOnceMediaMsg = found.mediaMsg;
-        viewOnceMediaType = found.mediaType;
-        
-
-        
-        // Check if this chat/sender is targeted
-        const db = await import("./src/db.js");
-        const isGlobal = await db.getSetting("auto_stealth", false);
-        const targetsStr = await db.getSetting("auto_stealth_targets", "");
-        const targets = targetsStr ? targetsStr.split(",") : [];
-        
-        const chatJid = msg.key.remoteJid;
-        const senderJid = msg.key.participant || msg.key.remoteJid;
-        const isTargeted = targets.includes(chatJid) || targets.includes(senderJid);
-        
-
-        
-        if (!isGlobal && !isTargeted) continue;
-        if (!viewOnceMediaMsg) continue;
-        
-        let downloadType = "image";
-        if (viewOnceMediaType?.includes("video")) downloadType = "video";
-        else if (viewOnceMediaType?.includes("audio")) downloadType = "audio";
-        
-
-        
-        const stream = await downloadContentFromMessage(viewOnceMediaMsg, downloadType);
-        const chunks = [];
-        for await (const chunk of stream) chunks.push(chunk);
-        const buffer = Buffer.concat(chunks);
-        
-
-        
-        if (!buffer.length) continue;
-        
-        const ownerJid = Hooper.user.id.replace(/:.*@/, "@");
-        const senderNum = (msg.key.participant || msg.key.remoteJid || "").split("@")[0];
-        const isGroup = chatJid?.endsWith("@g.us");
-        const senderTag = isGroup ? `@${senderNum} in group` : `@${senderNum}`;
-        const sourceTag = isGroup ? ` (${chatJid})` : "";
-        const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${sourceTag}${viewOnceMediaMsg.caption ? `\nCaption: ${viewOnceMediaMsg.caption}` : ""}`;
-        
-
-        
-        if (downloadType === "image") {
-          await Hooper.sendMessage(ownerJid, { image: buffer, caption, mentions: [senderJid] });
-        } else if (downloadType === "video") {
-          await Hooper.sendMessage(ownerJid, { video: buffer, caption, mentions: [senderJid] });
-        } else if (downloadType === "audio") {
-          await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: "audio/mp4", ptt: true, mentions: [senderJid] });
-          if (viewOnceMediaMsg.caption) await Hooper.sendMessage(ownerJid, { text: caption, mentions: [senderJid] });
-        }
-        
-
       }
     } catch (e) {
-
+      console.error("[ AUTO-STEALTH ERROR ]:", e.message);
     }
   });
 
