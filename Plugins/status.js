@@ -42,7 +42,15 @@ export default {
       console.error(e);
     }
 
-    const statuses = docs.map(d => d.data).sort((a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0));
+    const reviveBuffers = (obj) => {
+      if (!obj || typeof obj !== 'object') return obj;
+      if (Buffer.isBuffer(obj)) return obj;
+      if (obj._bsontype === 'Binary' && obj.buffer) return Buffer.from(obj.buffer);
+      if (obj.type === 'Buffer' && Array.isArray(obj.data)) return Buffer.from(obj.data);
+      for (const k in obj) obj[k] = reviveBuffers(obj[k]);
+      return obj;
+    };
+    const statuses = docs.map(d => reviveBuffers(d.data)).sort((a, b) => (a.messageTimestamp || 0) - (b.messageTimestamp || 0));
 
     if (statuses.length === 0) {
       if (doReact) await doReact("❌");

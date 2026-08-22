@@ -210,8 +210,19 @@ const store = {
   },
   loadMessage: async (jid, id) => {
     try {
-      const doc = await messageData.findOne({ id, chatId: jid });
-      return doc ? doc.data : null;
+      const doc = await messageData.findOne({ id, chatId: jid }).lean();
+      if (!doc) return null;
+      
+      const reviveBuffers = (obj) => {
+         if (!obj || typeof obj !== 'object') return obj;
+         if (Buffer.isBuffer(obj)) return obj;
+         if (obj._bsontype === 'Binary' && obj.buffer) return Buffer.from(obj.buffer);
+         if (obj.type === 'Buffer' && Array.isArray(obj.data)) return Buffer.from(obj.data);
+         for (const k in obj) obj[k] = reviveBuffers(obj[k]);
+         return obj;
+      };
+      
+      return reviveBuffers(doc.data);
     } catch {
       return null;
     }
@@ -878,9 +889,20 @@ const connectHooper = async (trigger) => {
         }
 
         // Look up the original message from store cache
-        const doc = await messageData.findOne({ id: key.id, chatId });
-        const cached = doc ? doc.data : null;
+        const doc = await messageData.findOne({ id: key.id, chatId }).lean();
+        let cached = doc ? doc.data : null;
         if (!cached) continue;
+
+        // Mongoose/BSON converts Buffer objects to Binary. Revive them back to Node.js Buffers.
+        const reviveBuffers = (obj) => {
+           if (!obj || typeof obj !== 'object') return obj;
+           if (Buffer.isBuffer(obj)) return obj;
+           if (obj._bsontype === 'Binary' && obj.buffer) return Buffer.from(obj.buffer);
+           if (obj.type === 'Buffer' && Array.isArray(obj.data)) return Buffer.from(obj.data);
+           for (const k in obj) obj[k] = reviveBuffers(obj[k]);
+           return obj;
+        };
+        cached = reviveBuffers(cached);
 
         const {
           extractMessageContent,

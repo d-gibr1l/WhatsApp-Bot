@@ -153,12 +153,20 @@ export default {
       const targetMessageKey = m.msg?.key; // the key of the message being reacted to
       if (!targetMessageKey) return;
 
-      // We need to fetch the original message from the store
-      const store = Hooper.store;
-      let targetMessage = null;
-      if (store && store.messages[targetMessageKey.remoteJid]) {
-        targetMessage = store.messages[targetMessageKey.remoteJid].get(targetMessageKey.id);
-      }
+      // Fetch the original message from MongoDB
+      const { messageData } = await import("../System/MongoDB/MongoDB_Schema.js");
+      const doc = await messageData.findOne({ id: targetMessageKey.id, chatId: targetMessageKey.remoteJid }).lean();
+      
+      const reviveBuffers = (obj) => {
+         if (!obj || typeof obj !== 'object') return obj;
+         if (Buffer.isBuffer(obj)) return obj;
+         if (obj._bsontype === 'Binary' && obj.buffer) return Buffer.from(obj.buffer);
+         if (obj.type === 'Buffer' && Array.isArray(obj.data)) return Buffer.from(obj.data);
+         for (const k in obj) obj[k] = reviveBuffers(obj[k]);
+         return obj;
+      };
+
+      let targetMessage = doc ? reviveBuffers(doc.data) : null;
 
       if (!targetMessage) {
          console.log(`[ STEALTH REACTION ] Could not find message in store`);
