@@ -146,6 +146,7 @@ export default {
             ``,
             `👤 *User :* ${pushName}`,
             `🤖 *Bot Status :* Online ✅`,
+            `⏱️ *Ping / Latency :* ${m.messageTimestamp ? Math.max(0, Date.now() - (m.messageTimestamp * 1000)) + "ms" : "Unknown"}`,
             ...(ver ? [`🔖 *Version :* ${ver}`] : []),
             ...(uptimeLines.length
               ? [``, `*━━━━━ 🕐 Uptime ━━━━━*`, ...uptimeLines]
