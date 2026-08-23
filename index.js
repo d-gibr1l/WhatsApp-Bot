@@ -753,7 +753,34 @@ const connectHooper = async (trigger) => {
             const ownerJid = (global.owner && global.owner.length > 0) ? `${global.owner[0].replace(/[^0-9]/g, "")}@s.whatsapp.net` : Hooper.user.id.replace(/:.*@/, "@");
             const senderTag = m.key.participant.split("@")[0];
             await Hooper.sendMessage(ownerJid, { text: `🔄 *Auto-Status Update* from @${senderTag}:`, mentions: [m.key.participant] });
-            await Hooper.sendMessage(ownerJid, { forward: msg });
+            // Download and re-send as fresh message to avoid "from a group" label
+            try {
+               const { extractMessageContent, getContentType, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
+               const extracted = extractMessageContent(msg.message);
+               const contentType = getContentType(extracted);
+               const content = extracted[contentType];
+               if (contentType === "conversation" || contentType === "extendedTextMessage") {
+                  await Hooper.sendMessage(ownerJid, { text: content?.text || extracted.conversation || "" });
+               } else if (contentType === "imageMessage" || contentType === "videoMessage") {
+                  const stream = await downloadContentFromMessage(content, contentType === "imageMessage" ? "image" : "video");
+                  const chunks = []; for await (const chunk of stream) chunks.push(chunk);
+                  const buf = Buffer.concat(chunks);
+                  const opts = { caption: content.caption || "", mimetype: content.mimetype };
+                  if (contentType === "imageMessage") await Hooper.sendMessage(ownerJid, { image: buf, ...opts });
+                  else await Hooper.sendMessage(ownerJid, { video: buf, ...opts });
+               } else if (contentType === "audioMessage") {
+                  const stream = await downloadContentFromMessage(content, "audio");
+                  const chunks = []; for await (const chunk of stream) chunks.push(chunk);
+                  await Hooper.sendMessage(ownerJid, { audio: Buffer.concat(chunks), mimetype: content.mimetype || "audio/mp4" });
+               } else {
+                  // Fallback: send as document
+                  const stream = await downloadContentFromMessage(content, contentType.replace("Message", ""));
+                  const chunks = []; for await (const chunk of stream) chunks.push(chunk);
+                  await Hooper.sendMessage(ownerJid, { document: Buffer.concat(chunks), mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "status" });
+               }
+            } catch (fwdErr) {
+               console.error("[ AUTO-STATUS ] Resend failed, skipping:", fwdErr.message);
+            }
          }
       } catch (e) {
          console.error("[ AUTO-STATUS ] Error:", e.message);

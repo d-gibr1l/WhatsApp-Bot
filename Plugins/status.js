@@ -60,9 +60,33 @@ export default {
     if (doReact) await doReact("✅");
     await m.reply(`Found ${statuses.length} recent status(es) for ${number}. Sending them now...`);
 
+    const { extractMessageContent, getContentType, downloadContentFromMessage } = await import("@whiskeysockets/baileys");
     for (const msg of statuses) {
       try {
-        await Hooper.sendMessage(m.from, { forward: msg }, { quoted: m });
+        if (!msg.message) continue;
+        const extracted = extractMessageContent(msg.message);
+        const contentType = getContentType(extracted);
+        const content = extracted[contentType];
+
+        if (contentType === "conversation" || contentType === "extendedTextMessage") {
+          await Hooper.sendMessage(m.from, { text: content?.text || extracted.conversation || "" });
+        } else if (contentType === "imageMessage" || contentType === "videoMessage") {
+          const stream = await downloadContentFromMessage(content, contentType === "imageMessage" ? "image" : "video");
+          const chunks = []; for await (const chunk of stream) chunks.push(chunk);
+          const buf = Buffer.concat(chunks);
+          const opts = { caption: content.caption || "", mimetype: content.mimetype };
+          if (contentType === "imageMessage") await Hooper.sendMessage(m.from, { image: buf, ...opts });
+          else await Hooper.sendMessage(m.from, { video: buf, ...opts });
+        } else if (contentType === "audioMessage") {
+          const stream = await downloadContentFromMessage(content, "audio");
+          const chunks = []; for await (const chunk of stream) chunks.push(chunk);
+          await Hooper.sendMessage(m.from, { audio: Buffer.concat(chunks), mimetype: content.mimetype || "audio/mp4" });
+        } else {
+          // Fallback document
+          const stream = await downloadContentFromMessage(content, contentType.replace("Message", ""));
+          const chunks = []; for await (const chunk of stream) chunks.push(chunk);
+          await Hooper.sendMessage(m.from, { document: Buffer.concat(chunks), mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "status" });
+        }
         await new Promise(res => setTimeout(res, 1000));
       } catch (e) {
         console.error("Error sending status:", e.message);
