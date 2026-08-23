@@ -1002,9 +1002,7 @@ const connectHooper = async (trigger) => {
                     }
                 } catch (e) {
                     console.log("[ ANTI-DELETE ] Media download failed:", e);
-                    // Fallback: Send alert separately, then forward
                     const alertMsg = await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: mentionsList });
-                    await Hooper.sendMessage(targetJid, { forward: cached }, { quoted: alertMsg });
                 }
             } else {
                 // For audio, sticker, document, send the alert first
@@ -1012,22 +1010,17 @@ const connectHooper = async (trigger) => {
                 const alertMsg = await Hooper.sendMessage(targetJid, { text: alertText, mentions: mentionsList });
                 
                 try {
-                    const quoteOpt = (contentType === "audioMessage" || contentType === "stickerMessage") ? { quoted: alertMsg } : {};
-                    await Hooper.sendMessage(targetJid, { forward: cached }, quoteOpt);
-                } catch (err) {
-                    console.log("[ ANTI-DELETE ] Forward failed, attempting fallback download...", err);
-                    try {
-                        const stream = await downloadContentFromMessage(content, mediaLabel === "picture" ? "image" : mediaLabel);
-                        const chunks = [];
-                        for await (const chunk of stream) chunks.push(chunk);
-                        const mediaBuffer = Buffer.concat(chunks);
-                        
-                        if (mediaLabel === "audio") await Hooper.sendMessage(targetJid, { audio: mediaBuffer, mimetype: content.mimetype || "audio/mp4" }, { quoted: alertMsg });
-                        else if (mediaLabel === "sticker") await Hooper.sendMessage(targetJid, { sticker: mediaBuffer }, { quoted: alertMsg });
-                        else await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document" }, { quoted: alertMsg });
-                    } catch (e) {
-                        await Hooper.sendMessage(targetJid, { text: `⚠️ Failed to recover the deleted ${mediaLabel}.` }, { quoted: alertMsg });
-                    }
+                    // Force manual download to avoid the "forwarded from group" bug entirely
+                    const stream = await downloadContentFromMessage(content, mediaLabel === "picture" ? "image" : mediaLabel);
+                    const chunks = [];
+                    for await (const chunk of stream) chunks.push(chunk);
+                    const mediaBuffer = Buffer.concat(chunks);
+                    
+                    if (mediaLabel === "audio") await Hooper.sendMessage(targetJid, { audio: mediaBuffer, mimetype: content.mimetype || "audio/mp4" }, { quoted: alertMsg });
+                    else if (mediaLabel === "sticker") await Hooper.sendMessage(targetJid, { sticker: mediaBuffer }, { quoted: alertMsg });
+                    else await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document" }, { quoted: alertMsg });
+                } catch (e) {
+                    await Hooper.sendMessage(targetJid, { text: `⚠️ Failed to recover the deleted ${mediaLabel}.` }, { quoted: alertMsg });
                 }
             }
         };
