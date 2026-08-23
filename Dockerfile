@@ -6,7 +6,9 @@ RUN npm i --omit=dev --legacy-peer-deps
 
 FROM node:24.11.1-alpine
 RUN apk upgrade --no-cache && \
-    apk add --no-cache ffmpeg imagemagick && \
+    apk add --no-cache ffmpeg imagemagick curl python3 && \
+    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
+    chmod a+rx /usr/local/bin/yt-dlp && \
     npm install -g pm2
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
