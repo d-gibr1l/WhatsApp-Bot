@@ -64,30 +64,54 @@ MediaFire
     try {
       if (doReact) await doReact("⏳");
 
-      const { downloadWithYtDlp } = await import("../src/downloader.js");
-      
-      const { filePath, url: directUrl, contentType, title } = await downloadWithYtDlp(url.url, false, "720");
-      const isAudio = contentType && contentType.startsWith("audio");
-      
-      if (directUrl) {
-         const mediaMsg = isAudio 
-            ? { audio: { url: directUrl }, mimetype: contentType } 
-            : { video: { url: directUrl }, mimetype: contentType, caption: `🎬 *${title}*` };
-         await Hooper.sendMessage(m.from, mediaMsg, { quoted: m });
+      if (url.type === "yt") {
+        const { downloadWithApi } = await import("../src/downloader.js");
+        
+        const { filePath, contentType, title } = await downloadWithApi(url.url);
+        
+        const fs = await import("fs");
+        try {
+          const isAudio = contentType && contentType.startsWith("audio");
+          const mediaMsg = isAudio 
+             ? { audio: fs.readFileSync(filePath), mimetype: contentType } 
+             : { video: fs.readFileSync(filePath), mimetype: contentType, caption: `🎬 *${title}*` };
+             
+          await Hooper.sendMessage(m.from, mediaMsg, { quoted: m });
+        } finally {
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        }
       } else {
-         const fs = await import("fs");
-         try {
+        const { downloadWithYtDlp } = await import("../src/downloader.js");
+        
+        const { filePath, url: directUrl, contentType, title } = await downloadWithYtDlp(url.url, false, "720");
+        const isAudio = contentType && contentType.startsWith("audio");
+        
+        if (directUrl) {
            const mediaMsg = isAudio 
-              ? { audio: fs.readFileSync(filePath), mimetype: contentType } 
-              : { video: fs.readFileSync(filePath), mimetype: contentType, caption: `🎬 *${title}*` };
+              ? { audio: { url: directUrl }, mimetype: contentType } 
+              : { video: { url: directUrl }, mimetype: contentType, caption: `🎬 *${title}*` };
            await Hooper.sendMessage(m.from, mediaMsg, { quoted: m });
-         } finally {
-           if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-         }
+        } else {
+           const fs = await import("fs");
+           try {
+             const mediaMsg = isAudio 
+                ? { audio: fs.readFileSync(filePath), mimetype: contentType } 
+                : { video: fs.readFileSync(filePath), mimetype: contentType, caption: `🎬 *${title}*` };
+             await Hooper.sendMessage(m.from, mediaMsg, { quoted: m });
+           } finally {
+             if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+           }
+        }
       }
       if (doReact) await doReact("✅");
     } catch (e) {
-      m.reply(`Error: ${e.message}`);
+      let errStr = e.message;
+      if (errStr.includes("RapidAPI key not set")) {
+          errStr = "To use the YouTube API downloader, you must set your RapidAPI key using `!setapikey <key>` first.";
+      } else if (errStr.includes("403")) {
+          errStr = "Your RapidAPI key is valid, but you are not subscribed to the 'All Social Media Video Downloader' API. Please subscribe to the free tier on RapidAPI.";
+      }
+      m.reply(`Error: ${errStr}`);
       if (doReact) await doReact("❌");
     }
   },
