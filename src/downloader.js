@@ -268,22 +268,22 @@ async function getYouTubeRapidApiCascade(url, apiKey) {
 
   const apis = [
     {
-      // 1. All Media Downloader 4 (Confirmed subscribed)
+      // 1. Social Media Video Downloader (proxied tunnel avoids 403)
+      method: "GET",
+      url: `https://social-media-video-downloader.p.rapidapi.com/youtube/v3/video/details?videoId=${videoId}&urlAccess=proxied`,
+      headers: { "x-rapidapi-host": "social-media-video-downloader.p.rapidapi.com", "x-rapidapi-key": apiKey }
+    },
+    {
+      // 2. All Media Downloader 4
       method: "GET",
       url: `https://all-media-downloader4.p.rapidapi.com/api/youtube/download?id=${videoId}`,
       headers: { "x-rapidapi-host": "all-media-downloader4.p.rapidapi.com", "x-rapidapi-key": apiKey }
     },
     {
-      // 2. All-In-One Social Media Saver API
+      // 3. All-In-One Social Media Saver API
       method: "GET",
       url: `https://all-in-one-social-media-saver-api.p.rapidapi.com/fetch?url=${encodedUrl}`,
       headers: { "x-rapidapi-host": "all-in-one-social-media-saver-api.p.rapidapi.com", "x-rapidapi-key": apiKey }
-    },
-    {
-      // 3. social media video downloader (the original)
-      method: "GET",
-      url: `https://all-social-media-video-downloader.p.rapidapi.com/smvd/get/all?url=${encodedUrl}`,
-      headers: { "x-rapidapi-host": "all-social-media-video-downloader.p.rapidapi.com", "x-rapidapi-key": apiKey }
     },
     {
       // 4. YouTube Info & Download API
@@ -322,6 +322,13 @@ async function getYouTubeRapidApiCascade(url, apiKey) {
           const videoOnly = data.results.find(r => r.mime?.includes('video') && r.quality === "720p") || data.results.find(r => r.mime?.includes('video'));
           videoUrl = videoOnly?.url;
         }
+      }
+      // For social-media-video-downloader (which gives proxied URLs avoiding 403)
+      else if (data.contents && Array.isArray(data.contents) && data.contents[0]?.videos) {
+        const videos = data.contents[0].videos;
+        // Prefer a video that has BOTH audio and video (e.g. 360p mp4)
+        const best = videos.find(v => v.metadata?.has_audio && v.metadata?.has_video) || videos[0];
+        videoUrl = best?.url;
       }
       else if (data.download_url) videoUrl = data.download_url;
       else if (data.url) videoUrl = data.url;
