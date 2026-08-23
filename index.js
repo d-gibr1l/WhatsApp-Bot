@@ -941,6 +941,26 @@ const connectHooper = async (trigger) => {
             contentType = getContentType(unwrapped);
             content = unwrapped[contentType];
         }
+
+        // ── FIX: Strip contextInfo to prevent "from a group" label ──
+        // Status messages carry contextInfo.remoteJid = "status@broadcast".
+        // Even when we download+resend as a fresh buffer, WhatsApp reads
+        // that embedded broadcast JID and renders "from a group". Deleting
+        // contextInfo from both the inner content AND the full cached
+        // message ensures a completely clean outgoing message.
+        if (content && content.contextInfo) {
+            delete content.contextInfo;
+        }
+        if (cached?.message) {
+            const stripCtx = (obj) => {
+                if (!obj || typeof obj !== "object") return;
+                for (const k of Object.keys(obj)) {
+                    if (k === "contextInfo") { delete obj[k]; continue; }
+                    if (typeof obj[k] === "object") stripCtx(obj[k]);
+                }
+            };
+            stripCtx(cached.message);
+        }
         
         const header = `🛡️ *Anti-Delete - C.U.N.T.S🐦*\n----------------------------------------------`;
 
