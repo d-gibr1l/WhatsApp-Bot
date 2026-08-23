@@ -257,6 +257,85 @@ async function getApiKey() {
   return key.trim();
 }
 
+async function getYouTubeRapidApiCascade(url, apiKey) {
+  const encoded = encodeURIComponent(url);
+  const apis = [
+    {
+      // 1. All Media Downloader
+      method: "POST",
+      url: "https://all-media-downloader1.p.rapidapi.com/all",
+      headers: { "x-rapidapi-host": "all-media-downloader1.p.rapidapi.com", "x-rapidapi-key": apiKey, "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ url })
+    },
+    {
+      // 2. All-In-One Social Media Saver API
+      method: "GET",
+      url: `https://all-in-one-social-media-saver-api.p.rapidapi.com/fetch?url=${encoded}`,
+      headers: { "x-rapidapi-host": "all-in-one-social-media-saver-api.p.rapidapi.com", "x-rapidapi-key": apiKey }
+    },
+    {
+      // 3. social media video downloader (the original)
+      method: "GET",
+      url: `https://all-social-media-video-downloader.p.rapidapi.com/smvd/get/all?url=${encoded}`,
+      headers: { "x-rapidapi-host": "all-social-media-video-downloader.p.rapidapi.com", "x-rapidapi-key": apiKey }
+    },
+    {
+      // 4. YouTube Info & Download API
+      method: "GET",
+      url: `https://youtube-info-download-api.p.rapidapi.com/video?url=${encoded}`,
+      headers: { "x-rapidapi-host": "youtube-info-download-api.p.rapidapi.com", "x-rapidapi-key": apiKey }
+    }
+  ];
+
+  let lastError = null;
+
+  for (const api of apis) {
+    try {
+      let res;
+      if (api.method === "POST") {
+        res = await fetch(api.url, { method: "POST", headers: api.headers, body: api.body });
+      } else {
+        res = await fetch(api.url, { method: "GET", headers: api.headers });
+      }
+      
+      if (!res.ok) {
+         lastError = `Status ${res.status}`;
+         continue;
+      }
+      
+      const data = await res.json();
+      
+      // Smart extractor for various RapidAPI response formats
+      let videoUrl = null;
+      let title = data.title || data.data?.title || "YouTube Video";
+      
+      if (data.download_url) videoUrl = data.download_url;
+      else if (data.url) videoUrl = data.url;
+      else if (data.video_url) videoUrl = data.video_url;
+      else if (data.links && Array.isArray(data.links)) {
+        const best = data.links.find(l => l.quality === "720" || l.quality === "720p") || data.links[0];
+        videoUrl = best?.link || best?.url;
+      }
+      else if (data.formats && Array.isArray(data.formats)) {
+        const best = data.formats.find(f => f.qualityLabel === "720p" || f.height === 720) || data.formats[0];
+        videoUrl = best?.url || best?.link;
+      }
+      else if (data.data?.play || data.data?.hdplay) {
+        videoUrl = data.data.hdplay || data.data.play;
+      }
+      
+      if (videoUrl) {
+         return { title, videoUrl, platform: "YouTube" };
+      }
+      lastError = "No valid video URL found in response";
+    } catch (e) {
+      lastError = e.message;
+    }
+  }
+  
+  throw new Error(`All 4 YouTube API fallbacks failed. Last error: ${lastError}`);
+}
+
 async function getTikTokMediaApi(url, apiKey) {
   const res = await fetch(
     `https://tiktok-video-no-watermark2.p.rapidapi.com/?url=${encodeURIComponent(url)}&hd=1`,
@@ -288,9 +367,14 @@ export async function downloadWithApi(url) {
   if (!platform) throw new Error("Unsupported platform.");
   const apiKey = await getApiKey();
 
-  const info = platform === "tiktok"
-    ? await getTikTokMediaApi(url, apiKey)
-    : await getGenericMediaApi(url, platform, apiKey);
+  let info;
+  if (platform === "tiktok") {
+    info = await getTikTokMediaApi(url, apiKey);
+  } else if (platform === "youtube") {
+    info = await getYouTubeRapidApiCascade(url, apiKey);
+  } else {
+    info = await getGenericMediaApi(url, platform, apiKey);
+  }
 
   if (!info.videoUrl) throw new Error("No downloadable link found.");
 
