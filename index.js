@@ -1570,7 +1570,11 @@ const watchdogTimer = setInterval(() => {
   void runWatchdog();
 }, WATCHDOG_INTERVAL_MS);
 const messageCacheTimer = setInterval(
-  () => store.pruneMessages(),
+  () => {
+    if (typeof store.pruneMessages === "function") {
+      store.pruneMessages();
+    }
+  },
   Math.min(
     10 * 60 * 1000,
     Math.max(60_000, Math.floor(MESSAGE_CACHE_TTL_MS / 2)),
