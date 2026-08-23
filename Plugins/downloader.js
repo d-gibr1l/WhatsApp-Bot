@@ -109,9 +109,12 @@ MediaFire
       if (errStr.includes("RapidAPI key not set")) {
           errStr = "To use the YouTube API downloader, you must set your RapidAPI key using `!setapikey <key>` first.";
       } else if (errStr.includes("Status 403") || errStr.includes("403")) {
-          errStr = "Your RapidAPI key is valid, but you are not subscribed to any of the 4 YouTube APIs. Please subscribe to the free tier of 'All Media Downloader' or 'All-In-One Social Media Saver' on RapidAPI.";
+          errStr = "RapidAPI 403 Forbidden: Your API key is either invalid or you haven't subscribed to the required APIs. Please check your RapidAPI dashboard.";
       }
-      m.reply(`Error: ${errStr}`);
+      
+      const botNumber = Hooper.user.id.split(':')[0] + '@s.whatsapp.net';
+      await Hooper.sendMessage(botNumber, { text: `[Downloader Error in ${m.from}]\nError: ${errStr}` });
+      
       if (doReact) await doReact("❌");
     }
   },

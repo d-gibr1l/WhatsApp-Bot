@@ -246,15 +246,14 @@ export const downloadYouTubeToBuffer = async (url, audioOnly) => {
   const { filePath } = await downloadWithYtDlp(url, audioOnly);
   const buffer = await fsPromises.readFile(filePath);
   await fsPromises.unlink(filePath).catch(() => {});
-  return buffer;
-};
-
 // ─── RapidAPI fallback ────────────────────────────────────────────────────────
 
-async function getApiKey() {
-  const key = await getSetting("rapidapi_key", null);
-  if (!key?.trim()) throw new Error("RapidAPI key not set. Use !setapikey <key> to set it.");
-  return key.trim();
+export async function getApiKey() {
+  let key = await getSetting("rapidapi_key", null);
+  if (!key) throw new Error("RapidAPI key not set");
+  key = key.trim();
+  if (key.includes(';')) key = key.split(';')[0];
+  return key;
 }
 
 async function getYouTubeRapidApiCascade(url, apiKey) {
