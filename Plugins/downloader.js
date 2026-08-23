@@ -41,24 +41,23 @@ export default {
   description: "Multi-platform media downloader",
   start: async (Hooper, m, { args, prefix, command, doReact }) => {
     let raw = args.join(" ").trim();
-    if (!raw && m.quoted?.text) raw = m.quoted.text;
+    if (m.quoted && m.quoted.text) {
+      raw = raw + " " + m.quoted.text;
+    }
 
-    if (!raw) {
-      return m.reply(`*Universal Downloader*
+    const botNumber = Hooper.user.id.split(':')[0] + '@s.whatsapp.net';
 
-*Supported Platforms:*
-TikTok   Instagram   Pinterest   Facebook
-Twitter/X   Threads   Videy   Mega
-SoundCloud   Spotify   YouTube   Sfile
-MediaFire
-
-*Usage:* ${prefix}dl <url>
-*Note:* Reply to a link also works`);
+    if (!raw.trim()) {
+      if (doReact) await doReact("❌");
+      await Hooper.sendMessage(botNumber, { text: `[Downloader Error in ${m.from}]\nUser invoked .dl without providing a link or replying to a message.` });
+      return;
     }
 
     const url = ext(raw);
     if (!url) {
-      return m.reply(`❌ No supported platform URL found in your message.`);
+      if (doReact) await doReact("❌");
+      await Hooper.sendMessage(botNumber, { text: `[Downloader Error in ${m.from}]\nNo supported platform URL found in the message:\n"${raw}"` });
+      return;
     }
 
     try {
@@ -112,7 +111,6 @@ MediaFire
           errStr = "RapidAPI 403 Forbidden: Your API key is either invalid or you haven't subscribed to the required APIs. Please check your RapidAPI dashboard.";
       }
       
-      const botNumber = Hooper.user.id.split(':')[0] + '@s.whatsapp.net';
       await Hooper.sendMessage(botNumber, { text: `[Downloader Error in ${m.from}]\nError: ${errStr}` });
       
       if (doReact) await doReact("❌");
