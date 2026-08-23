@@ -246,42 +246,49 @@ export const downloadYouTubeToBuffer = async (url, audioOnly) => {
   const { filePath } = await downloadWithYtDlp(url, audioOnly);
   const buffer = await fsPromises.readFile(filePath);
   await fsPromises.unlink(filePath).catch(() => {});
+  return buffer;
+}
+
 // ─── RapidAPI fallback ────────────────────────────────────────────────────────
 
 export async function getApiKey() {
   let key = await getSetting("rapidapi_key", null);
   if (!key) throw new Error("RapidAPI key not set");
   key = key.trim();
-  if (key.includes(';')) key = key.split(';')[0];
+  if (key.includes(';')) {
+    key = key.replace(';', '');
+  }
   return key;
 }
 
 async function getYouTubeRapidApiCascade(url, apiKey) {
-  const encoded = encodeURIComponent(url);
+  const encodedUrl = encodeURIComponent(url);
+  const idMatch = url.match(/(?:v=|shorts\/|live\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  const videoId = idMatch ? idMatch[1] : "";
+
   const apis = [
     {
-      // 1. All Media Downloader
-      method: "POST",
-      url: "https://all-media-downloader1.p.rapidapi.com/all",
-      headers: { "x-rapidapi-host": "all-media-downloader1.p.rapidapi.com", "x-rapidapi-key": apiKey, "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ url })
+      // 1. All Media Downloader 4 (Confirmed subscribed)
+      method: "GET",
+      url: `https://all-media-downloader4.p.rapidapi.com/api/youtube/download?id=${videoId}`,
+      headers: { "x-rapidapi-host": "all-media-downloader4.p.rapidapi.com", "x-rapidapi-key": apiKey }
     },
     {
       // 2. All-In-One Social Media Saver API
       method: "GET",
-      url: `https://all-in-one-social-media-saver-api.p.rapidapi.com/fetch?url=${encoded}`,
+      url: `https://all-in-one-social-media-saver-api.p.rapidapi.com/fetch?url=${encodedUrl}`,
       headers: { "x-rapidapi-host": "all-in-one-social-media-saver-api.p.rapidapi.com", "x-rapidapi-key": apiKey }
     },
     {
       // 3. social media video downloader (the original)
       method: "GET",
-      url: `https://all-social-media-video-downloader.p.rapidapi.com/smvd/get/all?url=${encoded}`,
+      url: `https://all-social-media-video-downloader.p.rapidapi.com/smvd/get/all?url=${encodedUrl}`,
       headers: { "x-rapidapi-host": "all-social-media-video-downloader.p.rapidapi.com", "x-rapidapi-key": apiKey }
     },
     {
       // 4. YouTube Info & Download API
       method: "GET",
-      url: `https://youtube-info-download-api.p.rapidapi.com/video?url=${encoded}`,
+      url: `https://youtube-info-download-api.p.rapidapi.com/video?url=${encodedUrl}`,
       headers: { "x-rapidapi-host": "youtube-info-download-api.p.rapidapi.com", "x-rapidapi-key": apiKey }
     }
   ];
@@ -290,12 +297,9 @@ async function getYouTubeRapidApiCascade(url, apiKey) {
 
   for (const api of apis) {
     try {
-      let res;
-      if (api.method === "POST") {
-        res = await fetch(api.url, { method: "POST", headers: api.headers, body: api.body });
-      } else {
-        res = await fetch(api.url, { method: "GET", headers: api.headers });
-      }
+      if (!videoId && api.url.includes("?id=")) continue; // skip if no ID and API requires ID
+      
+      const res = await fetch(api.url, { method: api.method, headers: api.headers, body: api.body });
       
       if (!res.ok) {
          lastError = `Status ${res.status}`;
@@ -308,7 +312,18 @@ async function getYouTubeRapidApiCascade(url, apiKey) {
       let videoUrl = null;
       let title = data.title || data.data?.title || "YouTube Video";
       
-      if (data.download_url) videoUrl = data.download_url;
+      // For all-media-downloader4
+      if (data.results && Array.isArray(data.results)) {
+        // Try to find a merged video+audio stream first
+        const merged = data.results.find(r => r.mime?.includes('video') && r.has_audio);
+        if (merged) videoUrl = merged.url;
+        else {
+          // Fallback to highest quality silent video (since they don't provide merged)
+          const videoOnly = data.results.find(r => r.mime?.includes('video') && r.quality === "720p") || data.results.find(r => r.mime?.includes('video'));
+          videoUrl = videoOnly?.url;
+        }
+      }
+      else if (data.download_url) videoUrl = data.download_url;
       else if (data.url) videoUrl = data.url;
       else if (data.video_url) videoUrl = data.video_url;
       else if (data.links && Array.isArray(data.links)) {
