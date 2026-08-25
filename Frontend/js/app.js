@@ -60,6 +60,7 @@ function setupEventListeners() {
 
 async function boot() {
   await checkStatus();
+  updateConnectionUI(); // MUST call this unconditionally on boot to show the QR section if disconnected
   if (!isConnected) {
     statusInterval = setInterval(checkStatus, 3000);
     qrInterval = setInterval(fetchQR, 3000);
