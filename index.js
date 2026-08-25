@@ -647,11 +647,14 @@ const connectHooper = async (trigger) => {
     }
 
     if (connection === "close") {
-      const reason = new Boom(lastDisconnect?.error)?.output.statusCode;
+      // Safely extract status code without re-wrapping with Boom, which can destroy the original 401 code
+      const reason = lastDisconnect?.error?.output?.statusCode || lastDisconnect?.error?.statusCode || 500;
       const reasonName = DisconnectReason[reason] || `unknown (${reason})`;
       const shouldClearAuth =
         reason === DisconnectReason.badSession ||
-        reason === DisconnectReason.loggedOut;
+        reason === DisconnectReason.loggedOut ||
+        reason === 401 ||
+        reason === 403;
 
       HooperSocket = null;
       activeSocketGeneration = 0;
