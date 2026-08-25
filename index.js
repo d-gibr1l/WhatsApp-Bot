@@ -518,6 +518,7 @@ const connectHooper = async (trigger) => {
   const generation = ++socketGeneration;
   const Hooper = makeWASocket({
     logger: pino({ level: "silent" }),
+    printQRInTerminal: true, // MUST be true for some Baileys versions to emit the qr event properly
     browser: ["Ubuntu", "Chrome", "20.0.04"],
     auth: state,
     version,
@@ -1705,10 +1706,14 @@ app.post("/api/clear-session", async (req, res) => {
     pendingClearAuth = true;
     if (HooperSocket) {
       scheduleReconnect("Manual session clear from GUI", { clearAuth: true });
-    } else if (clearAuthState) {
-      await clearAuthState();
+    } else {
+      if (clearAuthState) {
+        await clearAuthState();
+      }
+      // CRITICAL FIX: The bot is currently dead. We MUST restart it so it generates a new QR code!
+      startHooper("Manual session clear from GUI").catch(e => console.error("Failed to restart:", e));
     }
-    return res.json({ success: true, message: "Session cleared. The bot is restarting..." });
+    return res.json({ success: true, message: "Session cleared. The bot is restarting to generate a new QR code..." });
   } catch (err) {
     return res.status(500).json({ success: false, error: err.message });
   }
