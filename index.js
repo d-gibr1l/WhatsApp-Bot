@@ -513,7 +513,18 @@ const connectHooper = async (trigger) => {
 
   await installPlugin();
 
-  const { version, isLatest } = await fetchLatestBaileysVersion();
+  let { version, isLatest, error } = await fetchLatestBaileysVersion();
+  if (error || !version || version.length === 0) {
+    console.log(chalk.yellow(`[ HOOPER ] GitHub version fetch failed. Trying WA Web fetch...`));
+    const { fetchLatestWaWebVersion } = await import("@whiskeysockets/baileys");
+    try {
+      const waweb = await fetchLatestWaWebVersion();
+      if (waweb.version) version = waweb.version;
+    } catch (wawebErr) {
+      console.log(chalk.yellow(`[ HOOPER ] WA Web fetch failed. Using hardcoded version.`));
+      version = [2, 3000, 1046002285];
+    }
+  }
 
   const generation = ++socketGeneration;
   const Hooper = makeWASocket({
