@@ -525,6 +525,8 @@ const connectHooper = async (trigger) => {
       version = [2, 3000, 1046002285];
     }
   }
+  
+  console.log(`[ HOOPER ] Using WA Web Version:`, version);
 
   const generation = ++socketGeneration;
   const Hooper = makeWASocket({
@@ -686,8 +688,13 @@ const connectHooper = async (trigger) => {
     }
 
     if (qr) {
-      QR_GENERATE = qr;
       status = "qr";
+      // Generate the data URL once when the event fires to save CPU on API polls
+      qrcode.toDataURL(qr)
+        .then((url) => {
+          QR_GENERATE = url;
+        })
+        .catch((err) => console.error("[ HOOPER ] Failed to generate QR data URL:", err));
       // qrcodeTerminal.generate(qr, { small: true });
     }
   });
@@ -1697,19 +1704,15 @@ app.get("/api/status", (req, res) => {
   });
 });
 
-app.get("/api/qr", async (req, res) => {
+app.get("/api/qr", (req, res) => {
   if (status === "open") {
     return res.json({ status: "connected" });
   }
   if (!QR_GENERATE || QR_GENERATE === "invalid") {
     return res.json({ status: "waiting" });
   }
-  try {
-    const qrDataUrl = await qrcode.toDataURL(QR_GENERATE);
-    return res.json({ status: "qr", qr: qrDataUrl });
-  } catch (err) {
-    return res.status(500).json({ status: "error", message: err.message });
-  }
+  // QR_GENERATE is now a pre-generated base64 data URL
+  return res.json({ status: "qr", qr: QR_GENERATE });
 });
 
 app.post("/api/clear-session", async (req, res) => {
