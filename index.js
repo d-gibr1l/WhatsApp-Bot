@@ -979,16 +979,29 @@ const connectHooper = async (trigger) => {
             stripCtx(cached.message);
         }
         
-        // Where the message was deleted (so the header isn't misread as a
-        // group name — the old hardcoded "C.U.N.T.S🐦" branding was).
-        let sourceLabel = "Direct Message";
-        if (chatId.endsWith("@g.us")) {
-          try {
-            sourceLabel = (await Hooper.groupMetadata(chatId)).subject || "group";
-          } catch {
-            sourceLabel = "group";
+        // Where the message was deleted. On LID-addressed accounts the update
+        // event's remoteJid can be a @lid even for a group, so look for a
+        // real @g.us across every key we have; a stored key.participant also
+        // means "group" (1:1 messages never carry one).
+        const groupJid = [chatId, cached.key?.remoteJid, update.key?.remoteJid, key?.remoteJid]
+          .find((j) => j?.endsWith?.("@g.us"));
+        let sourceLabel;
+        if (chatId === "status@broadcast" || cached.key?.remoteJid === "status@broadcast") {
+          sourceLabel = "📢 Status";
+        } else if (groupJid || cached.key?.participant) {
+          let name = "Group";
+          if (groupJid) {
+            try {
+              name = `Group: ${(await Hooper.groupMetadata(groupJid)).subject || groupJid.split("@")[0]}`;
+            } catch {
+              name = "Group";
+            }
           }
+          sourceLabel = name;
+        } else {
+          sourceLabel = "Direct Message";
         }
+        console.log(`[ AD-SRC ] label="${sourceLabel}" chatId=${chatId} cachedRJ=${cached.key?.remoteJid} cachedPart=${cached.key?.participant || "-"} groupJid=${groupJid || "-"}`);
         const header = `🛡️ *Anti-Delete* · _${sourceLabel}_\n----------------------------------------------`;
 
         let actionText = "";
@@ -1081,11 +1094,11 @@ const connectHooper = async (trigger) => {
         // Send to the chat if antidelete is enabled for that chat
         if (isChatEnabled) {
             let skipChatBroadcast = false;
-            
+
             // Apply admin/mod/owner skip logic ONLY for the chat broadcast
-            if (chatId.endsWith("@g.us")) {
+            if (groupJid) {
                 try {
-                  const groupMeta = await Hooper.groupMetadata(chatId);
+                  const groupMeta = await Hooper.groupMetadata(groupJid);
                   const admins = groupMeta.participants
                     .filter((p) => p.admin === "admin" || p.admin === "superadmin")
                     .map((p) => jidNormalizedUser(p.id));
@@ -1101,7 +1114,7 @@ const connectHooper = async (trigger) => {
             if (integratedJids.includes(jidNormalizedUser(deleter))) skipChatBroadcast = true;
 
             if (!skipChatBroadcast) {
-                await sendDeletedMessage(chatId);
+                await sendDeletedMessage(groupJid || chatId);
             }
         }
       } catch (e) {
