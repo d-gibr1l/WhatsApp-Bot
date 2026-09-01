@@ -17,14 +17,23 @@ export default {
   alias: ["groups", "mute", "allow", "antidelete", "mode"],
   uniquecommands: ["groups", "antidelete"],
   description: "Group and mode management system",
-  start: async (Hooper, m, { inputCMD, text, prefix, isCreator, isAdmin }) => {
+  start: async (Hooper, m, { inputCMD, text, prefix, isCreator, isAdmin, doReact }) => {
     // Determine permissions
     const canManageGroup = isCreator || (m.isGroup && isAdmin);
+    const denyGroupManage = async () => {
+      await doReact("❌");
+      return m.reply("*You* must be *Admin* (or the bot owner) in order to use this Command!");
+    };
 
     if (inputCMD === "groups") {
       // Must be a direct message to the bot itself by the creator
       if (!isCreator || m.isGroup) {
-         return;
+         await doReact("❌");
+         return m.reply(
+           m.isGroup
+             ? "This command only works in a private message to the bot."
+             : "*Only the bot owner* can use this Command!",
+         );
       }
 
       const { getAllGroups, getBotMode } = await import("../src/db.js");
@@ -59,7 +68,7 @@ export default {
     }
 
     if (inputCMD === "mute") {
-      if (!canManageGroup) return;
+      if (!canManageGroup) return denyGroupManage();
       
       let jidsToMute = [];
       if (!text) {
@@ -83,7 +92,7 @@ export default {
     }
 
     if (inputCMD === "allow") {
-      if (!canManageGroup) return;
+      if (!canManageGroup) return denyGroupManage();
       
       let jidsToAllow = [];
       if (!text) {
@@ -112,7 +121,7 @@ export default {
     }
 
     if (inputCMD === "antidelete") {
-      if (!canManageGroup) return;
+      if (!canManageGroup) return denyGroupManage();
       if (!text) return m.reply(`Usage: ${prefix}antidelete <on/off> [numbers/all]`);
       
       const args = text.toLowerCase().split(/\s+/);
@@ -161,7 +170,10 @@ export default {
     }
 
     if (inputCMD === "mode") {
-      if (!isCreator) return;
+      if (!isCreator) {
+        await doReact("❌");
+        return m.reply("*Only the bot owner* can use this Command!");
+      }
       const { getBotMode } = await import("../src/db.js");
       const currentMode = await getBotMode();
 
