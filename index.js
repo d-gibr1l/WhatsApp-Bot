@@ -137,6 +137,7 @@ const MESSAGE_CACHE_MAX_PER_CHAT = Math.max(
 );
 
 import { messageData, contactData } from "./System/MongoDB/MongoDB_Schema.js";
+import { resolveParties, pickMedia, sanitizeMentions } from "./src/antidelete-helpers.js";
 
 const store = {
   bind(ev) {
@@ -960,25 +961,13 @@ const connectHooper = async (trigger) => {
           jidNormalizedUser,
         } = await import("@whiskeysockets/baileys");
 
-        const isGroupChat = (chatId || "").endsWith("@g.us");
-
-        // Resolve @lid → phone JID so mentions actually render, and never
-        // let a group JID leak into a mention (WhatsApp renders a @g.us
-        // mention as the whole group → "deleted message from <group>").
-        const resolveUser = (jid) => {
-          if (!jid) return "";
-          if (jid.endsWith("@lid") && global.lidToJidMap?.has(jid)) jid = global.lidToJidMap.get(jid);
-          jid = jidNormalizedUser(jid);
-          return jid.endsWith("@s.whatsapp.net") ? jid : "";
-        };
-
-        // In a group the real author is always key.participant; only fall
-        // back to remoteJid for 1:1 chats (where it *is* the user).
-        const rawSender = cached.key.fromMe
-          ? (Hooper.user?.id || "")
-          : (cached.key.participant || (isGroupChat ? "" : cached.key.remoteJid) || "");
-        const actualSender = resolveUser(rawSender);
-        const deleter = resolveUser(update.participant || rawSender || "");
+        const { actualSender, deleter } = resolveParties({
+          cachedKey: cached.key,
+          chatId,
+          updateParticipant: update.participant,
+          botUserId: Hooper.user?.id,
+          lidMap: global.lidToJidMap,
+        });
         const senderTag = deleter ? `@${deleter.split("@")[0]}` : "@unknown";
 
         const botJid = Hooper.user?.id ? jidNormalizedUser(Hooper.user.id) : null;
@@ -1036,17 +1025,9 @@ const connectHooper = async (trigger) => {
         const deleterTag = deleter ? deleter.split("@")[0] : "unknown";
         const senderMentionTag = actualSender ? actualSender.split("@")[0] : "unknown";
         
-        // Determine what kind of media it is: a human label + the exact
-        // type string `downloadContentFromMessage` expects (or null if
-        // it isn't downloadable media).
-        let mediaLabel = "message";
-        let mediaType = null;
-        if (contentType === "imageMessage") { mediaLabel = "picture"; mediaType = "image"; }
-        else if (contentType === "videoMessage") { mediaLabel = "video"; mediaType = "video"; }
-        else if (contentType === "ptvMessage") { mediaLabel = "video note"; mediaType = "ptv"; }
-        else if (contentType === "audioMessage") { mediaLabel = "audio"; mediaType = "audio"; }
-        else if (contentType === "stickerMessage") { mediaLabel = "sticker"; mediaType = "sticker"; }
-        else if (contentType === "documentMessage" || contentType === "documentWithCaptionMessage") { mediaLabel = "document"; mediaType = "document"; }
+        // Human label + the exact type string `downloadContentFromMessage`
+        // expects (or null if it isn't downloadable media).
+        const { mediaLabel, mediaType } = pickMedia(contentType);
 
         if (update.messageStubType === 132) {
             actionText = `Admin @${deleterTag} deleted @${senderMentionTag}'s ${mediaLabel}:`;
@@ -1056,7 +1037,7 @@ const connectHooper = async (trigger) => {
             mentionsList = [actualSender]; // Actual sender deleted their own message
         }
         // Only mention real user JIDs — never a group/broadcast JID.
-        mentionsList = mentionsList.filter((j) => j && j.endsWith("@s.whatsapp.net"));
+        mentionsList = sanitizeMentions(mentionsList);
         
         // Extract text if it's a text message
         let textToSend = "";

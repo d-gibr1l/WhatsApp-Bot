@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "node --check index.js && node --check Configurations.js && node --check Core.js",
+    "test": "node --check index.js && node --check Configurations.js && node --check Core.js && node --test \"tests/**/*.test.js\"",
     "start": "node --expose-gc index.js"
   },
   "repository": {
@@ -34,6 +34,7 @@
     "@fantox01/search-it": "^1.0.0",
     "@google/genai": "^0.7.0",
     "@hapi/boom": "^10.0.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@napi-rs/canvas": "^0.1.97",
     "@whiskeysockets/baileys": "7.0.0-rc13",
     "axios": "^1.14.0",
