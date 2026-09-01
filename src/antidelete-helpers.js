@@ -77,7 +77,15 @@ export function pickMedia(contentType) {
   return MEDIA_MAP[contentType] || { mediaLabel: "message", mediaType: null };
 }
 
-/** Keep only real user JIDs — never a group / broadcast JID — for `mentions`. */
+/**
+ * Keep only real user JIDs — never a group / broadcast JID — for `mentions`,
+ * deduped (e.g. an admin revoking their own message means deleter ===
+ * actualSender, which would otherwise mention the same person twice).
+ */
 export function sanitizeMentions(list) {
-  return (list || []).filter((j) => j && j.endsWith("@s.whatsapp.net"));
+  const seen = new Set();
+  for (const j of list || []) {
+    if (j && j.endsWith("@s.whatsapp.net")) seen.add(j);
+  }
+  return [...seen];
 }

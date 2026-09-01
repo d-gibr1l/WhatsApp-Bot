@@ -147,3 +147,10 @@ test("sanitizeMentions: handles an empty/missing list", () => {
   assert.deepEqual(sanitizeMentions([]), []);
   assert.deepEqual(sanitizeMentions(undefined), []);
 });
+
+test("sanitizeMentions: dedupes (admin revoking their own message mentions them once, not twice)", () => {
+  assert.deepEqual(
+    sanitizeMentions(["15551234567@s.whatsapp.net", "15551234567@s.whatsapp.net"]),
+    ["15551234567@s.whatsapp.net"],
+  );
+});
