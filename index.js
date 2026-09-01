@@ -1036,15 +1036,17 @@ const connectHooper = async (trigger) => {
         const deleterTag = deleter ? deleter.split("@")[0] : "unknown";
         const senderMentionTag = actualSender ? actualSender.split("@")[0] : "unknown";
         
-        // Determine what kind of media it is for the label
+        // Determine what kind of media it is: a human label + the exact
+        // type string `downloadContentFromMessage` expects (or null if
+        // it isn't downloadable media).
         let mediaLabel = "message";
-        if (contentType === "imageMessage") mediaLabel = "picture";
-        else if (contentType === "videoMessage") mediaLabel = "video";
-        else if (contentType === "audioMessage") mediaLabel = "audio";
-        else if (contentType === "stickerMessage") mediaLabel = "sticker";
-        else if (contentType === "documentMessage") mediaLabel = "document";
-        else if (contentType === "extendedTextMessage" || contentType === "conversation") mediaLabel = "message";
-        else mediaLabel = "message";
+        let mediaType = null;
+        if (contentType === "imageMessage") { mediaLabel = "picture"; mediaType = "image"; }
+        else if (contentType === "videoMessage") { mediaLabel = "video"; mediaType = "video"; }
+        else if (contentType === "ptvMessage") { mediaLabel = "video note"; mediaType = "ptv"; }
+        else if (contentType === "audioMessage") { mediaLabel = "audio"; mediaType = "audio"; }
+        else if (contentType === "stickerMessage") { mediaLabel = "sticker"; mediaType = "sticker"; }
+        else if (contentType === "documentMessage" || contentType === "documentWithCaptionMessage") { mediaLabel = "document"; mediaType = "document"; }
 
         if (update.messageStubType === 132) {
             actionText = `Admin @${deleterTag} deleted @${senderMentionTag}'s ${mediaLabel}:`;
@@ -1071,46 +1073,52 @@ const connectHooper = async (trigger) => {
                 // For pure text, send it all in one message
                 const finalMsg = `${header}\n${actionText}\n\n${textToSend}`;
                 await Hooper.sendMessage(targetJid, { text: finalMsg, mentions: mentionsList });
-            } else if (mediaLabel === "picture" || mediaLabel === "video") {
+            } else if (mediaType === "image" || mediaType === "video" || mediaType === "ptv") {
                 // For picture/video, embed the alert into the caption! (Also avoids the 'forwarded from group' bug for statuses)
                 const origCaption = content.caption ? `\n\n> ${content.caption}` : "";
                 const finalCaption = `${header}\n${actionText}${origCaption}`;
-                
+
                 try {
                     // Try downloading and resending directly to set the custom caption
-                    const stream = await downloadContentFromMessage(content, mediaLabel === "picture" ? "image" : "video");
+                    const stream = await downloadContentFromMessage(content, mediaType);
                     const chunks = [];
                     for await (const chunk of stream) chunks.push(chunk);
                     const mediaBuffer = Buffer.concat(chunks);
-                    
-                    if (mediaLabel === "picture") {
+
+                    if (mediaType === "image") {
                         await Hooper.sendMessage(targetJid, { image: mediaBuffer, caption: finalCaption, mentions: mentionsList });
                     } else {
                         await Hooper.sendMessage(targetJid, { video: mediaBuffer, caption: finalCaption, mentions: mentionsList });
                     }
                 } catch (e) {
-                    console.log("[ ANTI-DELETE ] Media download failed:", e);
-                    const alertMsg = await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: mentionsList });
+                    console.error(`[ ANTI-DELETE ] Failed to recover ${mediaLabel} (${contentType}):`, e);
+                    await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: mentionsList });
                 }
-            } else {
+            } else if (mediaType) {
                 // For audio, sticker, document, send the alert first
                 const alertText = `${header}\n${actionText}`;
                 const alertMsg = await Hooper.sendMessage(targetJid, { text: alertText, mentions: mentionsList });
-                
+
                 try {
                     // Force manual download to avoid the "forwarded from group" bug entirely
-                    const stream = await downloadContentFromMessage(content, mediaLabel === "picture" ? "image" : mediaLabel);
+                    const stream = await downloadContentFromMessage(content, mediaType);
                     const chunks = [];
                     for await (const chunk of stream) chunks.push(chunk);
                     const mediaBuffer = Buffer.concat(chunks);
-                    
-                    if (mediaLabel === "audio") await Hooper.sendMessage(targetJid, { audio: mediaBuffer, mimetype: content.mimetype || "audio/mp4" }, { quoted: alertMsg });
-                    else if (mediaLabel === "sticker") await Hooper.sendMessage(targetJid, { sticker: mediaBuffer }, { quoted: alertMsg });
+
+                    if (mediaType === "audio") await Hooper.sendMessage(targetJid, { audio: mediaBuffer, mimetype: content.mimetype || "audio/mp4" }, { quoted: alertMsg });
+                    else if (mediaType === "sticker") await Hooper.sendMessage(targetJid, { sticker: mediaBuffer }, { quoted: alertMsg });
                     else await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document" }, { quoted: alertMsg });
                 } catch (e) {
                     console.error(`[ ANTI-DELETE ] Failed to recover ${mediaLabel} (${contentType}):`, e);
                     await Hooper.sendMessage(targetJid, { text: `⚠️ Failed to recover the deleted ${mediaLabel}.` }, { quoted: alertMsg });
                 }
+            } else {
+                // Non-text, non-downloadable (poll, location, contact, etc.) — just notify.
+                await Hooper.sendMessage(targetJid, {
+                    text: `${header}\n${actionText}\n\n_(unsupported content type: ${contentType})_`,
+                    mentions: mentionsList,
+                });
             }
         };
 
