@@ -1143,14 +1143,6 @@ const connectHooper = async (trigger) => {
                 await sendDeletedMessage(chatId);
             }
         }
-        
-        continue;
-
-        // Fallback: unknown type — just notify
-        await Hooper.sendMessage(chatId, {
-          text: `🛡️ *Anti-Delete*\n\n${senderTag} deleted a message (type: ${contentType})`,
-          mentions: [deleter],
-        });
       } catch (e) {
         // Log but don't crash the event loop
         console.error(`[ ANTI-DELETE ] Failed to handle revoke for ${key?.id} in ${key?.remoteJid}:`, e);
