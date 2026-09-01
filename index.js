@@ -776,6 +776,14 @@ const connectHooper = async (trigger) => {
     const msg = chatUpdate.messages?.[0];
     if (!msg) return;
 
+    // Yield before doing any per-message work. Baileys emits the whole
+    // offline-message backlog in one synchronous burst on connect; without
+    // a break here every handler runs the heavy serialize() back-to-back
+    // and stacks unresolved core() promises, starving the loop until the
+    // process OOMs.
+    await new Promise((resolve) => setImmediate(resolve));
+    if (!isCurrentSocket(Hooper, generation)) return;
+
     // Prevent the bot from processing old messages
     let tsRaw = msg.messageTimestamp;
     if (typeof tsRaw === "object" && tsRaw !== null && "low" in tsRaw) tsRaw = tsRaw.low;
