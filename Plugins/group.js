@@ -10,9 +10,6 @@ import {
   setGroupChatbot,
   checkGroupChatbot,
   delGroupChatbot,
-  setAntidelete,
-  checkAntidelete,
-  delAntidelete,
   checkMod,
 } from "../System/MongoDB/MongoDb_Core.js";
 
@@ -29,8 +26,6 @@ const mergedCommands = [
   "remove",
   "revoke",
   "chatbotgc",
-  "antidel",
-  "antidelete",
 ];
 
 export default {
@@ -46,7 +41,6 @@ export default {
     "remove",
     "revoke",
     "chatbotgc",
-    "antidel",
   ],
   description: "All Group Management Commands",
   start: async (
@@ -539,48 +533,6 @@ export default {
           await doReact("❔");
           return m.reply(
             `Please provide On / Off action !\n\n*Example:*\n\n${prefix}welcome on`,
-          );
-        }
-        break;
-      }
-
-      case "antidel":
-      case "antidelete": {
-        if (m.from.endsWith("@g.us") && !isAdmin) {
-          await doReact("❌");
-          return m.reply(`*You* must be *Admin* in order to use this Command!`);
-        }
-        if (!text) {
-          await doReact("❔");
-          return m.reply(
-            `Please provide On / Off action !\n\n*Example:*\n\n${prefix}antidelete on`,
-          );
-        }
-        const antidelStatus = await checkAntidelete(m.from);
-        const action = args[0]?.toLowerCase();
-        
-        if (action == "on") {
-          if (antidelStatus) {
-            await doReact("❌");
-            return m.reply(`*Anti-Delete* is already *Enabled* !`);
-          }
-          await doReact("🛡️");
-          await setAntidelete(m.from);
-          await m.reply(
-            `*Anti-Delete* has been *Enabled* Successfully !\n\nDeleted messages will be resent by the bot.`,
-          );
-        } else if (action == "off") {
-          if (!antidelStatus) {
-            await doReact("❌");
-            return m.reply(`*Anti-Delete* is already *Disabled* !`);
-          }
-          await doReact("🛡️");
-          await delAntidelete(m.from);
-          await m.reply(`*Anti-Delete* has been *Disabled* Successfully !`);
-        } else {
-          await doReact("❔");
-          return m.reply(
-            `Please provide On / Off action !\n\n*Example:*\n\n${prefix}antidelete on`,
           );
         }
         break;

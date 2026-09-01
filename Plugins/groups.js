@@ -139,12 +139,24 @@ export default {
       }
       
       if (jidsToToggle.length === 0) return m.reply("No valid groups/chats found to toggle antidelete.");
-      
+
+      // Single current-chat toggle: give the friendly "already X" feedback.
+      if (!targetStr) {
+        const current = await checkAntidelete(m.from);
+        if (action === "on" && current) return m.reply("*Anti-Delete* is already *Enabled* !");
+        if (action === "off" && !current) return m.reply("*Anti-Delete* is already *Disabled* !");
+      }
+
       for (const jid of jidsToToggle) {
         if (action === "on") await setAntidelete(jid);
         else await delAntidelete(jid);
       }
-      
+
+      if (!targetStr) {
+        return m.reply(action === "on"
+          ? "*Anti-Delete* has been *Enabled* !\n\nDeleted messages will be resent by the bot."
+          : "*Anti-Delete* has been *Disabled* !");
+      }
       return m.reply(`✔️ Antidelete turned ${action.toUpperCase()} for ${jidsToToggle.length} chat(s).`);
     }
 
