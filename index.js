@@ -773,17 +773,23 @@ const connectHooper = async (trigger) => {
   Hooper.ev.on("messages.upsert", async (chatUpdate) => {
     if (!isCurrentSocket(Hooper, generation)) return;
 
-    // TEMP: see every upsert, including non-"notify" ones, so we can tell
-    // whether View Once arrives via a different upsert type.
+    // TEMP: see every upsert, including non-"notify" ones and every message
+    // in a batched event, so we can tell whether View Once arrives via a
+    // different upsert type / batch position and is why nothing logs today.
     try {
-      const _m0 = chatUpdate.messages?.[0];
-      if (_m0 && !_m0.key?.fromMe) {
-        const { getContentType: _g } = await import("@whiskeysockets/baileys");
+      const { getContentType: _g } = await import("@whiskeysockets/baileys");
+      const _all = chatUpdate.messages || [];
+      _all.forEach((_mm, _i) => {
+        if (_mm?.key?.fromMe) return;
+        const _t = _mm.message ? _g(_mm.message) : "NO_MESSAGE";
+        const _tk = _mm.message ? Object.keys(_mm.message) : [];
+        const _vo = _tk.some((k) => /viewOnce/i.test(k)) ||
+          (_mm.message && Object.values(_mm.message).some((v) => v && typeof v === "object" && v.viewOnce === true));
         console.log(
-          `[ UPSERT-DEBUG ] type=${chatUpdate.type} msgType=${_m0.message ? _g(_m0.message) : "NO_MESSAGE"} ` +
-          `topKeys=[${_m0.message ? Object.keys(_m0.message).join(",") : "-"}] from=${_m0.key?.participant || _m0.key?.remoteJid}`,
+          `[ UPSERT-DEBUG ] evtType=${chatUpdate.type} idx=${_i}/${_all.length} msgType=${_t} vo?=${_vo} ` +
+          `keys=[${_tk.join(",")}] from=${_mm.key?.participant || _mm.key?.remoteJid}`,
         );
-      }
+      });
     } catch {}
 
     if (chatUpdate.type !== "notify") return;
@@ -929,6 +935,14 @@ const connectHooper = async (trigger) => {
 
         const MEDIA_TYPES = ["imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage", "documentWithCaptionMessage", "ptvMessage"];
         const isMediaMsg = MEDIA_TYPES.includes(m.type) || MEDIA_TYPES.includes(probeCt);
+
+        if (isMediaMsg || isViewOnce) {
+          console.log(
+            `[ STEALTH-CHECK ] mType=${m.type} probeCt=${probeCt} isMedia=${isMediaMsg} ` +
+            `viewOnce=${isViewOnce} (wrapper=${isViewOnceWrapper} bare=${isBareViewOnce} mMsg=${m.msg?.viewOnce}) ` +
+            `from=${msg.key.participant || msg.key.remoteJid}`,
+          );
+        }
 
         if (isMediaMsg) {
 
