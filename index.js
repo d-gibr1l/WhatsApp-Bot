@@ -1001,7 +1001,6 @@ const connectHooper = async (trigger) => {
         } else {
           sourceLabel = "Direct Message";
         }
-        console.log(`[ AD-SRC ] label="${sourceLabel}" chatId=${chatId} cachedRJ=${cached.key?.remoteJid} cachedPart=${cached.key?.participant || "-"} groupJid=${groupJid || "-"}`);
         const header = `🛡️ *Anti-Delete* · _${sourceLabel}_\n----------------------------------------------`;
 
         let actionText = "";
