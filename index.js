@@ -919,12 +919,6 @@ const connectHooper = async (trigger) => {
         });
         const senderTag = deleter ? `@${deleter.split("@")[0]}` : "@unknown";
 
-        console.log(
-          `[ AD-DEBUG ] chatId=${chatId} updateKeys=${JSON.stringify(update)} ` +
-          `cachedKey=${JSON.stringify(cached.key)} actualSender=${actualSender} deleter=${deleter} ` +
-          `cachedMsgKeys=[${cached.message ? Object.keys(cached.message).join(",") : "-"}]`,
-        );
-
         const botJid = Hooper.user?.id ? jidNormalizedUser(Hooper.user.id) : null;
         
         // Skip if the original message was sent by the bot itself
@@ -972,7 +966,17 @@ const connectHooper = async (trigger) => {
             stripCtx(cached.message);
         }
         
-        const header = `🛡️ *Anti-Delete - C.U.N.T.S🐦*\n----------------------------------------------`;
+        // Where the message was deleted (so the header isn't misread as a
+        // group name — the old hardcoded "C.U.N.T.S🐦" branding was).
+        let sourceLabel = "Direct Message";
+        if (chatId.endsWith("@g.us")) {
+          try {
+            sourceLabel = (await Hooper.groupMetadata(chatId)).subject || "group";
+          } catch {
+            sourceLabel = "group";
+          }
+        }
+        const header = `🛡️ *Anti-Delete* · _${sourceLabel}_\n----------------------------------------------`;
 
         let actionText = "";
         let mentionsList = [];
@@ -1001,8 +1005,6 @@ const connectHooper = async (trigger) => {
         } else if (contentType === "extendedTextMessage") {
             textToSend = content?.text || "";
         }
-
-        console.log(`[ AD-DEBUG ] contentType=${contentType} mediaType=${mediaType} isChatEnabled=${isChatEnabled} ownerJid=${ownerJid} actionText="${actionText}" mentions=${JSON.stringify(mentionsList)} textToSend="${(textToSend||"").slice(0,60)}"`);
 
         const sendDeletedMessage = async (targetJid) => {
             if (!targetJid) return;
