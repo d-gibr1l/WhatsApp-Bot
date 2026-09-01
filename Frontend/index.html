@@ -10,8 +10,8 @@
 </head>
 <body>
 
-<div id="login-overlay" style="display:none; position:fixed; inset:0; z-index:1000; background:var(--bg-dark); align-items:center; justify-content:center; padding:16px;">
-  <form id="login-form" class="glass-surface" style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:14px;">
+<div id="auth-overlay" style="display:none; position:fixed; inset:0; z-index:1000; background:var(--bg-dark); align-items:center; justify-content:center; padding:16px;">
+  <form id="login-form" class="glass-surface" style="display:none; width:100%; max-width:340px; flex-direction:column; gap:14px;">
     <h1 style="font-size:1.3rem; color:var(--text-dark);">🔒 HOOPER Dashboard</h1>
     <p style="color:var(--text-muted); font-size:0.9rem; margin-top:-6px;">Enter the dashboard password to continue.</p>
     <input id="login-password" type="password" placeholder="Password" autocomplete="current-password"
@@ -21,6 +21,20 @@
       Log In
     </button>
     <p id="login-error" style="color:var(--danger); font-size:0.85rem; min-height:1em;"></p>
+  </form>
+
+  <form id="setup-form" class="glass-surface" style="display:none; width:100%; max-width:340px; flex-direction:column; gap:14px;">
+    <h1 style="font-size:1.3rem; color:var(--text-dark);">👋 Welcome to HOOPER</h1>
+    <p style="color:var(--text-muted); font-size:0.9rem; margin-top:-6px;">Choose a password to protect this dashboard. You'll use it to log in from now on.</p>
+    <input id="setup-password" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password"
+      style="padding:10px 12px; border-radius:8px; border:1px solid var(--input-border); font-size:1rem;" required minlength="8" />
+    <input id="setup-confirm" type="password" placeholder="Confirm password" autocomplete="new-password"
+      style="padding:10px 12px; border-radius:8px; border:1px solid var(--input-border); font-size:1rem;" required minlength="8" />
+    <button type="submit" id="setup-submit"
+      style="padding:10px 12px; border-radius:var(--radius-btn); border:none; background:var(--success); color:var(--text-light); font-weight:600; cursor:pointer;">
+      Set Password &amp; Continue
+    </button>
+    <p id="setup-error" style="color:var(--danger); font-size:0.85rem; min-height:1em;"></p>
   </form>
 </div>
 
@@ -130,7 +144,20 @@
   <!-- Settings Tab -->
   <div id="view-settings" class="tab-content glass-surface">
     <div class="settings-grid">
-      
+
+      <!-- Dashboard Password -->
+      <div class="setting-card" id="change-password-card">
+        <div class="setting-info">
+          <h3>Dashboard Password</h3>
+          <p>Change the password used to log into this dashboard.</p>
+        </div>
+        <div class="input-group" style="margin-top:12px; flex-direction:column; gap:8px; align-items:stretch;">
+          <input type="password" id="cfg-cur-pass" class="form-input" placeholder="Current password" autocomplete="current-password"/>
+          <input type="password" id="cfg-new-pass" class="form-input" placeholder="New password (min 8 chars)" autocomplete="new-password"/>
+          <button class="input-btn" onclick="changeDashboardPassword()" style="align-self:flex-end;">Update Password</button>
+        </div>
+      </div>
+
       <!-- Command Prefix -->
       <div class="setting-card">
         <div class="setting-info">

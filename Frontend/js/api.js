@@ -1,5 +1,19 @@
 // Handles all external backend communication
 const API = {
+  async fetchAuthState() {
+    const res = await fetch('/api/auth-state');
+    return res.json();
+  },
+
+  async setupPassword(password) {
+    const res = await fetch('/api/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    return res.json();
+  },
+
   async login(password) {
     const res = await fetch('/api/login', {
       method: 'POST',
@@ -11,6 +25,15 @@ const API = {
 
   async logout() {
     const res = await fetch('/api/logout', { method: 'POST' });
+    return res.json();
+  },
+
+  async changePassword(currentPassword, newPassword) {
+    const res = await fetch('/api/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
     return res.json();
   },
 

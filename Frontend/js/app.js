@@ -19,69 +19,109 @@ const featureLabels = {
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   setupEventListeners();
-  setupLoginForm();
+  setupAuthForms();
   authGate();
 });
 
 async function authGate() {
-  const authed = await checkAuthed();
-  if (authed) {
-    boot();
-  } else {
-    showLoginOverlay();
-  }
-}
-
-async function checkAuthed() {
+  let mode = 'login';
   try {
-    const res = await fetch('/api/status');
-    return res.status !== 401;
+    const state = await API.fetchAuthState();
+    mode = state.mode || 'login';
   } catch (e) {
-    return false;
+    mode = 'login';
+  }
+
+  if (mode === 'authed') {
+    hideAuthOverlay();
+    boot();
+  } else if (mode === 'setup') {
+    showAuthOverlay('setup');
+  } else {
+    showAuthOverlay('login');
   }
 }
 
-function showLoginOverlay() {
-  const overlay = document.getElementById('login-overlay');
-  if (overlay) overlay.style.display = 'flex';
-  const pw = document.getElementById('login-password');
-  if (pw) pw.focus();
+function showAuthOverlay(which) {
+  const overlay = document.getElementById('auth-overlay');
+  const loginForm = document.getElementById('login-form');
+  const setupForm = document.getElementById('setup-form');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  loginForm.style.display = which === 'login' ? 'flex' : 'none';
+  setupForm.style.display = which === 'setup' ? 'flex' : 'none';
+  const focusEl = document.getElementById(which === 'setup' ? 'setup-password' : 'login-password');
+  if (focusEl) focusEl.focus();
 }
 
-function hideLoginOverlay() {
-  const overlay = document.getElementById('login-overlay');
+function hideAuthOverlay() {
+  const overlay = document.getElementById('auth-overlay');
   if (overlay) overlay.style.display = 'none';
 }
 
-function setupLoginForm() {
-  const form = document.getElementById('login-form');
-  if (!form) return;
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const pwInput = document.getElementById('login-password');
-    const errorEl = document.getElementById('login-error');
-    const submitBtn = document.getElementById('login-submit');
-    const password = pwInput.value;
-    if (!password) return;
+function setupAuthForms() {
+  const loginForm = document.getElementById('login-form');
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pwInput = document.getElementById('login-password');
+      const errorEl = document.getElementById('login-error');
+      const submitBtn = document.getElementById('login-submit');
+      const password = pwInput.value;
+      if (!password) return;
 
-    errorEl.innerText = '';
-    submitBtn.disabled = true;
-    submitBtn.innerText = 'Logging in...';
-    try {
-      const data = await API.login(password);
-      if (data.success) {
-        pwInput.value = '';
-        hideLoginOverlay();
-        boot();
-      } else {
-        errorEl.innerText = data.error || 'Login failed.';
+      errorEl.innerText = '';
+      submitBtn.disabled = true;
+      submitBtn.innerText = 'Logging in...';
+      try {
+        const data = await API.login(password);
+        if (data.success) {
+          pwInput.value = '';
+          hideAuthOverlay();
+          boot();
+        } else {
+          errorEl.innerText = data.error || 'Login failed.';
+        }
+      } catch (e) {
+        errorEl.innerText = 'Network error.';
       }
-    } catch (e) {
-      errorEl.innerText = 'Network error.';
-    }
-    submitBtn.disabled = false;
-    submitBtn.innerText = 'Log In';
-  });
+      submitBtn.disabled = false;
+      submitBtn.innerText = 'Log In';
+    });
+  }
+
+  const setupForm = document.getElementById('setup-form');
+  if (setupForm) {
+    setupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pw = document.getElementById('setup-password').value;
+      const confirm = document.getElementById('setup-confirm').value;
+      const errorEl = document.getElementById('setup-error');
+      const submitBtn = document.getElementById('setup-submit');
+
+      errorEl.innerText = '';
+      if (pw.length < 8) { errorEl.innerText = 'Password must be at least 8 characters.'; return; }
+      if (pw !== confirm) { errorEl.innerText = 'Passwords do not match.'; return; }
+
+      submitBtn.disabled = true;
+      submitBtn.innerText = 'Saving...';
+      try {
+        const data = await API.setupPassword(pw);
+        if (data.success) {
+          document.getElementById('setup-password').value = '';
+          document.getElementById('setup-confirm').value = '';
+          hideAuthOverlay();
+          boot();
+        } else {
+          errorEl.innerText = data.error || 'Setup failed.';
+        }
+      } catch (e) {
+        errorEl.innerText = 'Network error.';
+      }
+      submitBtn.disabled = false;
+      submitBtn.innerText = 'Set Password & Continue';
+    });
+  }
 }
 
 function restoreTab() {
@@ -247,6 +287,27 @@ async function loadSettings() {
     showToast('Failed to load config', 'error');
   }
 }
+
+window.changeDashboardPassword = async function() {
+  const curEl = document.getElementById('cfg-cur-pass');
+  const newEl = document.getElementById('cfg-new-pass');
+  const current = curEl.value;
+  const next = newEl.value;
+  if (!current || !next) return showToast('Fill in both fields', 'error');
+  if (next.length < 8) return showToast('New password must be at least 8 characters', 'error');
+  try {
+    const data = await API.changePassword(current, next);
+    if (data.success) {
+      curEl.value = '';
+      newEl.value = '';
+      showToast('Dashboard password updated');
+    } else {
+      showToast(data.error || 'Failed to update password', 'error');
+    }
+  } catch (e) {
+    showToast('Network error', 'error');
+  }
+};
 
 window.saveConfig = async function(key, inputId) {
   const val = document.getElementById(inputId).value;

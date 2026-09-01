@@ -113,7 +113,7 @@ import {
 } from "./System/MongoDB/MongoDb_Core.js";
 import chalk from "chalk";
 import { spawn } from "child_process";
-import { resolveDashboardPassword, createDashboardAuth } from "./src/dashboard-auth.js";
+import { createDashboardAuth } from "./src/dashboard-auth.js";
 
 if (fs.existsSync("./wireproxy.conf")) {
   console.log(chalk.cyan("[ HOOPER ] Starting Wireproxy SOCKS5 proxy..."));
@@ -126,26 +126,20 @@ app.use(express.json());
 // ─── Dashboard auth ─────────────────────────────────────────────────────────
 // Every /api/* route below controls the live WhatsApp session (QR, pairing,
 // clear-session) or exposes secrets (/api/config), so the whole surface is
-// gated behind a password. Set DASHBOARD_PASSWORD to pick your own; otherwise
-// a random one is generated per-boot and printed once below — the dashboard
-// is unusable until you copy it from the logs.
-const { password: dashboardPassword, generated: dashboardPasswordGenerated } =
-  resolveDashboardPassword();
-if (dashboardPasswordGenerated) {
-  console.log(
-    chalk.bgYellow.black(
-      ` [ HOOPER ] No DASHBOARD_PASSWORD set — generated one for this session: ${dashboardPassword} `,
-    ),
-  );
-  console.log(
-    chalk.yellow(
-      `[ HOOPER ] This password changes every restart. Set DASHBOARD_PASSWORD in .env to keep it fixed.`,
-    ),
-  );
-} else {
+// gated behind a password. Priority: DASHBOARD_PASSWORD env var (fixed), then
+// a hash the operator sets on first visit ("setup" mode). The stored hash is
+// loaded from the DB later in initConfigAndStart().
+const DASHBOARD_ENV_PASSWORD = process.env.DASHBOARD_PASSWORD?.trim() || null;
+const dashboardAuth = createDashboardAuth({
+  envPassword: DASHBOARD_ENV_PASSWORD,
+  persistHash: async (hash) => {
+    const mod = await import("./src/db.js");
+    await mod.setSetting("dashboard_password_hash", hash);
+  },
+});
+if (DASHBOARD_ENV_PASSWORD) {
   console.log(chalk.green(`[ HOOPER ] Dashboard auth: using DASHBOARD_PASSWORD from environment.`));
 }
-const dashboardAuth = createDashboardAuth({ password: dashboardPassword });
 
 global.lidToJidMap = new Map();
 
@@ -1442,7 +1436,23 @@ const connectHooper = async (trigger) => {
 
 async function initConfigAndStart() {
   const db = await import("./src/db.js");
-  
+
+  // Load the dashboard password hash the operator set on a previous visit
+  // (skipped when DASHBOARD_PASSWORD env is in force).
+  if (!DASHBOARD_ENV_PASSWORD) {
+    try {
+      const storedHash = await db.getSetting("dashboard_password_hash", null);
+      dashboardAuth.setStoredHash(storedHash);
+      console.log(
+        storedHash
+          ? chalk.green(`[ HOOPER ] Dashboard auth: password configured.`)
+          : chalk.yellow(`[ HOOPER ] Dashboard auth: no password yet — set one on first visit to the dashboard.`),
+      );
+    } catch (e) {
+      console.warn(`[ HOOPER ] Could not load dashboard password hash: ${e.message}`);
+    }
+  }
+
   // Session ID: verify any saved ID actually has a session backup, otherwise auto-discover
   const { sessionSchema } = await import("./System/MongoAuth/Schema/index.js");
   let dbSessionId = await db.getSetting("HOOPER_SESSION_ID");
@@ -1770,9 +1780,12 @@ app.use("/", express.static(join(__dirname, "Frontend")));
 
 // Auth endpoints must be reachable without a session; everything else under
 // /api is gated by dashboardAuth.requireAuth below.
+app.get("/api/auth-state", dashboardAuth.authState);
+app.post("/api/setup", dashboardAuth.setup);
 app.post("/api/login", dashboardAuth.login);
 app.post("/api/logout", dashboardAuth.logout);
 app.use("/api", dashboardAuth.requireAuth);
+app.post("/api/change-password", dashboardAuth.changePassword);
 
 app.get("/api/status", (req, res) => {
   res.json({
