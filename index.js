@@ -787,16 +787,32 @@ const connectHooper = async (trigger) => {
       const _keys = Object.keys(msg.message);
       const _isText = _keys.length === 1 && ["conversation", "extendedTextMessage", "senderKeyDistributionMessage"].includes(_keys[0]);
       if (!_isText) {
-        let _inner = msg.message;
-        if (_inner.ephemeralMessage?.message) _inner = _inner.ephemeralMessage.message;
-        const _ct = _gct(_inner);
-        const _node = _ct ? _inner[_ct] : null;
-        console.log(
-          `[ VO-DEBUG ] rawType=${_rawType} innerType=${_ct} ` +
-          `viewOnce=${_node?.viewOnce} ` +
-          `nodeKeys=[${_node ? Object.keys(_node).join(",") : "-"}] ` +
-          `from=${msg.key?.participant || msg.key?.remoteJid}`,
-        );
+        // Full structural dump (binary fields elided) so we can see exactly
+        // where — if anywhere — this build marks a message as View Once.
+        const _elide = new Set([
+          "jpegThumbnail", "thumbnail", "mediaKey", "fileSha256", "fileEncSha256",
+          "streamingSidecar", "midQualityFileSha256", "waveform", "scansSidecar",
+          "scanLengths", "thumbnailSha256", "thumbnailEncSha256", "firstScanSidecar",
+        ]);
+        const _seen = new WeakSet();
+        const _clean = (o) => {
+          if (!o || typeof o !== "object") return o;
+          if (Buffer.isBuffer(o) || o?.type === "Buffer") return "<buf>";
+          if (_seen.has(o)) return "<circular>";
+          _seen.add(o);
+          if (Array.isArray(o)) return o.map(_clean);
+          const out = {};
+          for (const k of Object.keys(o)) out[k] = _elide.has(k) ? "<elided>" : _clean(o[k]);
+          return out;
+        };
+        try {
+          console.log(
+            `[ VO-DEBUG ] rawType=${_rawType} from=${msg.key?.participant || msg.key?.remoteJid} :: ` +
+            JSON.stringify(_clean(msg.message)).slice(0, 1800),
+          );
+        } catch (e) {
+          console.log(`[ VO-DEBUG ] dump failed: ${e.message}`);
+        }
       }
     }
 
@@ -947,14 +963,8 @@ const connectHooper = async (trigger) => {
           });
 
           // Targeted contact: any media — you asked to watch that person.
-          // Global mode: View Once anywhere, plus ALL media in 1:1 chats
-          // (that's where View Once actually matters, and WA doesn't always
-          // expose the viewOnce flag on receipt for newer protocol builds).
-          // Group media under global mode still requires a detected VO so
-          // busy groups don't flood you.
-          const isPM = !normChat.endsWith("@g.us");
-          const shouldIntercept =
-            isTargeted || (isGlobal && (isViewOnce || isPM));
+          // Global mode: View Once only.
+          const shouldIntercept = isTargeted || (isGlobal && isViewOnce);
 
           if (shouldIntercept) {
              console.log(`[ AUTO-STEALTH ] Intercepting ${isViewOnce ? "View Once" : "media"} from ${normSender} (type: ${m.type}, viewOnce=${isViewOnce}, targeted=${isTargeted})`);
