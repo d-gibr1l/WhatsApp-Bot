@@ -19,13 +19,33 @@ const LEGACY_KEY_TYPE_MAP = {
   senderKeyMemory: "sender-key-memory",
 };
 
+/**
+ * A session id is used both as a MongoDB key and as a directory name under
+ * SESSION_BASE_DIR. It can originate from a dashboard-set value, so strip it
+ * to a safe charset and refuse anything that would escape the base dir.
+ * @param {string} raw
+ * @returns {string}
+ */
+export function sanitizeSessionId(raw) {
+  const cleaned = String(raw ?? "").replace(/[^A-Za-z0-9._-]/g, "");
+  if (!cleaned) {
+    throw new Error(`Invalid session id (empty after sanitizing): ${JSON.stringify(raw)}`);
+  }
+  const resolved = path.resolve(SESSION_BASE_DIR, cleaned);
+  const rel = path.relative(SESSION_BASE_DIR, resolved);
+  if (!rel || rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) {
+    throw new Error(`Invalid session id (path traversal): ${JSON.stringify(raw)}`);
+  }
+  return cleaned;
+}
+
 export default class MongoAuth {
   /**
    * @param {string} sessionId
    */
   constructor(sessionId) {
-    this.sessionId = sessionId;
-    this.dir = path.join(SESSION_BASE_DIR, sessionId);
+    this.sessionId = sanitizeSessionId(sessionId);
+    this.dir = path.join(SESSION_BASE_DIR, this.sessionId);
   }
 
   /**

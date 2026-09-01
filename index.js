@@ -1475,6 +1475,23 @@ async function initConfigAndStart() {
     }
     await db.setSetting("HOOPER_SESSION_ID", dbSessionId);
   }
+
+  // Never let a stray/hostile value reach the filesystem path or Mongo key.
+  // Self-correct here (rather than crash-looping in MongoAuth's constructor)
+  // and persist the cleaned value.
+  try {
+    const { sanitizeSessionId } = await import("./System/MongoAuth/MongoAuth.js");
+    const safeSessionId = sanitizeSessionId(dbSessionId);
+    if (safeSessionId !== dbSessionId) {
+      console.warn(`[ HOOPER ] Sanitized session ID "${dbSessionId}" → "${safeSessionId}"`);
+      dbSessionId = safeSessionId;
+      await db.setSetting("HOOPER_SESSION_ID", dbSessionId);
+    }
+  } catch (e) {
+    dbSessionId = `HOOPER-MD-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    console.warn(`[ HOOPER ] Rejected invalid session ID (${e.message}) — generated "${dbSessionId}"`);
+    await db.setSetting("HOOPER_SESSION_ID", dbSessionId);
+  }
   global.sessionId = dbSessionId;
 
   // Load configs from Dashboard (MongoDB) to override .env
@@ -1963,10 +1980,36 @@ app.get("/api/config", async (req, res) => {
   }
 });
 
+// Only these settings may be written through the dashboard. Notably absent:
+// HOOPER_SESSION_ID — it names a filesystem directory and a Mongo key, and is
+// never meant to be operator-editable at runtime.
+const ALLOWED_CONFIG_KEYS = new Set([
+  "HOOPER_PREFIX",
+  "HOOPER_MODS",
+  "HOOPER_PACKNAME",
+  "HOOPER_AUTHOR",
+  "HOOPER_GEMINI_API",
+  "HOOPER_OPENAI_API",
+  "HOOPER_CLAUDE_API",
+  "HOOPER_TENOR_API",
+  "HOOPER_TMDB_API",
+  "HOOPER_GC_INTERVAL",
+  "R2_ACCOUNT_ID",
+  "R2_ACCESS_KEY",
+  "R2_SECRET_KEY",
+  "R2_BUCKET_NAME",
+  "R2_PUBLIC_URL",
+  "yt_cookies",
+  "rapidapi_key",
+]);
+
 app.post("/api/config", async (req, res) => {
   try {
     const { key, value } = req.body;
     if (!key) return res.status(400).json({ error: "key is required" });
+    if (!ALLOWED_CONFIG_KEYS.has(key)) {
+      return res.status(400).json({ error: `Unknown config key: ${key}` });
+    }
 
     const mod = await import("./src/db.js");
     await mod.setSetting(key, value);
