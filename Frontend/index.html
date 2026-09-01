@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0c1220">
   <title>HOOPER Dashboard</title>
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/layout.css">
@@ -10,65 +11,56 @@
 </head>
 <body>
 
-<div id="auth-overlay" style="display:none; position:fixed; inset:0; z-index:1000; background:var(--bg-dark); align-items:center; justify-content:center; padding:16px;">
-  <form id="login-form" class="glass-surface" style="display:none; width:100%; max-width:340px; flex-direction:column; gap:14px;">
-    <h1 style="font-size:1.3rem; color:var(--text-dark);">🔒 HOOPER Dashboard</h1>
-    <p style="color:var(--text-muted); font-size:0.9rem; margin-top:-6px;">Enter the dashboard password to continue.</p>
-    <input id="login-password" type="password" placeholder="Password" autocomplete="current-password"
-      style="padding:10px 12px; border-radius:8px; border:1px solid var(--input-border); font-size:1rem;" required />
-    <button type="submit" id="login-submit"
-      style="padding:10px 12px; border-radius:var(--radius-btn); border:none; background:var(--connecting); color:var(--text-light); font-weight:600; cursor:pointer;">
-      Log In
-    </button>
-    <p id="login-error" style="color:var(--danger); font-size:0.85rem; min-height:1em;"></p>
+<!-- ── Auth overlay ────────────────────────────────────────────────────── -->
+<div id="auth-overlay">
+  <form id="login-form" class="glass-surface">
+    <h1>🔒 HOOPER Dashboard</h1>
+    <p>Enter the dashboard password to continue.</p>
+    <input id="login-password" class="form-input" type="password" placeholder="Password" autocomplete="current-password" required>
+    <button type="submit" id="login-submit" class="input-btn btn-block">Log In</button>
+    <p id="login-error" class="auth-error"></p>
   </form>
 
-  <form id="setup-form" class="glass-surface" style="display:none; width:100%; max-width:340px; flex-direction:column; gap:14px;">
-    <h1 style="font-size:1.3rem; color:var(--text-dark);">👋 Welcome to HOOPER</h1>
-    <p style="color:var(--text-muted); font-size:0.9rem; margin-top:-6px;">Choose a password to protect this dashboard. You'll use it to log in from now on.</p>
-    <input id="setup-password" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password"
-      style="padding:10px 12px; border-radius:8px; border:1px solid var(--input-border); font-size:1rem;" required minlength="8" />
-    <input id="setup-confirm" type="password" placeholder="Confirm password" autocomplete="new-password"
-      style="padding:10px 12px; border-radius:8px; border:1px solid var(--input-border); font-size:1rem;" required minlength="8" />
-    <button type="submit" id="setup-submit"
-      style="padding:10px 12px; border-radius:var(--radius-btn); border:none; background:var(--success); color:var(--text-light); font-weight:600; cursor:pointer;">
-      Set Password &amp; Continue
-    </button>
-    <p id="setup-error" style="color:var(--danger); font-size:0.85rem; min-height:1em;"></p>
+  <form id="setup-form" class="glass-surface">
+    <h1>👋 Welcome to HOOPER</h1>
+    <p>Choose a password to protect this dashboard. You'll use it to log in from now on.</p>
+    <input id="setup-password" class="form-input" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password" minlength="8" required>
+    <input id="setup-confirm" class="form-input" type="password" placeholder="Confirm password" autocomplete="new-password" minlength="8" required>
+    <button type="submit" id="setup-submit" class="input-btn btn-block">Set Password &amp; Continue</button>
+    <p id="setup-error" class="auth-error"></p>
   </form>
 </div>
 
 <div class="wrap">
-  
-  <div class="header">
+
+  <!-- ── Header ────────────────────────────────────────────────────────── -->
+  <header class="header">
     <div class="logo">
-      <img src="TA.png" alt="HOOPER Logo" class="logo-icon">
+      <img src="TA.png" alt="HOOPER" class="logo-icon">
       <div class="logo-text">
         <h1>HOOPER Bot</h1>
+        <p>Control Panel</p>
       </div>
     </div>
-    
     <div class="header-right">
       <span class="status-pill waiting_qr" id="status-pill">
         <span class="pulse"></span>
-        <span id="header-status-text">Connecting...</span>
+        <span id="header-status-text">Connecting…</span>
       </span>
-      <button id="logout-btn" type="button"
-        style="margin-left:10px; padding:6px 12px; border-radius:var(--radius-btn); border:1px solid var(--input-border); background:transparent; color:var(--text-dark); cursor:pointer; font-size:0.85rem;">
-        Log Out
-      </button>
+      <button id="logout-btn" type="button" class="btn btn-ghost">Log Out</button>
     </div>
-  </div>
+  </header>
 
-  <div class="tabs-nav">
+  <!-- ── Tabs ──────────────────────────────────────────────────────────── -->
+  <nav class="tabs-nav">
     <button class="tab-btn active" data-tab="overview">Overview</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
     <button class="tab-btn" data-tab="modules">Modules</button>
-  </div>
+  </nav>
 
-  <!-- Overview Tab -->
-  <div id="view-overview" class="tab-content active glass-surface">
-    
+  <!-- ── Overview ──────────────────────────────────────────────────────── -->
+  <section id="view-overview" class="tab-content active glass-surface">
+
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-label">Uptime</div>
@@ -79,274 +71,231 @@
         <div class="stat-val" id="val-reconnects">--</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Node Version</div>
+        <div class="stat-label">Node</div>
         <div class="stat-val" id="val-node">--</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Bot Version</div>
         <div class="stat-val" id="val-bot">--</div>
       </div>
-      <div class="stat-card" style="grid-column: 1 / -1; max-width: 100%;">
+      <div class="stat-card stat-card--wide">
         <div class="stat-label">Storage Backend</div>
-        <div class="stat-val" id="val-storage" style="font-size: 1.1rem; color: var(--primary);">--</div>
+        <div class="stat-val" id="val-storage">--</div>
       </div>
     </div>
 
-    <!-- QR/Pairing Section -->
-    <div id="view-pairing" style="display: none; margin-top: 20px; text-align: center;">
-      <h2 style="margin-bottom: 15px;">Link Device</h2>
-      <p class="stat-label" style="margin-bottom: 20px;">Scan QR Code or enter number</p>
+    <!-- Pairing (shown only when disconnected) -->
+    <div id="view-pairing" style="display:none;">
+      <hr class="divider">
+      <div class="pair-panel">
+        <h2>Link Device</h2>
+        <p class="hint">Scan the QR code, or request a pairing code with your number.</p>
 
-      <div id="qr-container" style="display: none; justify-content: center; margin-bottom: 20px;">
-        <div class="qr-img-frame" style="padding: 12px; background: white; border-radius: 14px; box-shadow: 0 0 30px rgba(0,0,0,0.1);">
-          <img id="qr-image" src="" alt="Scan QR Code" style="display: block; width: 180px; height: 180px; border-radius: 8px;">
+        <div id="qr-container" style="display:none;">
+          <div class="qr-frame">
+            <img id="qr-image" src="" alt="Scan QR Code">
+          </div>
         </div>
-      </div>
-      
-      <form id="pair-form" style="display: flex; flex-direction: column; align-items: center; max-width: 400px; margin: 0 auto;">
-        <input type="text" id="phone-input" class="form-input" style="width:100%; text-align:center; font-size:1.2rem; padding:12px;" placeholder="e.g. 918888888888">
-        <button type="submit" class="input-btn" id="pair-btn" style="margin-top:15px; font-size:1rem; padding:12px 30px; border-radius:30px;">Get Pairing Code</button>
-      </form>
-      
-      <div id="pair-code-display" style="display:none; margin-top: 25px; font-size: 28px; font-weight: 900; letter-spacing: 4px; color: var(--bg-dark);"></div>
-      
-    </div>
-    
-    <!-- Clear Session Section -->
-    <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); text-align: center;">
-      <button class="input-btn" onclick="clearSession()" style="background-color: var(--danger, #ff4444); border-color: var(--danger, #ff4444); padding: 12px 30px; font-weight: bold; border-radius: 30px;">⚠️ Clear Session Data</button>
-      <p style="margin-top: 10px; color: var(--text-muted); font-size: 0.9rem;">Disconnects current WhatsApp account and restarts the bot to scan a new QR code.</p>
-    </div>
-    
-    <!-- Hidden Commands Section -->
-    <div id="hidden-commands" style="margin-top: 40px; text-align: left; padding: 20px; background: rgba(255,255,255,0.05); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
-      <h3 style="margin-bottom: 15px; color: var(--primary);">Hidden Commands</h3>
-      <div style="margin-bottom: 15px; line-height: 1.6;">
-        <strong style="font-size: 1.2rem; color: var(--text-main);">.//</strong> <span style="color: var(--text-muted);">(Single Action)</span> — <strong>Stealth Revive &amp; Save</strong>
-        <p style="margin-top: 4px; margin-bottom: 15px; color: var(--text-muted); font-size: 0.95rem;">
-          Reply to a <strong>View Once</strong> (or any message) with <code>.//</code> to silently save its media to your DM. WhatsApp never sends View Once media to the bot, so it's pulled from your reply — this only works as a reply.
-        </p>
 
-        <strong style="font-size: 1.2rem; color: var(--text-main);">.status</strong> <span style="color: var(--text-muted);">(Action & Auto)</span> — <strong>Status Saver & Forwarder</strong>
-        <p style="margin-top: 4px; color: var(--text-muted); font-size: 0.95rem;">
-          Send <code>.status @user</code> to instantly fetch and forward all of their recently posted statuses to your DM. Send <code>.auto status @user</code> to automatically forward their future statuses as soon as they are posted.
-        </p>
+        <form id="pair-form" class="pair-form">
+          <input type="text" id="phone-input" class="form-input" placeholder="e.g. 918888888888">
+          <button type="submit" id="pair-btn" class="input-btn">Get Pairing Code</button>
+        </form>
+
+        <div id="pair-code-display" class="pair-code" style="display:none;"></div>
       </div>
     </div>
 
-  </div>
+    <hr class="divider">
 
-  <!-- Settings Tab -->
-  <div id="view-settings" class="tab-content glass-surface">
+    <!-- Hidden commands -->
+    <div class="section-title">Hidden Commands</div>
     <div class="settings-grid">
+      <div class="info-card">
+        <h3><span class="cmd">.//</span> &nbsp;<span class="tag">Single Action</span></h3>
+        <p><strong>Stealth Revive &amp; Save.</strong> Reply to a View Once (or any message) with <code>.//</code> to silently save its media to your DM. WhatsApp never sends View Once media to the bot, so it's pulled from your reply — this only works as a reply.</p>
+      </div>
+      <div class="info-card">
+        <h3><span class="cmd">.status</span> &nbsp;<span class="tag">Action &amp; Auto</span></h3>
+        <p><strong>Status Saver &amp; Forwarder.</strong> Send <code>.status @user</code> to fetch and forward their recent statuses to your DM. Send <code>.auto status @user</code> to forward their future statuses automatically.</p>
+      </div>
+    </div>
 
-      <!-- Dashboard Password -->
-      <div class="setting-card" id="change-password-card">
+    <hr class="divider">
+
+    <!-- Danger zone -->
+    <div class="danger-zone">
+      <button class="btn btn-danger" onclick="clearSession()">⚠️ Clear Session Data</button>
+      <p>Disconnects the current WhatsApp account and restarts the bot to generate a new QR code.</p>
+    </div>
+
+  </section>
+
+  <!-- ── Settings ──────────────────────────────────────────────────────── -->
+  <section id="view-settings" class="tab-content glass-surface">
+
+    <div class="section-title">Dashboard</div>
+    <div class="settings-grid">
+      <div class="setting-card">
         <div class="setting-info">
           <h3>Dashboard Password</h3>
           <p>Change the password used to log into this dashboard.</p>
         </div>
-        <div class="input-group" style="margin-top:12px; flex-direction:column; gap:8px; align-items:stretch;">
-          <input type="password" id="cfg-cur-pass" class="form-input" placeholder="Current password" autocomplete="current-password"/>
-          <input type="password" id="cfg-new-pass" class="form-input" placeholder="New password (min 8 chars)" autocomplete="new-password"/>
-          <button class="input-btn" onclick="changeDashboardPassword()" style="align-self:flex-end;">Update Password</button>
+        <div class="input-group input-group--stack">
+          <input type="password" id="cfg-cur-pass" class="form-input" placeholder="Current password" autocomplete="current-password">
+          <input type="password" id="cfg-new-pass" class="form-input" placeholder="New password (min 8 chars)" autocomplete="new-password">
+          <button class="input-btn" onclick="changeDashboardPassword()">Update Password</button>
         </div>
       </div>
+    </div>
 
-      <!-- Command Prefix -->
+    <div class="section-title">General</div>
+    <div class="settings-grid">
       <div class="setting-card">
-        <div class="setting-info">
-          <h3>Command Prefix</h3>
-          <p>Trigger for bot commands (e.g., -, !, /)</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="text" id="cfg-prefix" class="form-input" placeholder="-"/>
+        <div class="setting-info"><h3>Command Prefix</h3><p>Trigger for bot commands (e.g. -, !, /).</p></div>
+        <div class="input-group">
+          <input type="text" id="cfg-prefix" class="form-input" placeholder="-">
           <button class="input-btn" onclick="saveConfig('HOOPER_PREFIX', 'cfg-prefix')">Save</button>
         </div>
       </div>
-
-      <!-- Moderators -->
       <div class="setting-card">
-        <div class="setting-info">
-          <h3>Moderators</h3>
-          <p>Comma-separated phone numbers</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="text" id="cfg-mods" class="form-input" placeholder="9181..."/>
+        <div class="setting-info"><h3>Moderators</h3><p>Comma-separated phone numbers.</p></div>
+        <div class="input-group">
+          <input type="text" id="cfg-mods" class="form-input" placeholder="9181...,2330...">
           <button class="input-btn" onclick="saveConfig('HOOPER_MODS', 'cfg-mods')">Save</button>
         </div>
       </div>
-
-      <!-- Sticker Pack -->
       <div class="setting-card">
-        <div class="setting-info">
-          <h3>Sticker Pack Name</h3>
-          <p>Default title applied to generated stickers</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="text" id="cfg-packname" class="form-input" placeholder="HOOPER"/>
+        <div class="setting-info"><h3>Sticker Pack Name</h3><p>Default title applied to generated stickers.</p></div>
+        <div class="input-group">
+          <input type="text" id="cfg-packname" class="form-input" placeholder="HOOPER">
           <button class="input-btn" onclick="saveConfig('HOOPER_PACKNAME', 'cfg-packname')">Save</button>
         </div>
       </div>
-
-      <!-- Sticker Author -->
       <div class="setting-card">
-        <div class="setting-info">
-          <h3>Sticker Author</h3>
-          <p>Author attribution for sticker packs</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="text" id="cfg-author" class="form-input" placeholder="by: HOOPER"/>
+        <div class="setting-info"><h3>Sticker Author</h3><p>Author attribution for sticker packs.</p></div>
+        <div class="input-group">
+          <input type="text" id="cfg-author" class="form-input" placeholder="by: HOOPER">
           <button class="input-btn" onclick="saveConfig('HOOPER_AUTHOR', 'cfg-author')">Save</button>
         </div>
       </div>
-
-      <!-- Gemini Key -->
       <div class="setting-card">
-        <div class="setting-info">
-          <h3>Gemini API Key</h3>
-          <p>Used for Google AI vision and text features</p>
+        <div class="setting-info"><h3>GC Interval (minutes)</h3><p>How often the bot forces garbage collection and syncs the session.</p></div>
+        <div class="input-group">
+          <input type="number" id="cfg-gc" class="form-input" placeholder="5" min="1">
+          <button class="input-btn" onclick="saveConfig('HOOPER_GC_INTERVAL', 'cfg-gc')">Save</button>
         </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="cfg-gemini" class="form-input" placeholder="AIzaSy..."/>
+      </div>
+    </div>
+
+    <div class="section-title">AI &amp; API Keys</div>
+    <div class="settings-grid">
+      <div class="setting-card">
+        <div class="setting-info"><h3>Gemini API Key</h3><p>Google AI vision and text features. Comma-separate multiple keys.</p></div>
+        <div class="input-group">
+          <input type="password" id="cfg-gemini" class="form-input" placeholder="AIzaSy...">
           <button class="input-btn" onclick="saveConfig('HOOPER_GEMINI_API', 'cfg-gemini')">Save</button>
         </div>
       </div>
-
-      <!-- RapidAPI Key -->
       <div class="setting-card">
-        <div class="setting-info">
-          <h3>RapidAPI Key</h3>
-          <p>API Key for RapidAPI Hub (used by the media downloader fallback chain).</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="cfg-rapidapi" class="form-input" placeholder="Enter RapidAPI Key..."/>
-          <button class="input-btn" onclick="saveConfig('rapidapi_key', 'cfg-rapidapi')">Save</button>
-        </div>
-      </div>\n      <!-- TMDB Key -->
-      <div class="setting-card">
-        <div class="setting-info">
-          <h3>TMDB API Key</h3>
-          <p>Used for the IMDb/movies command</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="cfg-tmdb" class="form-input" placeholder="your-tmdb-key"/>
-          <button class="input-btn" onclick="saveConfig('HOOPER_TMDB_API', 'cfg-tmdb')">Save</button>
-        </div>
-      </div>
-      
-      <!-- OpenAI Key -->
-      <div class="setting-card">
-        <div class="setting-info">
-          <h3>OpenAI API Key</h3>
-          <p>Used for ChatGPT features</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="cfg-openai" class="form-input" placeholder="sk-..."/>
+        <div class="setting-info"><h3>OpenAI API Key</h3><p>ChatGPT features. Comma-separate multiple keys.</p></div>
+        <div class="input-group">
+          <input type="password" id="cfg-openai" class="form-input" placeholder="sk-...">
           <button class="input-btn" onclick="saveConfig('HOOPER_OPENAI_API', 'cfg-openai')">Save</button>
         </div>
       </div>
-      
-      <!-- Cloudflare R2: Account ID -->
       <div class="setting-card">
-        <div class="setting-info">
-          <h3>Cloudflare R2 Account ID</h3>
-          <p>Required for bypassing IP/Disk limits on YouTube downloads</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="text" id="cfg-r2-account" class="form-input" placeholder="e.g. 1234abc5678def"/>
-          <button class="input-btn" onclick="saveConfig('R2_ACCOUNT_ID', 'cfg-r2-account')">Save</button>
+        <div class="setting-info"><h3>Claude API Key</h3><p>Anthropic Claude features. Comma-separate multiple keys.</p></div>
+        <div class="input-group">
+          <input type="password" id="cfg-claude" class="form-input" placeholder="sk-ant-...">
+          <button class="input-btn" onclick="saveConfig('HOOPER_CLAUDE_API', 'cfg-claude')">Save</button>
         </div>
       </div>
-      
-      <!-- Cloudflare R2: Access Key -->
       <div class="setting-card">
-        <div class="setting-info">
-          <h3>Cloudflare R2 Access Key</h3>
-          <p>S3 compatible access key</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="cfg-r2-access" class="form-input" placeholder="..."/>
-          <button class="input-btn" onclick="saveConfig('R2_ACCESS_KEY', 'cfg-r2-access')">Save</button>
+        <div class="setting-info"><h3>Tenor API Key</h3><p>GIF search support. Comma-separate multiple keys.</p></div>
+        <div class="input-group">
+          <input type="password" id="cfg-tenor" class="form-input" placeholder="AIzaSy...">
+          <button class="input-btn" onclick="saveConfig('HOOPER_TENOR_API', 'cfg-tenor')">Save</button>
         </div>
       </div>
-      
-      <!-- Cloudflare R2: Secret Key -->
       <div class="setting-card">
-        <div class="setting-info">
-          <h3>Cloudflare R2 Secret Key</h3>
-          <p>S3 compatible secret key</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="cfg-r2-secret" class="form-input" placeholder="..."/>
-          <button class="input-btn" onclick="saveConfig('R2_SECRET_KEY', 'cfg-r2-secret')">Save</button>
+        <div class="setting-info"><h3>TMDB API Key</h3><p>Used by the IMDb / movies command.</p></div>
+        <div class="input-group">
+          <input type="password" id="cfg-tmdb" class="form-input" placeholder="your-tmdb-key">
+          <button class="input-btn" onclick="saveConfig('HOOPER_TMDB_API', 'cfg-tmdb')">Save</button>
         </div>
       </div>
-
-      <!-- Cloudflare R2: Bucket Name -->
       <div class="setting-card">
-        <div class="setting-info">
-          <h3>Cloudflare R2 Bucket Name</h3>
-          <p>Where media will be uploaded (e.g. hooper-bucket)</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="text" id="cfg-r2-bucket" class="form-input" placeholder="my-bucket"/>
-          <button class="input-btn" onclick="saveConfig('R2_BUCKET_NAME', 'cfg-r2-bucket')">Save</button>
-        </div>
-      </div>
-      
-      <!-- Cloudflare R2: Public URL -->
-      <div class="setting-card">
-        <div class="setting-info">
-          <h3>Cloudflare R2 Public URL</h3>
-          <p>Custom domain attached to R2 (e.g. https://cdn.example.com)</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="text" id="cfg-r2-public" class="form-input" placeholder="https://..."/>
-          <button class="input-btn" onclick="saveConfig('R2_PUBLIC_URL', 'cfg-r2-public')">Save</button>
-        </div>
-      </div>
-
-      <!-- YouTube Cookies -->
-      <div class="setting-card">
-        <div class="setting-info">
-          <h3>YouTube Cookies (Raw Text)</h3>
-          <p>Paste the contents of cookies.txt exported from YouTube to bypass age restrictions and CAPTCHAs.</p>
-        </div>
-        <div class="input-group" style="margin-top:12px; flex-direction:column; gap:10px;">
-          <textarea id="cfg-yt-cookies" class="form-input" placeholder="# Netscape HTTP Cookie File\n..." style="width:100%; min-height:80px; font-family:monospace; font-size:0.8rem;"></textarea>
-          <button class="input-btn" onclick="saveConfig('yt_cookies', 'cfg-yt-cookies')" style="align-self:flex-end;">Save Cookies</button>
-        </div>
-      </div>
-
-      <!-- RapidAPI Key -->
-      <div class="setting-card">
-        <div class="setting-info">
-          <h3>RapidAPI Key</h3>
-          <p>API Key for RapidAPI Hub (used by the media downloader fallback chain).</p>
-        </div>
-        <div class="input-group" style="margin-top:12px;">
-          <input type="password" id="cfg-rapidapi" class="form-input" placeholder="Enter RapidAPI Key..."/>
+        <div class="setting-info"><h3>RapidAPI Key</h3><p>RapidAPI Hub key — used by the media downloader fallback chain.</p></div>
+        <div class="input-group">
+          <input type="password" id="cfg-rapidapi" class="form-input" placeholder="Enter RapidAPI key...">
           <button class="input-btn" onclick="saveConfig('rapidapi_key', 'cfg-rapidapi')">Save</button>
         </div>
       </div>
-
     </div>
-  </div>
 
-  <!-- Modules Tab -->
-  <div id="view-modules" class="tab-content glass-surface">
-    <div style="margin-bottom:20px;">
-      <h3 style="margin-bottom:10px;">Select Group</h3>
-      <select id="group-select" class="form-input" style="width:100%; max-width:400px; padding:10px;">
-        <option value="" disabled selected>Loading groups...</option>
+    <div class="section-title">Cloudflare R2 Storage</div>
+    <div class="settings-grid">
+      <div class="setting-card">
+        <div class="setting-info"><h3>R2 Account ID</h3><p>Required to bypass IP / disk limits on YouTube downloads.</p></div>
+        <div class="input-group">
+          <input type="text" id="cfg-r2-account" class="form-input" placeholder="1234abc5678def">
+          <button class="input-btn" onclick="saveConfig('R2_ACCOUNT_ID', 'cfg-r2-account')">Save</button>
+        </div>
+      </div>
+      <div class="setting-card">
+        <div class="setting-info"><h3>R2 Access Key</h3><p>S3-compatible access key.</p></div>
+        <div class="input-group">
+          <input type="password" id="cfg-r2-access" class="form-input" placeholder="...">
+          <button class="input-btn" onclick="saveConfig('R2_ACCESS_KEY', 'cfg-r2-access')">Save</button>
+        </div>
+      </div>
+      <div class="setting-card">
+        <div class="setting-info"><h3>R2 Secret Key</h3><p>S3-compatible secret key.</p></div>
+        <div class="input-group">
+          <input type="password" id="cfg-r2-secret" class="form-input" placeholder="...">
+          <button class="input-btn" onclick="saveConfig('R2_SECRET_KEY', 'cfg-r2-secret')">Save</button>
+        </div>
+      </div>
+      <div class="setting-card">
+        <div class="setting-info"><h3>R2 Bucket Name</h3><p>Where media is uploaded (e.g. hooper-bucket).</p></div>
+        <div class="input-group">
+          <input type="text" id="cfg-r2-bucket" class="form-input" placeholder="my-bucket">
+          <button class="input-btn" onclick="saveConfig('R2_BUCKET_NAME', 'cfg-r2-bucket')">Save</button>
+        </div>
+      </div>
+      <div class="setting-card">
+        <div class="setting-info"><h3>R2 Public URL</h3><p>Custom domain attached to R2 (e.g. https://cdn.example.com).</p></div>
+        <div class="input-group">
+          <input type="text" id="cfg-r2-public" class="form-input" placeholder="https://...">
+          <button class="input-btn" onclick="saveConfig('R2_PUBLIC_URL', 'cfg-r2-public')">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Downloader</div>
+    <div class="settings-grid">
+      <div class="setting-card">
+        <div class="setting-info"><h3>YouTube Cookies</h3><p>Paste the contents of a cookies.txt exported from YouTube to bypass age gates and CAPTCHAs.</p></div>
+        <div class="input-group input-group--stack">
+          <textarea id="cfg-yt-cookies" class="form-input" placeholder="# Netscape HTTP Cookie File"></textarea>
+          <button class="input-btn" onclick="saveConfig('yt_cookies', 'cfg-yt-cookies')">Save Cookies</button>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ── Modules ───────────────────────────────────────────────────────── -->
+  <section id="view-modules" class="tab-content glass-surface">
+    <div class="section-title">Per-Group Modules</div>
+    <div style="margin-bottom:18px;">
+      <select id="group-select" class="form-input" style="max-width:420px;">
+        <option value="" disabled selected>Loading groups…</option>
       </select>
     </div>
-
-    <div class="settings-grid" id="toggles-list">
-      <!-- Injected by JS -->
-    </div>
-  </div>
+    <div class="settings-grid" id="toggles-list"></div>
+  </section>
 
 </div>
 
