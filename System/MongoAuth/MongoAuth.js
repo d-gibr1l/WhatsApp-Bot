@@ -129,7 +129,12 @@ export default class MongoAuth {
 
     await sessionSchema.updateOne(
       { sessionId: this.sessionId },
-      { $set: { files, lastSync: new Date() } },
+      {
+        $set: { files, lastSync: new Date() },
+        // Once we're storing the file-based format, the legacy single-blob
+        // field is stale — drop it so it can't shadow future reads.
+        $unset: { session: "" },
+      },
       { upsert: true },
     );
   }
@@ -166,17 +171,29 @@ export default class MongoAuth {
     const doc = await sessionSchema.findOne({ sessionId: this.sessionId });
     if (!doc) return;
 
-    if (doc.session && !doc.files) {
+    // `files` defaults to {} in the schema, so check for real content rather
+    // than truthiness before falling back to the legacy blob.
+    const hasFiles = doc.files && Object.keys(doc.files).length > 0;
+
+    if (doc.session && !hasFiles) {
       await this._migrateLegacySession(doc.session);
       return;
     }
 
-    if (!doc.files) return;
+    if (!hasFiles) return;
     await fs.promises.mkdir(this.dir, { recursive: true });
     for (const [filename, base64Content] of Object.entries(doc.files)) {
       if (!base64Content || base64Content.length === 0) {
         console.log(
           `[ HOOPER ] [${this.sessionId}] Skipping empty entry in MongoDB session: ${filename}`,
+        );
+        continue;
+      }
+      // Defensive: session filenames are always flat basenames; never let a
+      // tampered DB entry write outside the session dir.
+      if (filename !== path.basename(filename)) {
+        console.warn(
+          `[ HOOPER ] [${this.sessionId}] Skipping suspicious session filename: ${filename}`,
         );
         continue;
       }
@@ -221,8 +238,15 @@ export default class MongoAuth {
       const keyData = keys[storageKey];
       if (!keyData || typeof keyData !== "object") continue;
       for (const [id, value] of Object.entries(keyData)) {
+        const fileName = `${baileyType}-${id}.json`;
+        if (fileName !== path.basename(fileName)) {
+          console.warn(
+            `[ HOOPER ] [${this.sessionId}] Skipping suspicious legacy key id: ${id}`,
+          );
+          continue;
+        }
         await fs.promises.writeFile(
-          path.join(this.dir, `${baileyType}-${id}.json`),
+          path.join(this.dir, fileName),
           JSON.stringify(value, BufferJSON.replacer),
         );
       }
