@@ -428,14 +428,19 @@ async function checkAntidelete(groupID) {
     _setGroup(groupID, { antidelete: false });
     return false;
   }
+  // Coerce: an old doc predating this field can have antidelete === undefined,
+  // and _getGroup's cache-hit check is `!== undefined` — an uncoerced
+  // undefined would never satisfy it, so every single deleted message would
+  // re-hit Mongo for that chat forever instead of getting cached.
+  const antideleteStatus = !!group.antidelete;
   _setGroup(groupID, {
-    antidelete: group.antidelete,
+    antidelete: antideleteStatus,
     antilink: group.antilink,
     switchWelcome: group.switchWelcome,
     chatBot: group.chatBot,
     bangroup: group.bangroup,
   });
-  return group.antidelete;
+  return antideleteStatus;
 }
 
 // DELETE ANTI-DELETE
