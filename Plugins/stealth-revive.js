@@ -94,7 +94,9 @@ export default {
 
   // Owner reacts 🕵️‍♂️ / 👀 to any message -> the bot saves it to the owner's DM.
   reaction: async (Hooper, m) => {
-    if (m.msg?.text !== "🕵️‍♂️" && m.msg?.text !== "👀") return;
+    // Accept any detective ( 🕵️ / 🕵️‍♂️ / 🕵️‍♀️ ) or eyes ( 👀 ) reaction.
+    const emoji = m.msg?.text || "";
+    if (!emoji.includes("\u{1F575}") && !emoji.includes("\u{1F440}")) return;
 
     // Only the bot owner may trigger this. Match on: the bot itself reacted
     // (single-number setup), the reactor's digits are in global.owner, or a
