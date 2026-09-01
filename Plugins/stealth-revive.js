@@ -19,10 +19,8 @@ export default {
       // Handle Auto-Stealth Toggles
       if (inputCMD === "///" || (inputCMD === "stealth" && (text || !m.quoted))) {
         let targetJid = m.from; // Default to current chat
-        // `///` on its own = GLOBAL toggle (intercept View Once from every
-        // chat). `stealth` on its own = toggle just the current chat.
-        let isGlobal = inputCMD === "///" && !text;
-
+        let isGlobal = false;
+        
         if (text) {
           if (text.toLowerCase() === "all") {
              isGlobal = true;
