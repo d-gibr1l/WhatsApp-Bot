@@ -960,9 +960,26 @@ const connectHooper = async (trigger) => {
           jidNormalizedUser,
         } = await import("@whiskeysockets/baileys");
 
-        const actualSender = cached.key.fromMe ? (Hooper.user?.id || "") : (cached.key.participant || cached.key.remoteJid || "");
-        const deleter = update.participant || actualSender || "";
-        const senderTag = deleter ? `@${jidNormalizedUser(deleter).split("@")[0]}` : "@unknown";
+        const isGroupChat = (chatId || "").endsWith("@g.us");
+
+        // Resolve @lid → phone JID so mentions actually render, and never
+        // let a group JID leak into a mention (WhatsApp renders a @g.us
+        // mention as the whole group → "deleted message from <group>").
+        const resolveUser = (jid) => {
+          if (!jid) return "";
+          if (jid.endsWith("@lid") && global.lidToJidMap?.has(jid)) jid = global.lidToJidMap.get(jid);
+          jid = jidNormalizedUser(jid);
+          return jid.endsWith("@s.whatsapp.net") ? jid : "";
+        };
+
+        // In a group the real author is always key.participant; only fall
+        // back to remoteJid for 1:1 chats (where it *is* the user).
+        const rawSender = cached.key.fromMe
+          ? (Hooper.user?.id || "")
+          : (cached.key.participant || (isGroupChat ? "" : cached.key.remoteJid) || "");
+        const actualSender = resolveUser(rawSender);
+        const deleter = resolveUser(update.participant || rawSender || "");
+        const senderTag = deleter ? `@${deleter.split("@")[0]}` : "@unknown";
 
         const botJid = Hooper.user?.id ? jidNormalizedUser(Hooper.user.id) : null;
         
@@ -1016,8 +1033,8 @@ const connectHooper = async (trigger) => {
         let actionText = "";
         let mentionsList = [];
         
-        const deleterTag = jidNormalizedUser(deleter).split("@")[0];
-        const senderMentionTag = jidNormalizedUser(actualSender).split("@")[0];
+        const deleterTag = deleter ? deleter.split("@")[0] : "unknown";
+        const senderMentionTag = actualSender ? actualSender.split("@")[0] : "unknown";
         
         // Determine what kind of media it is for the label
         let mediaLabel = "message";
@@ -1036,6 +1053,8 @@ const connectHooper = async (trigger) => {
             actionText = `@${senderMentionTag} deleted this ${mediaLabel}:`;
             mentionsList = [actualSender]; // Actual sender deleted their own message
         }
+        // Only mention real user JIDs — never a group/broadcast JID.
+        mentionsList = mentionsList.filter((j) => j && j.endsWith("@s.whatsapp.net"));
         
         // Extract text if it's a text message
         let textToSend = "";
@@ -1089,6 +1108,7 @@ const connectHooper = async (trigger) => {
                     else if (mediaLabel === "sticker") await Hooper.sendMessage(targetJid, { sticker: mediaBuffer }, { quoted: alertMsg });
                     else await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document" }, { quoted: alertMsg });
                 } catch (e) {
+                    console.error(`[ ANTI-DELETE ] Failed to recover ${mediaLabel} (${contentType}):`, e);
                     await Hooper.sendMessage(targetJid, { text: `⚠️ Failed to recover the deleted ${mediaLabel}.` }, { quoted: alertMsg });
                 }
             }
@@ -1132,7 +1152,8 @@ const connectHooper = async (trigger) => {
           mentions: [deleter],
         });
       } catch (e) {
-        // Silently skip errors — don't crash the event loop
+        // Log but don't crash the event loop
+        console.error(`[ ANTI-DELETE ] Failed to handle revoke for ${key?.id} in ${key?.remoteJid}:`, e);
       }
     }
   });
