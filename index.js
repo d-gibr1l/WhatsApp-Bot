@@ -156,6 +156,26 @@ function isDuplicateRevoke(dedupKey) {
   return false;
 }
 
+// Auto-stealth settings, cached in memory so the message handler never hits
+// MongoDB per-message (that storm was freezing the bot in busy groups).
+let _stealthCfg = { global: false, targets: [], ts: 0 };
+async function getStealthConfig() {
+  if (Date.now() - _stealthCfg.ts < 30_000) return _stealthCfg;
+  try {
+    const db = await import("./src/db.js");
+    const global_ = await db.getBoolSetting("auto_stealth", false);
+    const str = await db.getSetting("auto_stealth_targets", "");
+    _stealthCfg = {
+      global: global_,
+      targets: str ? str.split(",").filter(Boolean) : [],
+      ts: Date.now(),
+    };
+  } catch {
+    _stealthCfg.ts = Date.now(); // don't hammer the DB on errors
+  }
+  return _stealthCfg;
+}
+
 const MESSAGE_CACHE_TTL_MS =
   Math.max(
     30,
@@ -772,42 +792,16 @@ const connectHooper = async (trigger) => {
 
   Hooper.ev.on("messages.upsert", async (chatUpdate) => {
     if (!isCurrentSocket(Hooper, generation)) return;
-    if (chatUpdate.requestId) {
-      const _m = chatUpdate.messages?.[0];
-      console.log(`[ AUTO-STEALTH ] PDO response upsert requestId=${chatUpdate.requestId} id=${_m?.key?.id} hasMsg=${!!_m?.message} isVO=${_m?.key?.isViewOnce}`);
-    }
     if (chatUpdate.type !== "notify") return;
     const msg = chatUpdate.messages?.[0];
     if (!msg) return;
 
-    // ── View Once recovery ────────────────────────────────────────────────
-    // WhatsApp does NOT deliver View Once media to linked devices — it sends
-    // an "unavailable/view_once" stub (Baileys marks it key.isViewOnce with
-    // an empty message). Ask the phone to resend the real content via a
-    // placeholder-resend PDO; Baileys re-emits it as a fresh messages.upsert
-    // with the full message, which then flows through the interceptor below.
-    if (msg.key?.isViewOnce && !msg.message && !msg.key.fromMe) {
-      try {
-        const cleanKey = {
-          remoteJid: msg.key.remoteJid,
-          fromMe: false,
-          id: msg.key.id,
-          participant: msg.key.participant || undefined,
-        };
-        Promise.resolve(
-          Hooper.requestPlaceholderResend?.(cleanKey, {
-            key: msg.key,
-            messageTimestamp: msg.messageTimestamp,
-            pushName: msg.pushName,
-          }),
-        )
-          .then((r) => console.log(`[ AUTO-STEALTH ] View Once ${msg.key.id}: requested content from phone (${r || "sent"})`))
-          .catch((e) => console.error(`[ AUTO-STEALTH ] View Once resend request failed: ${e?.message || e}`));
-      } catch (e) {
-        console.error("[ AUTO-STEALTH ] requestPlaceholderResend error:", e?.message || e);
-      }
-      return; // empty stub — wait for the resent copy
-    }
+    // NOTE: On current WhatsApp builds, View Once media is NOT delivered to
+    // linked devices at all — only an empty "unavailable/view_once" stub
+    // (msg.key.isViewOnce, msg.message === null). There is nothing to
+    // intercept here; the manual `.//` / reaction handlers still work
+    // because the content is embedded when someone quotes the message.
+    if (msg.key?.isViewOnce && !msg.message) return;
 
     // Prevent the bot from processing old messages
     let tsRaw = msg.messageTimestamp;
@@ -882,169 +876,50 @@ const connectHooper = async (trigger) => {
 
     core(Hooper, m, commands, chatUpdate);
 
-    // ─── Unified Auto-Stealth View Once Interceptor ──────────────────────
+    // ─── Auto-Stealth View Once Interceptor ─────────────────────────────
+    // Only ever acts on messages that carry a real, downloadable View Once
+    // payload. On current WhatsApp builds that basically never happens on a
+    // linked device (see the key.isViewOnce guard above) — but older clients
+    // / some contacts still send the classic viewOnceMessage wrapper, and
+    // this handles those without touching the DB for every sticker.
     try {
-      if (!m.key.fromMe && msg.message) {
-        const { getContentType, jidNormalizedUser } = await import("@whiskeysockets/baileys");
-        
-        // 1. View Once detection. Shapes seen in the wild:
-        //    (a) a viewOnceMessage* wrapper (possibly under ephemeralMessage)
-        //    (b) a bare imageMessage/videoMessage/audioMessage with its own
-        //        `viewOnce: true` field
-        //    (c) key.isViewOnce set by Baileys on the resent copy (this build)
-        const VO_KEYS = ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"];
-        let probe = msg.message;
-        if (probe?.ephemeralMessage?.message) probe = probe.ephemeralMessage.message;
-        const voKey = VO_KEYS.find((k) => probe?.[k]);
-        const isViewOnceWrapper = Boolean(voKey);
+      if (!m.key.fromMe && m.msg?.viewOnce === true &&
+          ["imageMessage", "videoMessage", "audioMessage"].includes(m.type)) {
+        const cfg = await getStealthConfig();
+        const rawChatJid = m.key.remoteJid || "";
+        const rawSenderJid = m.key.participant || rawChatJid;
+        const cand = new Set(
+          [rawChatJid, rawSenderJid, m.key.participantAlt, m.key.remoteJidAlt, m.key.participantPn].filter(Boolean),
+        );
+        const isTargeted = cfg.targets.some((t) => cand.has(t));
 
-        const probeCt = getContentType(probe);
-        const probeNode = probeCt ? probe[probeCt] : null;
-
-        const rawType = voKey || probeCt || getContentType(msg.message);
-        const isViewOnce =
-          isViewOnceWrapper ||
-          probeNode?.viewOnce === true ||
-          m.msg?.viewOnce === true ||
-          msg.key?.isViewOnce === true;
-
-        const MEDIA_TYPES = ["imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage", "documentWithCaptionMessage", "ptvMessage"];
-        const isMediaMsg = MEDIA_TYPES.includes(m.type) || MEDIA_TYPES.includes(probeCt);
-
-        if (isMediaMsg) {
-
-          // 2. Fetch targets & Normalize JIDs
-          const db = await import("./src/db.js");
-          const isGlobal = await db.getBoolSetting("auto_stealth", false);
-          const targetsStr = await db.getSetting("auto_stealth_targets", "");
-          const targets = targetsStr ? targetsStr.split(",").filter(Boolean) : [];
-
-          const rawChatJid = msg.key.remoteJid || "";
-          const rawSenderJid = msg.key.participant || rawChatJid;
-
-          const normChat = jidNormalizedUser(rawChatJid);
-          const normSender = jidNormalizedUser(rawSenderJid);
-
-          // 3. Build every identifier this message could be known by — raw
-          // JIDs, their LID<->phone map resolutions, Baileys v7 alt fields,
-          // and bare digits — then match against the (similarly expanded)
-          // target list. Belt-and-braces because a targeted contact is often
-          // stored as a phone JID while the message arrives as a @lid.
-          const expand = (jid) => {
-            const out = new Set();
-            if (!jid) return out;
-            out.add(jid);
-            const norm = jidNormalizedUser(jid);
-            out.add(norm);
-            const mapped = global.lidToJidMap?.get(jid) || global.lidToJidMap?.get(norm);
-            if (mapped) { out.add(mapped); out.add(jidNormalizedUser(mapped)); }
-            const digits = norm.replace(/[^0-9]/g, "");
-            if (digits.length >= 7 && digits.length <= 15) out.add(digits);
-            return out;
-          };
-
-          const msgIds = new Set();
-          for (const j of [
-            rawChatJid, rawSenderJid,
-            msg.key.participantAlt, msg.key.remoteJidAlt,
-            msg.key.participantPn, msg.key.senderPn,
-          ]) {
-            for (const v of expand(j)) msgIds.add(v);
-          }
-
-          const isTargeted = targets.some((t) => {
-            for (const v of expand(t)) if (msgIds.has(v)) return true;
-            return false;
-          });
-
-          // Targeted contact: any media — you asked to watch that person.
-          // Global mode: View Once only.
-          const shouldIntercept = isTargeted || (isGlobal && isViewOnce);
-
-          if (shouldIntercept) {
-             console.log(`[ AUTO-STEALTH ] Intercepting ${isViewOnce ? "View Once" : "media"} from ${normSender} (type: ${m.type}, viewOnce=${isViewOnce}, targeted=${isTargeted})`);
-
-             // 4. Resolve the media node. `m.msg` is already unwrapped by
-             // serialize() (it runs extractMessageContent), so ephemeral +
-             // viewOnce wrappers are gone and mime/keys are reliable — but
-             // fall back to digging the raw wrapper just in case.
-             let media = m.msg;
-             let mediaCt = m.type;
-             if ((!media?.mimetype && !media?.directPath) && isViewOnceWrapper) {
-               const inner = probe?.[rawType]?.message;
-               const innerCt = inner ? getContentType(inner) : null;
-               if (inner && innerCt) { media = inner[innerCt]; mediaCt = innerCt; }
-             }
-
-             const mime = media?.mimetype || "";
-             const captionText = media?.caption || "";
-
-             let dlType = null;
-             if (mediaCt === "imageMessage" || /image\//.test(mime)) dlType = "image";
-             else if (mediaCt === "videoMessage" || mediaCt === "ptvMessage" || /video\//.test(mime)) dlType = "video";
-             else if (mediaCt === "audioMessage" || /audio\//.test(mime)) dlType = "audio";
-             else if (mediaCt === "stickerMessage") dlType = "sticker";
-             else if (mediaCt === "documentMessage" || mediaCt === "documentWithCaptionMessage") dlType = "document";
-
-             if (!dlType || !media) {
-               console.log(`[ AUTO-STEALTH ] Skipping — unrecognized media (type: ${mediaCt}, mime: "${mime}")`);
-             } else {
-               // 5. Download the bare media node (same path the manual .//
-               // and 🕵️ reaction handlers use, which are known to work).
-               let buffer = null;
-               try {
-                 const { downloadContentFromMessage } = await import("@whiskeysockets/baileys");
-                 const stream = await downloadContentFromMessage(media, dlType);
-                 const chunks = [];
-                 for await (const chunk of stream) chunks.push(chunk);
-                 buffer = Buffer.concat(chunks);
-               } catch (dlErr) {
-                 console.error("[ AUTO-STEALTH ] downloadContentFromMessage failed, trying high-level:", dlErr.message);
-                 try { buffer = await Hooper.downloadMediaMessage(msg); } catch (e2) {
-                   console.error("[ AUTO-STEALTH ] high-level download also failed:", e2.message);
-                 }
-               }
-
-               if (!buffer || !buffer.length) {
-                 console.log(`[ AUTO-STEALTH ] Failed: could not download the media.`);
-               } else {
-                 // Send to the configured owner, not the bot's own number.
-                 const ownerJid = (global.owner && global.owner.length > 0)
-                   ? `${global.owner[0].replace(/[^0-9]/g, "")}@s.whatsapp.net`
-                   : Hooper.user.id.replace(/:.*@/, "@");
-                 const senderNum = normSender.split("@")[0];
-                 const isGroup = normChat.endsWith("@g.us");
-                 const senderTag = isGroup ? `@${senderNum} in group` : `@${senderNum}`;
-                 const sourceTag = isGroup ? ` (${normChat})` : "";
-                 const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${sourceTag}${captionText ? `\nCaption: ${captionText}` : ""}`;
-                 const mentions = normSender.endsWith("@s.whatsapp.net") ? [normSender] : [];
-
-                 if (dlType === "image") {
-                   await Hooper.sendMessage(ownerJid, { image: buffer, caption, mentions });
-                 } else if (dlType === "video") {
-                   await Hooper.sendMessage(ownerJid, { video: buffer, caption, mentions });
-                 } else if (dlType === "audio") {
-                   await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: mime || "audio/mp4", ptt: !!media.ptt });
-                   await Hooper.sendMessage(ownerJid, { text: caption, mentions });
-                 } else if (dlType === "sticker") {
-                   await Hooper.sendMessage(ownerJid, { sticker: buffer });
-                   await Hooper.sendMessage(ownerJid, { text: caption, mentions });
-                 } else {
-                   await Hooper.sendMessage(ownerJid, { document: buffer, mimetype: mime || "application/octet-stream", fileName: media.fileName || "stealth_media", caption, mentions });
-                 }
-                 console.log(`[ AUTO-STEALTH ] Successfully forwarded to ${ownerJid}`);
-               }
-             }
-          } else if (isViewOnce) {
-             console.log(
-               `[ AUTO-STEALTH ] View Once from ${normSender} not forwarded ` +
-               `(global=${isGlobal}, targeted=${isTargeted}).`,
-             );
+        if (cfg.global || isTargeted) {
+          const { downloadContentFromMessage } = await import("@whiskeysockets/baileys");
+          const media = m.msg;
+          const dlType = m.type === "imageMessage" ? "image" : m.type === "videoMessage" ? "video" : "audio";
+          const stream = await downloadContentFromMessage(media, dlType);
+          const chunks = [];
+          for await (const chunk of stream) chunks.push(chunk);
+          const buffer = Buffer.concat(chunks);
+          if (buffer.length) {
+            const ownerJid = (global.owner && global.owner.length > 0)
+              ? `${global.owner[0].replace(/[^0-9]/g, "")}@s.whatsapp.net`
+              : Hooper.user.id.replace(/:.*@/, "@");
+            const senderNum = (rawSenderJid || "").split("@")[0];
+            const caption = `👁️ *Auto-Stealth*\nFrom: @${senderNum}${media.caption ? `\n${media.caption}` : ""}`;
+            const mentions = rawSenderJid.endsWith("@s.whatsapp.net") ? [rawSenderJid] : [];
+            if (dlType === "image") await Hooper.sendMessage(ownerJid, { image: buffer, caption, mentions });
+            else if (dlType === "video") await Hooper.sendMessage(ownerJid, { video: buffer, caption, mentions });
+            else {
+              await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: media.mimetype || "audio/mp4", ptt: !!media.ptt });
+              await Hooper.sendMessage(ownerJid, { text: caption, mentions });
+            }
+            console.log(`[ AUTO-STEALTH ] Forwarded a View Once from @${senderNum} to owner`);
           }
         }
       }
     } catch (e) {
-      console.error("[ AUTO-STEALTH ERROR ]:", e);
+      console.error("[ AUTO-STEALTH ] error:", e?.message || e);
     }
   });
 
