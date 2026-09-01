@@ -18,8 +18,9 @@ export default {
 
 1️⃣ *Stealth Revive & Save*
 *Command:* \`.//\`
-*Usage:* Reply to any View Once message or normal message with \`.//\` (or react 🕵️‍♂️ / 👀 to it).
-*Description:* Downloads the media and silently forwards it to your personal DM, keeping you hidden.
+*Usage:* Reply to any message with \`.//\` to silently save its media to your DM.
+*View Once:* only \`.//\` works — WhatsApp never sends View Once media to the bot, so it's pulled from your reply.
+*Reaction shortcut:* react 🕵️ or 👀 to any *normal* photo/video/voice note to save it the same way (does NOT work on View Once).
 
 2️⃣ *Status Saver & Forwarder*
 *Command:* \`.status\`

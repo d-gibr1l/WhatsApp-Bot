@@ -139,7 +139,16 @@ export default {
 
       const { serialize } = await import("../System/whatsapp.js");
       const qMsg = serialize(Hooper, targetMessage);
-      if (!qMsg) return;
+
+      // A View Once we only ever received as an empty stub — the media
+      // never reaches a linked device. Nothing to recover from the store;
+      // the owner has to use `.//` as a reply (that embeds the content).
+      if (!qMsg?.message || (targetMessage.key?.isViewOnce && !qMsg.msg?.directPath && !qMsg.msg?.mediaKey)) {
+        await Hooper.sendMessage(m.sender, {
+          text: "👁️ That's a View Once — WhatsApp doesn't send its media to the bot. Reply to it with `.//` instead and I'll grab it from your reply.",
+        });
+        return;
+      }
 
       const mime = qMsg.msg?.mimetype || qMsg.mimetype || "";
       const isMedia = /image|video|audio|sticker/.test(mime) || qMsg.type?.toLowerCase().includes("viewonce");
