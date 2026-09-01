@@ -113,6 +113,7 @@ import {
 } from "./System/MongoDB/MongoDb_Core.js";
 import chalk from "chalk";
 import { spawn } from "child_process";
+import { resolveDashboardPassword, createDashboardAuth } from "./src/dashboard-auth.js";
 
 if (fs.existsSync("./wireproxy.conf")) {
   console.log(chalk.cyan("[ HOOPER ] Starting Wireproxy SOCKS5 proxy..."));
@@ -121,6 +122,30 @@ if (fs.existsSync("./wireproxy.conf")) {
 }
 
 app.use(express.json());
+
+// ─── Dashboard auth ─────────────────────────────────────────────────────────
+// Every /api/* route below controls the live WhatsApp session (QR, pairing,
+// clear-session) or exposes secrets (/api/config), so the whole surface is
+// gated behind a password. Set DASHBOARD_PASSWORD to pick your own; otherwise
+// a random one is generated per-boot and printed once below — the dashboard
+// is unusable until you copy it from the logs.
+const { password: dashboardPassword, generated: dashboardPasswordGenerated } =
+  resolveDashboardPassword();
+if (dashboardPasswordGenerated) {
+  console.log(
+    chalk.bgYellow.black(
+      ` [ HOOPER ] No DASHBOARD_PASSWORD set — generated one for this session: ${dashboardPassword} `,
+    ),
+  );
+  console.log(
+    chalk.yellow(
+      `[ HOOPER ] This password changes every restart. Set DASHBOARD_PASSWORD in .env to keep it fixed.`,
+    ),
+  );
+} else {
+  console.log(chalk.green(`[ HOOPER ] Dashboard auth: using DASHBOARD_PASSWORD from environment.`));
+}
+const dashboardAuth = createDashboardAuth({ password: dashboardPassword });
 
 global.lidToJidMap = new Map();
 
@@ -1720,6 +1745,12 @@ process.once("SIGTERM", () => void shutdown("SIGTERM"));
 app.use("/", express.static(join(__dirname, "Frontend")));
 
 // --- GUI API Endpoints ---
+
+// Auth endpoints must be reachable without a session; everything else under
+// /api is gated by dashboardAuth.requireAuth below.
+app.post("/api/login", dashboardAuth.login);
+app.post("/api/logout", dashboardAuth.logout);
+app.use("/api", dashboardAuth.requireAuth);
 
 app.get("/api/status", (req, res) => {
   res.json({

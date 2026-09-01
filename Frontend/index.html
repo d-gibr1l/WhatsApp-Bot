@@ -10,6 +10,20 @@
 </head>
 <body>
 
+<div id="login-overlay" style="display:none; position:fixed; inset:0; z-index:1000; background:var(--bg-dark); align-items:center; justify-content:center; padding:16px;">
+  <form id="login-form" class="glass-surface" style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:14px;">
+    <h1 style="font-size:1.3rem; color:var(--text-dark);">🔒 HOOPER Dashboard</h1>
+    <p style="color:var(--text-muted); font-size:0.9rem; margin-top:-6px;">Enter the dashboard password to continue.</p>
+    <input id="login-password" type="password" placeholder="Password" autocomplete="current-password"
+      style="padding:10px 12px; border-radius:8px; border:1px solid var(--input-border); font-size:1rem;" required />
+    <button type="submit" id="login-submit"
+      style="padding:10px 12px; border-radius:var(--radius-btn); border:none; background:var(--connecting); color:var(--text-light); font-weight:600; cursor:pointer;">
+      Log In
+    </button>
+    <p id="login-error" style="color:var(--danger); font-size:0.85rem; min-height:1em;"></p>
+  </form>
+</div>
+
 <div class="wrap">
   
   <div class="header">
@@ -25,6 +39,10 @@
         <span class="pulse"></span>
         <span id="header-status-text">Connecting...</span>
       </span>
+      <button id="logout-btn" type="button"
+        style="margin-left:10px; padding:6px 12px; border-radius:var(--radius-btn); border:1px solid var(--input-border); background:transparent; color:var(--text-dark); cursor:pointer; font-size:0.85rem;">
+        Log Out
+      </button>
     </div>
   </div>
 

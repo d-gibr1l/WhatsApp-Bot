@@ -1,5 +1,19 @@
 // Handles all external backend communication
 const API = {
+  async login(password) {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    return res.json();
+  },
+
+  async logout() {
+    const res = await fetch('/api/logout', { method: 'POST' });
+    return res.json();
+  },
+
   async fetchStatus() {
     const res = await fetch('/api/status');
     return res.json();

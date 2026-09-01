@@ -19,8 +19,70 @@ const featureLabels = {
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   setupEventListeners();
-  boot();
+  setupLoginForm();
+  authGate();
 });
+
+async function authGate() {
+  const authed = await checkAuthed();
+  if (authed) {
+    boot();
+  } else {
+    showLoginOverlay();
+  }
+}
+
+async function checkAuthed() {
+  try {
+    const res = await fetch('/api/status');
+    return res.status !== 401;
+  } catch (e) {
+    return false;
+  }
+}
+
+function showLoginOverlay() {
+  const overlay = document.getElementById('login-overlay');
+  if (overlay) overlay.style.display = 'flex';
+  const pw = document.getElementById('login-password');
+  if (pw) pw.focus();
+}
+
+function hideLoginOverlay() {
+  const overlay = document.getElementById('login-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function setupLoginForm() {
+  const form = document.getElementById('login-form');
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const pwInput = document.getElementById('login-password');
+    const errorEl = document.getElementById('login-error');
+    const submitBtn = document.getElementById('login-submit');
+    const password = pwInput.value;
+    if (!password) return;
+
+    errorEl.innerText = '';
+    submitBtn.disabled = true;
+    submitBtn.innerText = 'Logging in...';
+    try {
+      const data = await API.login(password);
+      if (data.success) {
+        pwInput.value = '';
+        hideLoginOverlay();
+        boot();
+      } else {
+        errorEl.innerText = data.error || 'Login failed.';
+      }
+    } catch (e) {
+      errorEl.innerText = 'Network error.';
+    }
+    submitBtn.disabled = false;
+    submitBtn.innerText = 'Log In';
+  });
+}
 
 function restoreTab() {
   const activeTab = localStorage.getItem('activeTab') || 'overview';
@@ -52,6 +114,7 @@ function setupEventListeners() {
   });
 
   document.getElementById('pair-form').addEventListener('submit', handlePairing);
+  document.getElementById('logout-btn')?.addEventListener('click', handleLogout);
   document.getElementById('group-select').addEventListener('change', (e) => {
     selectedGroupId = e.target.value;
     renderGroupToggles();
@@ -260,6 +323,16 @@ async function loadBans() {
     // Implementation omitted for brevity, similar to old app
     // Needs HTML for bans rendering
 } catch(e) {}
+}
+
+async function handleLogout() {
+  clearInterval(statusInterval);
+  clearInterval(qrInterval);
+  clearInterval(localUptimeInterval);
+  try {
+    await API.logout();
+  } catch (e) {}
+  window.location.reload();
 }
 
 async function clearSession() {
