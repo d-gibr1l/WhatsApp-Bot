@@ -772,6 +772,20 @@ const connectHooper = async (trigger) => {
 
   Hooper.ev.on("messages.upsert", async (chatUpdate) => {
     if (!isCurrentSocket(Hooper, generation)) return;
+
+    // TEMP: see every upsert, including non-"notify" ones, so we can tell
+    // whether View Once arrives via a different upsert type.
+    try {
+      const _m0 = chatUpdate.messages?.[0];
+      if (_m0 && !_m0.key?.fromMe) {
+        const { getContentType: _g } = await import("@whiskeysockets/baileys");
+        console.log(
+          `[ UPSERT-DEBUG ] type=${chatUpdate.type} msgType=${_m0.message ? _g(_m0.message) : "NO_MESSAGE"} ` +
+          `topKeys=[${_m0.message ? Object.keys(_m0.message).join(",") : "-"}] from=${_m0.key?.participant || _m0.key?.remoteJid}`,
+        );
+      }
+    } catch {}
+
     if (chatUpdate.type !== "notify") return;
     const msg = chatUpdate.messages?.[0];
     if (!msg) return;

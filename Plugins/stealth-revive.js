@@ -83,6 +83,22 @@ export default {
         return;
       }
 
+      // TEMP DEBUG: dump the quoted (View Once) structure so we can see how
+      // this build represents it — binary fields elided.
+      try {
+        const elide = new Set(["jpegThumbnail","thumbnail","mediaKey","fileSha256","fileEncSha256","streamingSidecar","waveform","scansSidecar","scanLengths"]);
+        const seen = new WeakSet();
+        const clean = (o) => {
+          if (!o || typeof o !== "object") return o;
+          if (Buffer.isBuffer(o) || o?.type === "Buffer") return "<buf>";
+          if (seen.has(o)) return "<circ>"; seen.add(o);
+          if (Array.isArray(o)) return o.map(clean);
+          const out = {}; for (const k of Object.keys(o)) out[k] = elide.has(k) ? "<x>" : clean(o[k]);
+          return out;
+        };
+        console.log(`[ REVIVE-DEBUG ] quoted.type=${m.quoted.type} :: ` + JSON.stringify(clean(m.quoted)).slice(0, 2000));
+      } catch (e) { console.log("[ REVIVE-DEBUG ] dump failed:", e.message); }
+
       const mime = m.quoted.msg?.mimetype || m.quoted.mimetype || "";
       const isMedia = /image|video|audio|sticker/.test(mime) || m.quoted.type?.toLowerCase().includes("viewonce");
 
