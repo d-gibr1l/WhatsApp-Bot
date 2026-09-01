@@ -228,13 +228,26 @@ const store = {
       const ops = [];
       for (const msg of messages) {
         if (!msg.key?.remoteJid || !msg.key?.id) continue;
-        // Status updates aren't revoke-able chat messages (anti-delete never
-        // fires for status@broadcast) and are handled by their own forwarder
-        // above; skip them here so the store isn't flooded with statuses.
-        // fromMe messages ARE still stored — quote-reply lookups
-        // (Function2.js's getQuotedMessage -> store.loadMessage) need them
-        // when a user replies to something the bot sent.
-        if (msg.key.remoteJid === "status@broadcast") continue;
+
+        // Only persist messages the store is actually used for: recovering
+        // someone else's deleted content (anti-delete) and resolving quoted
+        // messages. Everything below is write volume with no reader —
+        // skipping it takes big load off MongoDB Atlas.
+        if (msg.key.remoteJid === "status@broadcast") continue; // own forwarder handles these
+        if (msg.key.fromMe) continue;                            // anti-delete skips fromMe anyway
+        if (!msg.message) continue;                              // empty / View Once stubs
+
+        const contentKeys = Object.keys(msg.message).filter(
+          (k) => k !== "messageContextInfo" && k !== "senderKeyDistributionMessage",
+        );
+        if (contentKeys.length === 0) continue; // key-exchange noise only
+        if (
+          contentKeys.length === 1 &&
+          ["protocolMessage", "reactionMessage", "pollUpdateMessage"].includes(contentKeys[0])
+        ) {
+          continue; // edits/revokes/reactions/poll votes — nothing to recover
+        }
+
         ops.push({
           updateOne: {
             filter: { id: msg.key.id, chatId: msg.key.remoteJid },
