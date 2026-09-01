@@ -1084,6 +1084,25 @@ const connectHooper = async (trigger) => {
   // ─── Anti-Delete: catch "delete for everyone" and resend ───────────────────
   Hooper.ev.on("messages.update", async (updates) => {
     if (!isCurrentSocket(Hooper, generation)) return;
+
+    // TEMP: View Once notify arrives with an empty message body — the real
+    // content must land via one of these update events. Dump anything that
+    // carries a message payload.
+    try {
+      for (const u of updates) {
+        if (u?.update?.message) {
+          const { getContentType: _g } = await import("@whiskeysockets/baileys");
+          const _mk = Object.keys(u.update.message);
+          console.log(
+            `[ UPDATE-DEBUG ] id=${u.key?.id} from=${u.key?.participant || u.key?.remoteJid} ` +
+            `msgType=${_g(u.update.message)} keys=[${_mk.join(",")}]`,
+          );
+        } else if (u?.update && Object.keys(u.update).length) {
+          console.log(`[ UPDATE-DEBUG ] id=${u.key?.id} updateKeys=[${Object.keys(u.update).join(",")}]`);
+        }
+      }
+    } catch {}
+
     for (const { key, update } of updates) {
       try {
         if (!update?.messageStubType) continue;
