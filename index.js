@@ -10,6 +10,7 @@ import {
   downloadContentFromMessage,
   downloadMediaMessage,
   jidDecode,
+  jidNormalizedUser,
 } from "@whiskeysockets/baileys";
 import MongoAuth from "./System/MongoAuth/MongoAuth.js";
 import fs from "fs";
@@ -856,6 +857,55 @@ const connectHooper = async (trigger) => {
 
 
     core(Hooper, m, commands, chatUpdate);
+  });
+
+  // ─── Reaction dispatch ───────────────────────────────────────────────
+  // Baileys emits `messages.reaction` for emoji reactions. Route each one
+  // to any plugin that exports a `reaction(Hooper, m)` handler, giving it
+  // an m-like object: m.sender = who reacted, m.msg.text = the emoji,
+  // m.msg.key = the key of the message that was reacted to.
+  Hooper.ev.on("messages.reaction", async (reactions) => {
+    if (!isCurrentSocket(Hooper, generation)) return;
+    await new Promise((resolve) => setImmediate(resolve));
+    if (!isCurrentSocket(Hooper, generation)) return;
+
+    const handlers = Array.from(commands.values()).filter(
+      (p) => typeof p?.reaction === "function",
+    );
+    if (!handlers.length) return;
+
+    for (const { key, reaction } of reactions || []) {
+      try {
+        if (!reaction?.text) continue; // empty text = reaction removed
+
+        // Who reacted. reaction.key is the reaction envelope's key.
+        let reactor = reaction.key?.fromMe
+          ? Hooper.user?.id
+          : reaction.key?.participant || reaction.key?.remoteJid || key?.participant || key?.remoteJid || "";
+        if (reactor.endsWith?.("@lid") && global.lidToJidMap?.has(reactor)) {
+          reactor = global.lidToJidMap.get(reactor);
+        }
+
+        const m = {
+          sender: jidNormalizedUser(reactor),
+          from: key?.remoteJid || "",
+          chat: key?.remoteJid || "",
+          isGroup: (key?.remoteJid || "").endsWith("@g.us"),
+          fromMe: Boolean(reaction.key?.fromMe),
+          msg: { text: reaction.text, key },
+        };
+
+        for (const plugin of handlers) {
+          try {
+            await plugin.reaction(Hooper, m);
+          } catch (err) {
+            console.error(`[ REACTION ] ${plugin.name || "plugin"} handler error:`, err?.message || err);
+          }
+        }
+      } catch (e) {
+        console.error("[ REACTION ] dispatch error:", e?.message || e);
+      }
+    }
   });
 
   // ─── Anti-Delete: catch "delete for everyone" and resend ───────────────────

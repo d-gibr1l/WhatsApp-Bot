@@ -92,16 +92,30 @@ export default {
     }
   },
 
-  // Owner can also react 🕵️‍♂️ / 👀 to a message to save it to their DM
+  // Owner reacts 🕵️‍♂️ / 👀 to any message -> the bot saves it to the owner's DM.
   reaction: async (Hooper, m) => {
-    if (!global.owner?.includes(m.sender.split("@")[0]) && m.sender !== Hooper.user.id.replace(/:.*@/, "@")) return;
     if (m.msg?.text !== "🕵️‍♂️" && m.msg?.text !== "👀") return;
+
+    // Only the bot owner may trigger this. Match on: the bot itself reacted
+    // (single-number setup), the reactor's digits are in global.owner, or a
+    // @lid reactor resolves to an owner number.
+    const reactorDigits = (m.sender || "").split("@")[0].replace(/[^0-9]/g, "");
+    const ownerDigits = (global.owner || []).map((o) => o.replace(/[^0-9]/g, ""));
+    const botDigits = (Hooper.user?.id || "").split("@")[0].split(":")[0];
+    const mapped = global.lidToJidMap?.get(m.sender);
+    const mappedDigits = mapped ? mapped.split("@")[0].replace(/[^0-9]/g, "") : "";
+    const isOwner =
+      m.fromMe ||
+      reactorDigits === botDigits ||
+      ownerDigits.includes(reactorDigits) ||
+      ownerDigits.includes(mappedDigits);
+    if (!isOwner) return;
 
     try {
       console.log(`[ STEALTH REACTION ] Triggered by ${m.sender}`);
 
       const targetMessageKey = m.msg?.key;
-      if (!targetMessageKey) return;
+      if (!targetMessageKey?.id || !targetMessageKey?.remoteJid) return;
 
       const { messageData } = await import("../System/MongoDB/MongoDB_Schema.js");
       const doc = await messageData.findOne({ id: targetMessageKey.id, chatId: targetMessageKey.remoteJid }).lean();
