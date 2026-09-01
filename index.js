@@ -209,6 +209,13 @@ const store = {
       const ops = [];
       for (const msg of messages) {
         if (!msg.key?.remoteJid || !msg.key?.id) continue;
+        // Status updates aren't revoke-able chat messages (anti-delete never
+        // fires for status@broadcast) and are handled by their own forwarder
+        // above; skip them here so the store isn't flooded with statuses.
+        // fromMe messages ARE still stored — quote-reply lookups
+        // (Function2.js's getQuotedMessage -> store.loadMessage) need them
+        // when a user replies to something the bot sent.
+        if (msg.key.remoteJid === "status@broadcast") continue;
         ops.push({
           updateOne: {
             filter: { id: msg.key.id, chatId: msg.key.remoteJid },
