@@ -772,83 +772,38 @@ const connectHooper = async (trigger) => {
 
   Hooper.ev.on("messages.upsert", async (chatUpdate) => {
     if (!isCurrentSocket(Hooper, generation)) return;
-
-    // TEMP: see every upsert, including non-"notify" ones and every message
-    // in a batched event, so we can tell whether View Once arrives via a
-    // different upsert type / batch position and is why nothing logs today.
-    try {
-      const { getContentType: _g } = await import("@whiskeysockets/baileys");
-      const _all = chatUpdate.messages || [];
-      _all.forEach((_mm, _i) => {
-        if (_mm?.key?.fromMe) return;
-        const _t = _mm.message ? _g(_mm.message) : "NO_MESSAGE";
-        const _tk = _mm.message ? Object.keys(_mm.message) : [];
-        const _vo = _tk.some((k) => /viewOnce/i.test(k)) ||
-          (_mm.message && Object.values(_mm.message).some((v) => v && typeof v === "object" && v.viewOnce === true));
-        console.log(
-          `[ UPSERT-DEBUG ] evtType=${chatUpdate.type} idx=${_i}/${_all.length} msgType=${_t} vo?=${_vo} ` +
-          `keys=[${_tk.join(",")}] from=${_mm.key?.participant || _mm.key?.remoteJid}`,
-        );
-        // For empty-message notifies (View Once lands here), dump the whole
-        // envelope so we can see stubType / retry state / other fields.
-        if (_t === "NO_MESSAGE") {
-          const _seen = new WeakSet();
-          const _c = (o) => {
-            if (!o || typeof o !== "object") return o;
-            if (Buffer.isBuffer(o) || o?.type === "Buffer") return "<buf>";
-            if (_seen.has(o)) return "<circ>"; _seen.add(o);
-            if (Array.isArray(o)) return o.map(_c);
-            const r = {}; for (const k of Object.keys(o)) r[k] = _c(o[k]); return r;
-          };
-          try { console.log(`[ EMPTY-MSG ] ` + JSON.stringify(_c(_mm)).slice(0, 1500)); } catch {}
-        }
-      });
-    } catch {}
-
     if (chatUpdate.type !== "notify") return;
     const msg = chatUpdate.messages?.[0];
     if (!msg) return;
 
-    // Log raw message type for viewOnce debugging
-    const { getContentType: _gct } = await import("@whiskeysockets/baileys");
-    const _rawType = msg.message ? _gct(msg.message) : "NO_MESSAGE";
-    const _isVO = ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(_rawType);
-
-    // Temporary VO diagnostic: dump the shape of every non-text inbound
-    // message so we can see exactly how a View Once arrives.
-    if (!msg.key?.fromMe && msg.message) {
-      const _keys = Object.keys(msg.message);
-      const _isText = _keys.length === 1 && ["conversation", "extendedTextMessage", "senderKeyDistributionMessage"].includes(_keys[0]);
-      if (!_isText) {
-        // Full structural dump (binary fields elided) so we can see exactly
-        // where — if anywhere — this build marks a message as View Once.
-        const _elide = new Set([
-          "jpegThumbnail", "thumbnail", "mediaKey", "fileSha256", "fileEncSha256",
-          "streamingSidecar", "midQualityFileSha256", "waveform", "scansSidecar",
-          "scanLengths", "thumbnailSha256", "thumbnailEncSha256", "firstScanSidecar",
-        ]);
-        const _seen = new WeakSet();
-        const _clean = (o) => {
-          if (!o || typeof o !== "object") return o;
-          if (Buffer.isBuffer(o) || o?.type === "Buffer") return "<buf>";
-          if (_seen.has(o)) return "<circular>";
-          _seen.add(o);
-          if (Array.isArray(o)) return o.map(_clean);
-          const out = {};
-          for (const k of Object.keys(o)) out[k] = _elide.has(k) ? "<elided>" : _clean(o[k]);
-          return out;
+    // ── View Once recovery ────────────────────────────────────────────────
+    // WhatsApp does NOT deliver View Once media to linked devices — it sends
+    // an "unavailable/view_once" stub (Baileys marks it key.isViewOnce with
+    // an empty message). Ask the phone to resend the real content via a
+    // placeholder-resend PDO; Baileys re-emits it as a fresh messages.upsert
+    // with the full message, which then flows through the interceptor below.
+    if (msg.key?.isViewOnce && !msg.message && !msg.key.fromMe) {
+      try {
+        const cleanKey = {
+          remoteJid: msg.key.remoteJid,
+          fromMe: false,
+          id: msg.key.id,
+          participant: msg.key.participant || undefined,
         };
-        try {
-          console.log(
-            `[ VO-DEBUG ] rawType=${_rawType} from=${msg.key?.participant || msg.key?.remoteJid} :: ` +
-            JSON.stringify(_clean(msg.message)).slice(0, 1800),
-          );
-        } catch (e) {
-          console.log(`[ VO-DEBUG ] dump failed: ${e.message}`);
-        }
+        Promise.resolve(
+          Hooper.requestPlaceholderResend?.(cleanKey, {
+            key: msg.key,
+            messageTimestamp: msg.messageTimestamp,
+            pushName: msg.pushName,
+          }),
+        )
+          .then((r) => console.log(`[ AUTO-STEALTH ] View Once ${msg.key.id}: requested content from phone (${r || "sent"})`))
+          .catch((e) => console.error(`[ AUTO-STEALTH ] View Once resend request failed: ${e?.message || e}`));
+      } catch (e) {
+        console.error("[ AUTO-STEALTH ] requestPlaceholderResend error:", e?.message || e);
       }
+      return; // empty stub — wait for the resent copy
     }
-
 
     // Prevent the bot from processing old messages
     let tsRaw = msg.messageTimestamp;
@@ -928,11 +883,11 @@ const connectHooper = async (trigger) => {
       if (!m.key.fromMe && msg.message) {
         const { getContentType, jidNormalizedUser } = await import("@whiskeysockets/baileys");
         
-        // 1. View Once detection. Two shapes exist:
+        // 1. View Once detection. Shapes seen in the wild:
         //    (a) a viewOnceMessage* wrapper (possibly under ephemeralMessage)
-        //    (b) a bare imageMessage/videoMessage/audioMessage whose own
-        //        `viewOnce` field is true (newer LID-era protocol) — this is
-        //        what actually arrives on this account.
+        //    (b) a bare imageMessage/videoMessage/audioMessage with its own
+        //        `viewOnce: true` field
+        //    (c) key.isViewOnce set by Baileys on the resent copy (this build)
         const VO_KEYS = ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"];
         let probe = msg.message;
         if (probe?.ephemeralMessage?.message) probe = probe.ephemeralMessage.message;
@@ -941,21 +896,16 @@ const connectHooper = async (trigger) => {
 
         const probeCt = getContentType(probe);
         const probeNode = probeCt ? probe[probeCt] : null;
-        const isBareViewOnce = probeNode?.viewOnce === true;
 
         const rawType = voKey || probeCt || getContentType(msg.message);
-        const isViewOnce = isViewOnceWrapper || m.msg?.viewOnce === true || isBareViewOnce;
+        const isViewOnce =
+          isViewOnceWrapper ||
+          probeNode?.viewOnce === true ||
+          m.msg?.viewOnce === true ||
+          msg.key?.isViewOnce === true;
 
         const MEDIA_TYPES = ["imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage", "documentWithCaptionMessage", "ptvMessage"];
         const isMediaMsg = MEDIA_TYPES.includes(m.type) || MEDIA_TYPES.includes(probeCt);
-
-        if (isMediaMsg || isViewOnce) {
-          console.log(
-            `[ STEALTH-CHECK ] mType=${m.type} probeCt=${probeCt} isMedia=${isMediaMsg} ` +
-            `viewOnce=${isViewOnce} (wrapper=${isViewOnceWrapper} bare=${isBareViewOnce} mMsg=${m.msg?.viewOnce}) ` +
-            `from=${msg.key.participant || msg.key.remoteJid}`,
-          );
-        }
 
         if (isMediaMsg) {
 
@@ -1081,10 +1031,10 @@ const connectHooper = async (trigger) => {
                  console.log(`[ AUTO-STEALTH ] Successfully forwarded to ${ownerJid}`);
                }
              }
-          } else {
+          } else if (isViewOnce) {
              console.log(
-               `[ AUTO-STEALTH ] Media from ${normSender} in ${normChat} not intercepted ` +
-               `(viewOnce=${isViewOnce}, global=${isGlobal}, targeted=${isTargeted}, targets=[${targets.join(", ") || "none"}]).`,
+               `[ AUTO-STEALTH ] View Once from ${normSender} not forwarded ` +
+               `(global=${isGlobal}, targeted=${isTargeted}).`,
              );
           }
         }
@@ -1097,25 +1047,6 @@ const connectHooper = async (trigger) => {
   // ─── Anti-Delete: catch "delete for everyone" and resend ───────────────────
   Hooper.ev.on("messages.update", async (updates) => {
     if (!isCurrentSocket(Hooper, generation)) return;
-
-    // TEMP: View Once notify arrives with an empty message body — the real
-    // content must land via one of these update events. Dump anything that
-    // carries a message payload.
-    try {
-      for (const u of updates) {
-        if (u?.update?.message) {
-          const { getContentType: _g } = await import("@whiskeysockets/baileys");
-          const _mk = Object.keys(u.update.message);
-          console.log(
-            `[ UPDATE-DEBUG ] id=${u.key?.id} from=${u.key?.participant || u.key?.remoteJid} ` +
-            `msgType=${_g(u.update.message)} keys=[${_mk.join(",")}]`,
-          );
-        } else if (u?.update && Object.keys(u.update).length) {
-          console.log(`[ UPDATE-DEBUG ] id=${u.key?.id} updateKeys=[${Object.keys(u.update).join(",")}]`);
-        }
-      }
-    } catch {}
-
     for (const { key, update } of updates) {
       try {
         if (!update?.messageStubType) continue;
