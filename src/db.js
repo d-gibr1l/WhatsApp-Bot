@@ -503,9 +503,11 @@ export const checkAntilink = async (id) => (await getGroup(id)).antilink || fals
 export const setAntilink = async (id) => await updateGroup(id, { antilink: true });
 export const delAntilink = async (id) => await updateGroup(id, { antilink: false });
 
-export const checkAntidelete = async (id) => (await getGroup(id)).antidelete || false;
-export const setAntidelete = async (id) => await updateGroup(id, { antidelete: true });
-export const delAntidelete = async (id) => await updateGroup(id, { antidelete: false });
+// Antidelete on/off lives in System/MongoDB/MongoDb_Core.js (checkAntidelete/
+// setAntidelete/delAntidelete) — that's what index.js's revoke handler and
+// Plugins/groups.js actually use. Don't re-add duplicates here; two
+// implementations toggling the same `antidelete` field is how this file's
+// old antidelete helpers went dead and confusing in the first place.
 
 export const checkGroupChatbot = async (id) => (await getGroup(id)).chatBot || false;
 export const setGroupChatbot = async (id) => await updateGroup(id, { chatBot: true });
