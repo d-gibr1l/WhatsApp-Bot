@@ -124,6 +124,19 @@ app.use(express.json());
 
 global.lidToJidMap = new Map();
 
+// Baileys can emit "messages.update" more than once for the same revoke
+// (multi-device fan-out, reconnect replays). Module-scoped so it survives
+// socket reconnects, unlike the handler closure itself.
+const REVOKE_DEDUP_TTL_MS = 10_000;
+const recentlyRevoked = new Map(); // `${chatId}:${id}` -> timeout handle
+function isDuplicateRevoke(dedupKey) {
+  if (recentlyRevoked.has(dedupKey)) return true;
+  const timer = setTimeout(() => recentlyRevoked.delete(dedupKey), REVOKE_DEDUP_TTL_MS);
+  if (typeof timer.unref === "function") timer.unref();
+  recentlyRevoked.set(dedupKey, timer);
+  return false;
+}
+
 const MESSAGE_CACHE_TTL_MS =
   Math.max(
     30,
@@ -925,6 +938,11 @@ const connectHooper = async (trigger) => {
         if (update.messageStubType !== 1 && update.messageStubType !== 132) continue;
 
         const chatId = key.remoteJid;
+
+        // Baileys can fire this event more than once for the same revoke;
+        // skip repeats so the owner/chat doesn't get duplicate alerts.
+        if (!key.id || isDuplicateRevoke(`${chatId}:${key.id}`)) continue;
+
         // Check if chat-level antidelete is enabled (true for groups or PMs if toggled)
         const isChatEnabled = await checkAntidelete(chatId);
         
