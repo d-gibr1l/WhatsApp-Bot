@@ -918,6 +918,12 @@ const connectHooper = async (trigger) => {
         });
         const senderTag = deleter ? `@${deleter.split("@")[0]}` : "@unknown";
 
+        console.log(
+          `[ AD-DEBUG ] chatId=${chatId} updateKeys=${JSON.stringify(update)} ` +
+          `cachedKey=${JSON.stringify(cached.key)} actualSender=${actualSender} deleter=${deleter} ` +
+          `cachedMsgKeys=[${cached.message ? Object.keys(cached.message).join(",") : "-"}]`,
+        );
+
         const botJid = Hooper.user?.id ? jidNormalizedUser(Hooper.user.id) : null;
         
         // Skip if the original message was sent by the bot itself
@@ -994,6 +1000,8 @@ const connectHooper = async (trigger) => {
         } else if (contentType === "extendedTextMessage") {
             textToSend = content?.text || "";
         }
+
+        console.log(`[ AD-DEBUG ] contentType=${contentType} mediaType=${mediaType} isChatEnabled=${isChatEnabled} ownerJid=${ownerJid} actionText="${actionText}" mentions=${JSON.stringify(mentionsList)} textToSend="${(textToSend||"").slice(0,60)}"`);
 
         const sendDeletedMessage = async (targetJid) => {
             if (!targetJid) return;
