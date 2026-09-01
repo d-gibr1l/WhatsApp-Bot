@@ -73,7 +73,7 @@ export default class MongoAuth {
           await fs.promises.rm(this.dir, { recursive: true, force: true });
         }
 
-        const downloadOk = await this._localExists();
+        const downloadOk = await this._localSessionValid();
         if (downloadOk) {
           console.log(
             `[ HOOPER ] [${this.sessionId}] Session restored from MongoDB ✓`,
@@ -164,6 +164,28 @@ export default class MongoAuth {
     try {
       await fs.promises.access(credsPath);
       return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Stronger check than _localExists: creds.json must be present, valid JSON,
+   * and belong to an actually-registered account. Used to confirm a MongoDB
+   * restore produced a usable session rather than an empty/partial one that
+   * only happens to contain a creds.json.
+   */
+  async _localSessionValid() {
+    const credsPath = path.join(this.dir, "creds.json");
+    let raw;
+    try {
+      raw = await fs.promises.readFile(credsPath, "utf-8");
+    } catch {
+      return false;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed?.registered === true || Boolean(parsed?.me?.id);
     } catch {
       return false;
     }
