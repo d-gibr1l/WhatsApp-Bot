@@ -911,6 +911,7 @@ const connectHooper = async (trigger) => {
 
         const { actualSender, deleter } = resolveParties({
           cachedKey: cached.key,
+          updateKey: update.key || key,
           chatId,
           updateParticipant: update.participant,
           botUserId: Hooper.user?.id,

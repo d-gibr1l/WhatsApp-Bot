@@ -102,6 +102,47 @@ test("resolveParties: fromMe uses the bot's own id", () => {
   assert.equal(actualSender, "15550000000@s.whatsapp.net");
 });
 
+test("resolveParties: LID-addressed 1:1 chat resolves via remoteJidAlt", () => {
+  // Real shape from a live account: remoteJid is a @lid, remoteJidAlt is the phone.
+  const { actualSender, deleter } = resolveParties({
+    cachedKey: {
+      remoteJid: "208113445675096@lid",
+      remoteJidAlt: "233509942578@s.whatsapp.net",
+      participant: "",
+      fromMe: false,
+    },
+    updateKey: { remoteJid: "208113445675096@lid", remoteJidAlt: "233509942578@s.whatsapp.net", participant: "" },
+    chatId: "208113445675096@lid",
+    updateParticipant: "",
+  });
+  assert.equal(actualSender, "233509942578@s.whatsapp.net");
+  assert.equal(deleter, "233509942578@s.whatsapp.net");
+});
+
+test("resolveParties: LID group author resolves via participantAlt", () => {
+  const { actualSender } = resolveParties({
+    cachedKey: {
+      remoteJid: "120363012345678901@g.us",
+      participant: "777888999@lid",
+      participantAlt: "15551234567@s.whatsapp.net",
+      fromMe: false,
+    },
+    chatId: "120363012345678901@g.us",
+  });
+  assert.equal(actualSender, "15551234567@s.whatsapp.net");
+});
+
+test("resolveParties: admin revoke deleter comes from update.key.participantAlt", () => {
+  const { actualSender, deleter } = resolveParties({
+    cachedKey: { remoteJid: "120363012345678901@g.us", participant: "111@lid", participantAlt: "15551111111@s.whatsapp.net", fromMe: false },
+    updateKey: { participant: "222@lid", participantAlt: "15552222222@s.whatsapp.net" },
+    chatId: "120363012345678901@g.us",
+    updateParticipant: "222@lid",
+  });
+  assert.equal(actualSender, "15551111111@s.whatsapp.net");
+  assert.equal(deleter, "15552222222@s.whatsapp.net");
+});
+
 // ── pickMedia ────────────────────────────────────────────────────────────
 
 test("pickMedia: known media types map to a valid downloadContentFromMessage type", () => {

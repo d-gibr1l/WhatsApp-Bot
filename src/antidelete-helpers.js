@@ -25,34 +25,64 @@ export function resolveUser(jid, lidMap) {
   return jid.endsWith("@s.whatsapp.net") ? jid : "";
 }
 
+/** First candidate that resolves to a real user JID, else "". */
+function firstResolvable(candidates, lidMap) {
+  for (const c of candidates) {
+    const r = resolveUser(c, lidMap);
+    if (r) return r;
+  }
+  return "";
+}
+
 /**
  * Work out who sent the deleted message and who deleted it.
  *
- * In a group the author is always `key.participant`; `key.remoteJid` is the
- * group itself, so it may only be used as a fallback for 1:1 chats.
+ * Modern (LID-addressed) keys put the @lid in `participant` / `remoteJid`
+ * and the real phone JID in `participantAlt` / `remoteJidAlt`, so we try
+ * every field. In a group the author is `key.participant(Alt)`; only a 1:1
+ * chat may fall back to `key.remoteJid(Alt)`.
  *
  * @param {object}  opts
  * @param {object}  opts.cachedKey          the stored message's `key`
+ * @param {object} [opts.updateKey]         `update.key` from the revoke event
  * @param {string}  opts.chatId             `key.remoteJid` from the update event
  * @param {string} [opts.updateParticipant] `update.participant` (set for admin revoke)
  * @param {string} [opts.botUserId]         `sock.user.id`, used when the message was fromMe
  * @param {*}      [opts.lidMap]            lid → phone map
- * @returns {{ isGroupChat: boolean, rawSender: string, actualSender: string, deleter: string }}
+ * @returns {{ isGroupChat: boolean, actualSender: string, deleter: string }}
  */
 export function resolveParties({
   cachedKey = {},
+  updateKey = {},
   chatId = "",
   updateParticipant = "",
   botUserId = "",
   lidMap,
 } = {}) {
   const isGroupChat = (chatId || "").endsWith("@g.us");
-  const rawSender = cachedKey.fromMe
-    ? botUserId || ""
-    : cachedKey.participant || (isGroupChat ? "" : cachedKey.remoteJid) || "";
-  const actualSender = resolveUser(rawSender, lidMap);
-  const deleter = resolveUser(updateParticipant || rawSender || "", lidMap);
-  return { isGroupChat, rawSender, actualSender, deleter };
+
+  const senderCandidates = cachedKey.fromMe
+    ? [botUserId]
+    : [
+        cachedKey.participant,
+        cachedKey.participantAlt,
+        isGroupChat ? null : cachedKey.remoteJid,
+        isGroupChat ? null : cachedKey.remoteJidAlt,
+      ];
+  const actualSender = firstResolvable(senderCandidates, lidMap);
+
+  const deleter =
+    firstResolvable(
+      [
+        updateParticipant,
+        updateKey.participant,
+        updateKey.participantAlt,
+        ...senderCandidates,
+      ],
+      lidMap,
+    ) || actualSender;
+
+  return { isGroupChat, actualSender, deleter };
 }
 
 const MEDIA_MAP = {
