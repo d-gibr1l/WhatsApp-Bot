@@ -776,12 +776,6 @@ const connectHooper = async (trigger) => {
     const msg = chatUpdate.messages?.[0];
     if (!msg) return;
 
-    // Log raw message type for viewOnce debugging
-    const { getContentType: _gct } = await import("@whiskeysockets/baileys");
-    const _rawType = msg.message ? _gct(msg.message) : "NO_MESSAGE";
-    const _isVO = ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(_rawType);
-
-
     // Prevent the bot from processing old messages
     let tsRaw = msg.messageTimestamp;
     if (typeof tsRaw === "object" && tsRaw !== null && "low" in tsRaw) tsRaw = tsRaw.low;
@@ -854,109 +848,6 @@ const connectHooper = async (trigger) => {
 
 
     core(Hooper, m, commands, chatUpdate);
-
-    // ─── Unified Auto-Stealth View Once Interceptor ──────────────────────
-    try {
-      if (!m.key.fromMe && msg.message) {
-        const { getContentType, jidNormalizedUser } = await import("@whiskeysockets/baileys");
-        
-        // 1. Bulletproof View Once Detection
-        const rawType = getContentType(msg.message);
-        const isViewOnceWrapper = ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(rawType);
-        const isViewOnceFlag = m.msg?.viewOnce || false;
-        
-        if (isViewOnceWrapper || isViewOnceFlag) {
-          
-          // 2. Fetch targets & Normalize JIDs
-          const db = await import("./src/db.js");
-          const isGlobal = await db.getBoolSetting("auto_stealth", false);
-          const targetsStr = await db.getSetting("auto_stealth_targets", "");
-          const targets = targetsStr ? targetsStr.split(",").filter(Boolean) : [];
-          
-          // Strip multi-device suffixes (e.g., :1, :2) from the incoming message
-          const rawChatJid = msg.key.remoteJid || "";
-          const rawSenderJid = msg.key.participant || rawChatJid;
-          
-          const normChat = jidNormalizedUser(rawChatJid);
-          const normSender = jidNormalizedUser(rawSenderJid);
-
-          // 3. Check if targeted (with LID resolver to fix DB mismatches)
-          const isTargeted = targets.some(t => {
-             // Resolve Target if it is a LID
-             let resolvedT = t;
-             if (t.endsWith("@lid") && global.lidToJidMap?.has(t)) {
-                 resolvedT = global.lidToJidMap.get(t);
-             }
-             
-             // Resolve Incoming Message JIDs if they are LIDs
-             let rChat = rawChatJid;
-             if (rChat.endsWith("@lid") && global.lidToJidMap?.has(rChat)) rChat = global.lidToJidMap.get(rChat);
-             
-             let rSender = rawSenderJid;
-             if (rSender.endsWith("@lid") && global.lidToJidMap?.has(rSender)) rSender = global.lidToJidMap.get(rSender);
-
-             const tNorm = jidNormalizedUser(resolvedT);
-             const nChat = jidNormalizedUser(rChat);
-             const nSender = jidNormalizedUser(rSender);
-
-             return tNorm === nChat || tNorm === nSender || resolvedT === rChat || resolvedT === rSender;
-          });
-
-          if (isGlobal || isTargeted) {
-             console.log(`[ AUTO-STEALTH ] Intercepting View Once from: ${normSender}`);
-             
-             // 4. Download using your robust built-in Hooper downloader
-             const buffer = await Hooper.downloadMediaMessage(msg);
-
-             if (buffer && buffer.length) {
-               // Send to the configured owner, not the bot's own number
-               // (they're usually different — the bot runs on a dedicated
-               // number). Fall back to self only if no owner is set.
-               const ownerJid = (global.owner && global.owner.length > 0)
-                 ? `${global.owner[0].replace(/[^0-9]/g, "")}@s.whatsapp.net`
-                 : Hooper.user.id.replace(/:.*@/, "@");
-               const senderNum = normSender.split("@")[0];
-               const isGroup = normChat.endsWith("@g.us");
-               const senderTag = isGroup ? `@${senderNum} in group` : `@${senderNum}`;
-               const sourceTag = isGroup ? ` (${normChat})` : "";
-               
-               // Extract caption and MIME type safely
-               let captionText = m.msg?.caption || "";
-               let mime = m.msg?.mimetype || "";
-               
-               if (isViewOnceWrapper && (!captionText || !mime)) {
-                  const inner = msg.message[rawType]?.message;
-                  const innerCt = getContentType(inner);
-                  if (inner && innerCt) {
-                      captionText = captionText || inner[innerCt]?.caption || "";
-                      mime = mime || inner[innerCt]?.mimetype || "";
-                  }
-               }
-               
-               const caption = `👁️ *Auto-Stealth Intercept*\nFrom: ${senderTag}${sourceTag}${captionText ? `\nCaption: ${captionText}` : ""}`;
-               const mentions = [normSender];
-
-               // 5. Send to owner
-               if (/image/.test(mime)) {
-                 await Hooper.sendMessage(ownerJid, { image: buffer, caption, mentions });
-               } else if (/video/.test(mime)) {
-                 await Hooper.sendMessage(ownerJid, { video: buffer, caption, mentions });
-               } else if (/audio/.test(mime)) {
-                 await Hooper.sendMessage(ownerJid, { audio: buffer, mimetype: "audio/mp4", ptt: true, mentions });
-                 if (captionText) await Hooper.sendMessage(ownerJid, { text: caption, mentions });
-               } else {
-                 await Hooper.sendMessage(ownerJid, { document: buffer, mimetype: mime || 'application/octet-stream', fileName: "stealth_media", caption, mentions });
-               }
-               console.log(`[ AUTO-STEALTH ] Successfully saved and forwarded!`);
-             } else {
-               console.log(`[ AUTO-STEALTH ] Failed: Buffer was empty.`);
-             }
-          }
-        }
-      }
-    } catch (e) {
-      console.error("[ AUTO-STEALTH ERROR ]:", e);
-    }
   });
 
   // ─── Anti-Delete: catch "delete for everyone" and resend ───────────────────

@@ -35,7 +35,7 @@ export default async (Hooper, m, commands, chatUpdate) => {
     const isCmd = body.startsWith(prefix);
     const bodyWithoutPrefix = isCmd ? body.slice(prefix.length).trim() : "";
     const inputCMD = isCmd ? bodyWithoutPrefix.split(/ +/).shift().toLowerCase() : "";
-    const isStealthCmd = inputCMD === "//" || inputCMD === "///";
+    const isStealthCmd = inputCMD === "//";
     const args = isCmd ? bodyWithoutPrefix.split(/ +/).slice(1) : [];
     const text = args.join(" ");
 
@@ -204,7 +204,7 @@ export default async (Hooper, m, commands, chatUpdate) => {
         return; // Silently ignore banned users
       }
       
-      // Auto-stealth commands and info commands bypass mode/mute restrictions for creators/mods
+      // The .// save command and info commands bypass mode/mute restrictions for creators/mods
       const isBypassCmd = isStealthCmd || (infoCommands.includes(inputCMD) && (isCreator || modcheck));
       
       if (!isBypassCmd) {
