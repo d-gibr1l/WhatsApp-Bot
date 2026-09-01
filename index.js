@@ -781,6 +781,22 @@ const connectHooper = async (trigger) => {
     const _rawType = msg.message ? _gct(msg.message) : "NO_MESSAGE";
     const _isVO = ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"].includes(_rawType);
 
+    // Temporary VO diagnostic: dump the shape of every non-text inbound
+    // message so we can see exactly how a View Once arrives.
+    if (!msg.key?.fromMe && msg.message) {
+      const _keys = Object.keys(msg.message);
+      const _isText = _keys.length === 1 && ["conversation", "extendedTextMessage", "senderKeyDistributionMessage"].includes(_keys[0]);
+      if (!_isText) {
+        let _inner = msg.message;
+        if (_inner.ephemeralMessage?.message) _inner = _inner.ephemeralMessage.message;
+        console.log(
+          `[ VO-DEBUG ] rawType=${_rawType} topKeys=[${_keys.join(",")}] ` +
+          `innerKeys=[${Object.keys(_inner).join(",")}] ` +
+          `from=${msg.key?.participant || msg.key?.remoteJid} chat=${msg.key?.remoteJid}`,
+        );
+      }
+    }
+
 
     // Prevent the bot from processing old messages
     let tsRaw = msg.messageTimestamp;
