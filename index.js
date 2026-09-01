@@ -789,6 +789,19 @@ const connectHooper = async (trigger) => {
           `[ UPSERT-DEBUG ] evtType=${chatUpdate.type} idx=${_i}/${_all.length} msgType=${_t} vo?=${_vo} ` +
           `keys=[${_tk.join(",")}] from=${_mm.key?.participant || _mm.key?.remoteJid}`,
         );
+        // For empty-message notifies (View Once lands here), dump the whole
+        // envelope so we can see stubType / retry state / other fields.
+        if (_t === "NO_MESSAGE") {
+          const _seen = new WeakSet();
+          const _c = (o) => {
+            if (!o || typeof o !== "object") return o;
+            if (Buffer.isBuffer(o) || o?.type === "Buffer") return "<buf>";
+            if (_seen.has(o)) return "<circ>"; _seen.add(o);
+            if (Array.isArray(o)) return o.map(_c);
+            const r = {}; for (const k of Object.keys(o)) r[k] = _c(o[k]); return r;
+          };
+          try { console.log(`[ EMPTY-MSG ] ` + JSON.stringify(_c(_mm)).slice(0, 1500)); } catch {}
+        }
       });
     } catch {}
 
