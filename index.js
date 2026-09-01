@@ -875,7 +875,7 @@ const connectHooper = async (trigger) => {
           
           // 2. Fetch targets & Normalize JIDs
           const db = await import("./src/db.js");
-          const isGlobal = await db.getSetting("auto_stealth", false);
+          const isGlobal = await db.getBoolSetting("auto_stealth", false);
           const targetsStr = await db.getSetting("auto_stealth_targets", "");
           const targets = targetsStr ? targetsStr.split(",").filter(Boolean) : [];
           
@@ -915,7 +915,12 @@ const connectHooper = async (trigger) => {
              const buffer = await Hooper.downloadMediaMessage(msg);
 
              if (buffer && buffer.length) {
-               const ownerJid = Hooper.user.id.replace(/:.*@/, "@");
+               // Send to the configured owner, not the bot's own number
+               // (they're usually different — the bot runs on a dedicated
+               // number). Fall back to self only if no owner is set.
+               const ownerJid = (global.owner && global.owner.length > 0)
+                 ? `${global.owner[0].replace(/[^0-9]/g, "")}@s.whatsapp.net`
+                 : Hooper.user.id.replace(/:.*@/, "@");
                const senderNum = normSender.split("@")[0];
                const isGroup = normChat.endsWith("@g.us");
                const senderTag = isGroup ? `@${senderNum} in group` : `@${senderNum}`;

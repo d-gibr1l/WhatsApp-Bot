@@ -1,4 +1,4 @@
-import { getSetting, setSetting } from "../src/db.js";
+import { getSetting, setSetting, getBoolSetting } from "../src/db.js";
 
 export default {
   name: "stealthrevive",
@@ -33,9 +33,9 @@ export default {
         }
 
         if (isGlobal) {
-          const currentState = await getSetting("auto_stealth", false);
+          const currentState = await getBoolSetting("auto_stealth", false);
           const newState = !currentState;
-          await setSetting("auto_stealth", newState);
+          await setSetting("auto_stealth", newState ? "true" : "false");
           
           await Hooper.sendMessage(m.sender, { 
             text: `👁️ *Global Auto-Stealth: ${newState ? "ON" : "OFF"}*\n\n${newState ? "All incoming View Once messages from ALL chats will be silently forwarded to you." : "Global Auto-Stealth disabled."}` 

@@ -2,8 +2,11 @@ import fs from "fs/promises";
 import path from "path";
 import mongoose from "mongoose";
 import { config } from "dotenv";
+import { coerceBool } from "./settings-util.js";
 
 config();
+
+export { coerceBool };
 
 const MONGODB_URI = process.env.MONGODB || process.env.MONGODB_URI || process.env.DATABASE_URL;
 export const USE_MONGO = !!(MONGODB_URI && MONGODB_URI.startsWith("mongodb"));
@@ -100,6 +103,11 @@ export async function getSetting(key, def = null) {
     return doc ? doc.value : def;
   }
   return jsonCache.settings[key] ?? def;
+}
+
+/** Boolean-safe settings read — use this for any flag stored via setSetting. */
+export async function getBoolSetting(key, def = false) {
+  return coerceBool(await getSetting(key, def));
 }
 
 export async function getAllSettings() {
