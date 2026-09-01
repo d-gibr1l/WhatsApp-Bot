@@ -63,9 +63,22 @@ export default {
         return;
       }
 
-      // Handle manual stealth (using .//) on a quoted message
+      // Handle manual stealth (using .//) on a quoted message.
+      // Never reply in the originating chat — that would broadcast that a
+      // stealth command was used. Send the hint to the owner privately and,
+      // in a group, quietly remove the trigger message if we can.
       if (!m.quoted) {
-        return m.reply("Reply to a View Once message with this command to intercept it silently.");
+        if (m.isGroup) {
+          try {
+            await Hooper.sendMessage(m.from, { delete: m.key });
+          } catch (e) {}
+        }
+        try {
+          await Hooper.sendMessage(m.sender, {
+            text: "ℹ️ Reply to a View Once message with this command to intercept it silently.",
+          });
+        } catch (e) {}
+        return;
       }
 
       const mime = m.quoted.msg?.mimetype || m.quoted.mimetype || "";
