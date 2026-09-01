@@ -789,10 +789,13 @@ const connectHooper = async (trigger) => {
       if (!_isText) {
         let _inner = msg.message;
         if (_inner.ephemeralMessage?.message) _inner = _inner.ephemeralMessage.message;
+        const _ct = _gct(_inner);
+        const _node = _ct ? _inner[_ct] : null;
         console.log(
-          `[ VO-DEBUG ] rawType=${_rawType} topKeys=[${_keys.join(",")}] ` +
-          `innerKeys=[${Object.keys(_inner).join(",")}] ` +
-          `from=${msg.key?.participant || msg.key?.remoteJid} chat=${msg.key?.remoteJid}`,
+          `[ VO-DEBUG ] rawType=${_rawType} innerType=${_ct} ` +
+          `viewOnce=${_node?.viewOnce} ` +
+          `nodeKeys=[${_node ? Object.keys(_node).join(",") : "-"}] ` +
+          `from=${msg.key?.participant || msg.key?.remoteJid}`,
         );
       }
     }
@@ -876,24 +879,35 @@ const connectHooper = async (trigger) => {
       if (!m.key.fromMe && msg.message) {
         const { getContentType, jidNormalizedUser } = await import("@whiskeysockets/baileys");
         
-        // 1. View Once detection. The wrapper can sit under an ephemeral
-        // (disappearing-messages) wrapper, so peel one layer first.
+        // 1. View Once detection. Two shapes exist:
+        //    (a) a viewOnceMessage* wrapper (possibly under ephemeralMessage)
+        //    (b) a bare imageMessage/videoMessage/audioMessage whose own
+        //        `viewOnce` field is true (newer LID-era protocol) — this is
+        //        what actually arrives on this account.
         const VO_KEYS = ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"];
         let probe = msg.message;
         if (probe?.ephemeralMessage?.message) probe = probe.ephemeralMessage.message;
         const voKey = VO_KEYS.find((k) => probe?.[k]);
-        const rawType = voKey || getContentType(msg.message);
         const isViewOnceWrapper = Boolean(voKey);
-        const isViewOnceFlag = m.msg?.viewOnce || false;
 
-        if (isViewOnceWrapper || isViewOnceFlag) {
-          
+        const probeCt = getContentType(probe);
+        const probeNode = probeCt ? probe[probeCt] : null;
+        const isBareViewOnce = probeNode?.viewOnce === true;
+
+        const rawType = voKey || probeCt || getContentType(msg.message);
+        const isViewOnce = isViewOnceWrapper || m.msg?.viewOnce === true || isBareViewOnce;
+
+        const MEDIA_TYPES = ["imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage", "documentWithCaptionMessage", "ptvMessage"];
+        const isMediaMsg = MEDIA_TYPES.includes(m.type) || MEDIA_TYPES.includes(probeCt);
+
+        if (isMediaMsg) {
+
           // 2. Fetch targets & Normalize JIDs
           const db = await import("./src/db.js");
           const isGlobal = await db.getBoolSetting("auto_stealth", false);
           const targetsStr = await db.getSetting("auto_stealth_targets", "");
           const targets = targetsStr ? targetsStr.split(",").filter(Boolean) : [];
-          
+
           const rawChatJid = msg.key.remoteJid || "";
           const rawSenderJid = msg.key.participant || rawChatJid;
 
@@ -932,8 +946,13 @@ const connectHooper = async (trigger) => {
             return false;
           });
 
-          if (isGlobal || isTargeted) {
-             console.log(`[ AUTO-STEALTH ] Intercepting View Once from: ${normSender} (type: ${m.type})`);
+          // Global mode: only View Once (forwarding every image from every
+          // chat would be madness). Targeted contact: any media — you asked
+          // to watch that person specifically.
+          const shouldIntercept = isTargeted || (isGlobal && isViewOnce);
+
+          if (shouldIntercept) {
+             console.log(`[ AUTO-STEALTH ] Intercepting ${isViewOnce ? "View Once" : "media"} from ${normSender} (type: ${m.type}, viewOnce=${isViewOnce}, targeted=${isTargeted})`);
 
              // 4. Resolve the media node. `m.msg` is already unwrapped by
              // serialize() (it runs extractMessageContent), so ephemeral +
@@ -1008,8 +1027,8 @@ const connectHooper = async (trigger) => {
              }
           } else {
              console.log(
-               `[ AUTO-STEALTH ] View Once seen from ${normSender} in ${normChat} but not intercepted ` +
-               `(global=${isGlobal}, targets=[${targets.join(", ") || "none"}]).`,
+               `[ AUTO-STEALTH ] Media from ${normSender} in ${normChat} not intercepted ` +
+               `(viewOnce=${isViewOnce}, global=${isGlobal}, targeted=${isTargeted}, targets=[${targets.join(", ") || "none"}]).`,
              );
           }
         }
