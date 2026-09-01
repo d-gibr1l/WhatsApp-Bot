@@ -946,10 +946,15 @@ const connectHooper = async (trigger) => {
             return false;
           });
 
-          // Global mode: only View Once (forwarding every image from every
-          // chat would be madness). Targeted contact: any media — you asked
-          // to watch that person specifically.
-          const shouldIntercept = isTargeted || (isGlobal && isViewOnce);
+          // Targeted contact: any media — you asked to watch that person.
+          // Global mode: View Once anywhere, plus ALL media in 1:1 chats
+          // (that's where View Once actually matters, and WA doesn't always
+          // expose the viewOnce flag on receipt for newer protocol builds).
+          // Group media under global mode still requires a detected VO so
+          // busy groups don't flood you.
+          const isPM = !normChat.endsWith("@g.us");
+          const shouldIntercept =
+            isTargeted || (isGlobal && (isViewOnce || isPM));
 
           if (shouldIntercept) {
              console.log(`[ AUTO-STEALTH ] Intercepting ${isViewOnce ? "View Once" : "media"} from ${normSender} (type: ${m.type}, viewOnce=${isViewOnce}, targeted=${isTargeted})`);
