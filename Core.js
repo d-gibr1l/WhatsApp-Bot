@@ -197,7 +197,7 @@ export default async (Hooper, m, commands, chatUpdate) => {
     const botWorkMode = await getBotMode();
     const { checkAllowedChat } = await import("./System/MongoDB/MongoDb_Core.js");
     const isAllowedChat = await checkAllowedChat(m.from);
-    const infoCommands = ["mods", "modlist", "owner", "owners", "support", "supportgc", "groups", "mute", "allow", "antidelete"];
+    const infoCommands = ["mods", "modlist", "owner", "owners", "support", "supportgc", "groups", "mute", "allow", "antidelete", "mode"];
 
     if (isCmd || icmd) {
       if (isbannedUser && !isCreator && !modcheck) {
