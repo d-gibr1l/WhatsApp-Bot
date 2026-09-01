@@ -570,7 +570,7 @@ const connectHooper = async (trigger) => {
 
   const generation = ++socketGeneration;
   const Hooper = makeWASocket({
-    logger: pino({ level: "silent" }),
+    logger: pino({ level: process.env.BAILEYS_LOG_LEVEL || "silent" }),
     printQRInTerminal: true, // MUST be true for some Baileys versions to emit the qr event properly
     browser: ["Ubuntu", "Chrome", "20.0.04"],
     auth: state,
@@ -772,6 +772,10 @@ const connectHooper = async (trigger) => {
 
   Hooper.ev.on("messages.upsert", async (chatUpdate) => {
     if (!isCurrentSocket(Hooper, generation)) return;
+    if (chatUpdate.requestId) {
+      const _m = chatUpdate.messages?.[0];
+      console.log(`[ AUTO-STEALTH ] PDO response upsert requestId=${chatUpdate.requestId} id=${_m?.key?.id} hasMsg=${!!_m?.message} isVO=${_m?.key?.isViewOnce}`);
+    }
     if (chatUpdate.type !== "notify") return;
     const msg = chatUpdate.messages?.[0];
     if (!msg) return;
