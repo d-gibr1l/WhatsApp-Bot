@@ -81,25 +81,18 @@ export default {
         }
       } else {
         const { downloadWithYtDlp } = await import("../src/downloader.js");
-        
-        const { filePath, url: directUrl, contentType, title } = await downloadWithYtDlp(url.url, false, "720");
+
+        const { filePath, contentType, title } = await downloadWithYtDlp(url.url, false, "720");
         const isAudio = contentType && contentType.startsWith("audio");
-        
-        if (directUrl) {
-           const mediaMsg = isAudio 
-              ? { audio: { url: directUrl }, mimetype: contentType } 
-              : { video: { url: directUrl }, mimetype: contentType, caption: `🎬 *${title}*` };
-           await Hooper.sendMessage(m.from, mediaMsg, { quoted: m });
-        } else {
-           const fs = await import("fs");
-           try {
-             const mediaMsg = isAudio 
-                ? { audio: fs.readFileSync(filePath), mimetype: contentType } 
-                : { video: fs.readFileSync(filePath), mimetype: contentType, caption: `🎬 *${title}*` };
-             await Hooper.sendMessage(m.from, mediaMsg, { quoted: m });
-           } finally {
-             if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-           }
+
+        const fs = await import("fs");
+        try {
+          const mediaMsg = isAudio
+             ? { audio: fs.readFileSync(filePath), mimetype: contentType }
+             : { video: fs.readFileSync(filePath), mimetype: contentType, caption: `🎬 *${title}*` };
+          await Hooper.sendMessage(m.from, mediaMsg, { quoted: m });
+        } finally {
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         }
       }
       if (doReact) await doReact("✅");

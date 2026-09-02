@@ -78,10 +78,6 @@
         <div class="stat-label">Bot Version</div>
         <div class="stat-val" id="val-bot">--</div>
       </div>
-      <div class="stat-card stat-card--wide">
-        <div class="stat-label">Storage Backend</div>
-        <div class="stat-val" id="val-storage">--</div>
-      </div>
     </div>
 
     <!-- Pairing (shown only when disconnected) -->
@@ -230,45 +226,6 @@
         <div class="input-group">
           <input type="password" id="cfg-rapidapi" class="form-input" placeholder="Enter RapidAPI key...">
           <button class="input-btn" onclick="saveConfig('rapidapi_key', 'cfg-rapidapi')">Save</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="section-title">Cloudflare R2 Storage</div>
-    <div class="settings-grid">
-      <div class="setting-card">
-        <div class="setting-info"><h3>R2 Account ID</h3><p>Required to bypass IP / disk limits on YouTube downloads.</p></div>
-        <div class="input-group">
-          <input type="text" id="cfg-r2-account" class="form-input" placeholder="1234abc5678def">
-          <button class="input-btn" onclick="saveConfig('R2_ACCOUNT_ID', 'cfg-r2-account')">Save</button>
-        </div>
-      </div>
-      <div class="setting-card">
-        <div class="setting-info"><h3>R2 Access Key</h3><p>S3-compatible access key.</p></div>
-        <div class="input-group">
-          <input type="password" id="cfg-r2-access" class="form-input" placeholder="...">
-          <button class="input-btn" onclick="saveConfig('R2_ACCESS_KEY', 'cfg-r2-access')">Save</button>
-        </div>
-      </div>
-      <div class="setting-card">
-        <div class="setting-info"><h3>R2 Secret Key</h3><p>S3-compatible secret key.</p></div>
-        <div class="input-group">
-          <input type="password" id="cfg-r2-secret" class="form-input" placeholder="...">
-          <button class="input-btn" onclick="saveConfig('R2_SECRET_KEY', 'cfg-r2-secret')">Save</button>
-        </div>
-      </div>
-      <div class="setting-card">
-        <div class="setting-info"><h3>R2 Bucket Name</h3><p>Where media is uploaded (e.g. hooper-bucket).</p></div>
-        <div class="input-group">
-          <input type="text" id="cfg-r2-bucket" class="form-input" placeholder="my-bucket">
-          <button class="input-btn" onclick="saveConfig('R2_BUCKET_NAME', 'cfg-r2-bucket')">Save</button>
-        </div>
-      </div>
-      <div class="setting-card">
-        <div class="setting-info"><h3>R2 Public URL</h3><p>Custom domain attached to R2 (e.g. https://cdn.example.com).</p></div>
-        <div class="input-group">
-          <input type="text" id="cfg-r2-public" class="form-input" placeholder="https://...">
-          <button class="input-btn" onclick="saveConfig('R2_PUBLIC_URL', 'cfg-r2-public')">Save</button>
         </div>
       </div>
     </div>

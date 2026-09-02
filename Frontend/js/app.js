@@ -251,8 +251,6 @@ async function loadDashboard() {
     document.getElementById('val-uptime').innerText = formatUptime(localUptimeMs);
     document.getElementById('val-node').innerText = data.nodeVersion || '--';
     document.getElementById('val-bot').innerText = data.botVersion || '--';
-    const storageEl = document.getElementById('val-storage');
-    if (storageEl) storageEl.innerText = data.storageBackend || '--';
 
     if (localUptimeInterval) clearInterval(localUptimeInterval);
     localUptimeInterval = setInterval(() => {
@@ -276,11 +274,6 @@ async function loadSettings() {
     if (document.getElementById('cfg-claude')) document.getElementById('cfg-claude').value = data.claudeAPI || '';
     if (document.getElementById('cfg-tenor')) document.getElementById('cfg-tenor').value = data.tenorAPI || '';
     if (document.getElementById('cfg-gc')) document.getElementById('cfg-gc').value = data.gcInterval || '';
-    if (document.getElementById('cfg-r2-account')) document.getElementById('cfg-r2-account').value = data.r2Account || '';
-    if (document.getElementById('cfg-r2-access')) document.getElementById('cfg-r2-access').value = data.r2Access || '';
-    if (document.getElementById('cfg-r2-secret')) document.getElementById('cfg-r2-secret').value = data.r2Secret || '';
-    if (document.getElementById('cfg-r2-bucket')) document.getElementById('cfg-r2-bucket').value = data.r2Bucket || '';
-    if (document.getElementById('cfg-r2-public')) document.getElementById('cfg-r2-public').value = data.r2PublicUrl || '';
     if (document.getElementById('cfg-yt-cookies')) document.getElementById('cfg-yt-cookies').value = data.ytCookies || '';
     if (document.getElementById('cfg-rapidapi')) document.getElementById('cfg-rapidapi').value = data.rapidapiKey || '';
   } catch(e) {

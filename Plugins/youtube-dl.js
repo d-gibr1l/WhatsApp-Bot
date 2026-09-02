@@ -26,7 +26,7 @@ export default {
   name: "youtube",
   alias: [...mergedCommands],
   uniquecommands: ["play", "mp3", "mp4"],
-  description: "Advanced YouTube system (Local Proxy/R2 based)",
+  description: "YouTube audio / video downloader (yt-dlp).",
 
   start: async (Hooper, m, { inputCMD, text, doReact, prefix }) => {
     const botName = global.botName || "HOOPER";
@@ -66,34 +66,20 @@ export default {
             { quoted: m },
           );
 
-          const { filePath, url, contentType, title } = await downloadWithYtDlp(targetUrl, false, "720");
+          const { filePath, contentType, title } = await downloadWithYtDlp(targetUrl, false, "720");
 
-          if (url) {
-            // R2 Uploaded
+          try {
             await Hooper.sendMessage(
               m.from,
               {
-                video: { url },
+                video: fs.readFileSync(filePath),
                 mimetype: contentType,
-                caption: `🎬 *${title}*\n\n> Powered by ${botName} (Cloud Stream)`,
+                caption: `🎬 *${title}*\n\n> Powered by ${botName}`,
               },
               { quoted: m },
             );
-          } else {
-            // Local file
-            try {
-              await Hooper.sendMessage(
-                m.from,
-                {
-                  video: fs.readFileSync(filePath),
-                  mimetype: contentType,
-                  caption: `🎬 *${title}*\n\n> Powered by ${botName} (Local)`,
-                },
-                { quoted: m },
-              );
-            } finally {
-              if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-            }
+          } finally {
+            if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
           }
           await doReact("✅");
           break;
@@ -116,15 +102,13 @@ export default {
             { quoted: m },
           );
 
-          const { filePath, url, contentType, title } = await downloadWithYtDlp(targetUrl, true);
+          const { filePath, contentType, title } = await downloadWithYtDlp(targetUrl, true);
 
           try {
-            const audioPayload = url ? { url } : fs.readFileSync(filePath);
-
             await Hooper.sendMessage(
               m.from,
               {
-                audio: audioPayload,
+                audio: fs.readFileSync(filePath),
                 mimetype: "audio/mpeg",
                 contextInfo: {
                   externalAdReply: {
@@ -139,7 +123,7 @@ export default {
               { quoted: m },
             );
           } finally {
-            if (!url && filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
           }
           await doReact("✅");
           break;

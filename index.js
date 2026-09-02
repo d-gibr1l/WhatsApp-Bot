@@ -1460,22 +1460,6 @@ async function initConfigAndStart() {
   let dbTmdbApi = await db.getSetting("HOOPER_TMDB_API");
   if (dbTmdbApi) global.tmdbAPIKey = dbTmdbApi;
 
-  // Load Cloudflare R2 Credentials
-  const r2AccountId = await db.getSetting("R2_ACCOUNT_ID");
-  if (r2AccountId) process.env.R2_ACCOUNT_ID = r2AccountId;
-  
-  const r2AccessKey = await db.getSetting("R2_ACCESS_KEY");
-  if (r2AccessKey) process.env.R2_ACCESS_KEY = r2AccessKey;
-
-  const r2SecretKey = await db.getSetting("R2_SECRET_KEY");
-  if (r2SecretKey) process.env.R2_SECRET_KEY = r2SecretKey;
-
-  const r2BucketName = await db.getSetting("R2_BUCKET_NAME");
-  if (r2BucketName) process.env.R2_BUCKET_NAME = r2BucketName;
-
-  const r2PublicUrl = await db.getSetting("R2_PUBLIC_URL");
-  if (r2PublicUrl) process.env.R2_PUBLIC_URL = r2PublicUrl;
-
   // Load YouTube Cookies
   const ytCookies = await db.getSetting("yt_cookies");
   if (ytCookies) {
@@ -1813,7 +1797,6 @@ app.get("/api/uptime", (req, res) => {
     websocketOpen: Boolean(HooperSocket?.ws?.isOpen),
     reconnectAttempt,
     healthProbeFailures,
-    storageBackend: process.env.R2_ACCOUNT_ID ? "☁️ Cloudflare R2 (100MB Limit)" : "💾 Local Disk (50MB Fallback)"
   });
 });
 
@@ -1919,11 +1902,6 @@ app.get("/api/config", async (req, res) => {
       tenorAPI: (global.tenorAPIKeys || []).join(","),
       tmdbAPI: global.tmdbAPIKey || "",
       gcInterval: process.env.GC_INTERVAL_MINUTES || "5",
-      r2Account: await mod.getSetting("R2_ACCOUNT_ID") || "",
-      r2Access: await mod.getSetting("R2_ACCESS_KEY") || "",
-      r2Secret: await mod.getSetting("R2_SECRET_KEY") || "",
-      r2Bucket: await mod.getSetting("R2_BUCKET_NAME") || "",
-      r2PublicUrl: await mod.getSetting("R2_PUBLIC_URL") || "",
       ytCookies: await mod.getSetting("yt_cookies") || "",
       rapidapiKey: await mod.getSetting("rapidapi_key") || "",
     };
@@ -1947,11 +1925,6 @@ const ALLOWED_CONFIG_KEYS = new Set([
   "HOOPER_TENOR_API",
   "HOOPER_TMDB_API",
   "HOOPER_GC_INTERVAL",
-  "R2_ACCOUNT_ID",
-  "R2_ACCESS_KEY",
-  "R2_SECRET_KEY",
-  "R2_BUCKET_NAME",
-  "R2_PUBLIC_URL",
   "yt_cookies",
   "rapidapi_key",
 ]);
@@ -1980,7 +1953,6 @@ app.post("/api/config", async (req, res) => {
     if (key === "HOOPER_TENOR_API") global.tenorAPIKeys = value ? value.split(",") : [];
     if (key === "HOOPER_TMDB_API") global.tmdbAPIKey = value;
     if (key === "HOOPER_GC_INTERVAL") process.env.GC_INTERVAL_MINUTES = value;
-    if (key.startsWith("R2_")) process.env[key] = value;
     if (key === "yt_cookies") {
       const fs = await import("fs");
       if (value) {
