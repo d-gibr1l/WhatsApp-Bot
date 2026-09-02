@@ -170,6 +170,11 @@ const MESSAGE_CACHE_MAX_PER_CHAT = Math.max(
 
 import { messageData, contactData } from "./System/MongoDB/MongoDB_Schema.js";
 import { resolveParties, pickMedia, sanitizeMentions } from "./src/antidelete-helpers.js";
+import {
+  sessions as tempmailSessions,
+  pollOnce as tempmailPollOnce,
+  hydrate as tempmailHydrate,
+} from "./src/tempmail.js";
 
 const store = {
   bind(ev) {
@@ -1388,6 +1393,14 @@ async function initConfigAndStart() {
     }
   }
 
+  // Load watched temp-mail inboxes into memory (one query, at boot).
+  try {
+    const n = await tempmailHydrate(db);
+    if (n) console.log(chalk.cyan(`[ HOOPER ] Temp-mail: watching ${n} inbox(es)`));
+  } catch (e) {
+    console.warn(`[ HOOPER ] Temp-mail hydrate failed: ${e.message}`);
+  }
+
   // Session ID: verify any saved ID actually has a session backup, otherwise auto-discover
   const { sessionSchema } = await import("./System/MongoAuth/Schema/index.js");
   let dbSessionId = await db.getSetting("HOOPER_SESSION_ID");
@@ -1612,6 +1625,23 @@ console.log(
   ),
 );
 
+// ─── Temp-mail auto-delivery ───────────────────────────────────────────────
+// Every 7s, check each watched disposable inbox and DM the owner any new
+// mail. pollOnce() is self-guarded against overlap and rate-limits itself.
+const tempmailTimer = setInterval(async () => {
+  if (status !== "open" || !HooperSocket || !tempmailSessions.size) return;
+  const sock = HooperSocket;
+  try {
+    const db = await import("./src/db.js");
+    await tempmailPollOnce({
+      db,
+      send: (jid, text) => sock.sendMessage(jid, { text }),
+    });
+  } catch (e) {
+    console.error("[ TEMPMAIL ] poll cycle error:", e?.message || e);
+  }
+}, 7000);
+
 let maintenanceTimer;
 if (typeof global.gc === "function") {
   maintenanceTimer = setInterval(
@@ -1654,6 +1684,7 @@ const shutdown = async (signal) => {
   clearInterval(watchdogTimer);
   clearInterval(messageCacheTimer);
   clearInterval(maintenanceTimer);
+  clearInterval(tempmailTimer);
   clearStableConnectionTimer();
 
   if (instanceLock) await instanceLock.releaseLock();
