@@ -1,5 +1,6 @@
 import axios from "axios";
 import crypto from "crypto";
+import { getSetting, setSetting, getAllSettings } from "./db.js";
 
 // ── mail.tm client + in-memory watcher registry ─────────────────────────────
 // The plugin drives commands; index.js runs a poller that walks `sessions`
@@ -105,16 +106,16 @@ export async function deleteAccount(session) {
 
 const keyFor = (sender) => SETTING_PREFIX + sender;
 
-export async function persist(db, sender) {
+export async function persist(sender) {
   const s = sessions.get(sender);
-  if (!s) return db.setSetting(keyFor(sender), "");
+  if (!s) return setSetting(keyFor(sender), "");
   const trimmed = { ...s, seenIds: s.seenIds.slice(-MAX_SEEN) };
-  return db.setSetting(keyFor(sender), JSON.stringify(trimmed));
+  return setSetting(keyFor(sender), JSON.stringify(trimmed));
 }
 
-export async function forget(db, sender) {
+export async function forget(sender) {
   sessions.delete(sender);
-  return db.setSetting(keyFor(sender), "");
+  return setSetting(keyFor(sender), "");
 }
 
 export function touch(sender) {
@@ -123,9 +124,9 @@ export function touch(sender) {
 }
 
 /** Load every stored tempmail session into memory. Call once after DB is up. */
-export async function hydrate(db) {
+export async function hydrate() {
   try {
-    const all = await db.getAllSettings();
+    const all = await getAllSettings();
     let n = 0;
     for (const { key, value } of all) {
       if (!key.startsWith(SETTING_PREFIX) || !value) continue;
@@ -153,11 +154,11 @@ export async function hydrate(db) {
 let polling = false;
 
 /**
- * One poll cycle. `send(jid, message)` sends a WhatsApp message; `db` persists
- * seenIds. Processes accounts oldest-first with a gap between each so we stay
- * under mail.tm's rate limit even with many watchers.
+ * One poll cycle. `send(jid, message)` sends a WhatsApp message. Processes
+ * accounts oldest-first with a gap between each so we stay under mail.tm's
+ * rate limit even with many watchers.
  */
-export async function pollOnce({ send, db }) {
+export async function pollOnce({ send }) {
   if (polling) return;
   polling = true;
   try {
@@ -167,7 +168,7 @@ export async function pollOnce({ send, db }) {
     for (const [sender, s] of entries) {
       // drop idle sessions (mail.tm has wiped them anyway)
       if (now - s.lastActive > IDLE_MS) {
-        await forget(db, sender).catch(() => {});
+        await forget(sender).catch(() => {});
         continue;
       }
       try {
@@ -196,7 +197,7 @@ export async function pollOnce({ send, db }) {
               `──────────────\n${clip(bodyText || "(no text content)", 3500)}`,
           );
         }
-        await persist(db, sender).catch(() => {});
+        await persist(sender).catch(() => {});
       } catch (e) {
         // one bad account must not stop the loop
         if (!/429|Auth failed/.test(e.message)) {

@@ -18,7 +18,7 @@ export default {
   uniquecommands: ["tempmail", "tm"],
   description: "Disposable email — new mail is pushed to you automatically",
 
-  start: async (Hooper, m, { inputCMD, args, prefix, doReact, db }) => {
+  start: async (Hooper, m, { inputCMD, args, prefix, doReact }) => {
     const sender = m.sender;
     const p = prefix;
     const sub = (inputCMD === "tmi" ? "inbox" : (args[0] || "")).toLowerCase();
@@ -31,7 +31,7 @@ export default {
         if (old) await deleteAccount(old);
         const session = await createInbox(sender);
         sessions.set(sender, session);
-        await persist(db, sender);
+        await persist(sender);
         await doReact("✅");
         return m.reply(
           `📧 *New temporary email*\n\n\`${session.address}\`\n\n` +
@@ -44,7 +44,7 @@ export default {
         const session = sessions.get(sender);
         if (!session) return m.reply(`You don't have a temporary email. Make one with *${p}tempmail*`);
         await deleteAccount(session);
-        await forget(db, sender);
+        await forget(sender);
         await doReact("🗑️");
         return m.reply("🗑️ Temporary email deleted. Auto-delivery stopped.");
       }
@@ -84,7 +84,7 @@ export default {
         const msgs = await listMessages(session);
         // mark everything as seen so the poller doesn't re-push what you just read
         session.seenIds = [...new Set([...session.seenIds, ...msgs.map((x) => x.id)])];
-        await persist(db, sender);
+        await persist(sender);
         await doReact("✅");
 
         if (!msgs.length) return m.reply(`📭 *${session.address}*\n\nInbox is empty.`);
@@ -108,7 +108,7 @@ export default {
         await doReact("⏳");
         session = await createInbox(sender);
         sessions.set(sender, session);
-        await persist(db, sender);
+        await persist(sender);
       } else {
         touch(sender);
       }

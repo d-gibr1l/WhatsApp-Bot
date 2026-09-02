@@ -1395,7 +1395,7 @@ async function initConfigAndStart() {
 
   // Load watched temp-mail inboxes into memory (one query, at boot).
   try {
-    const n = await tempmailHydrate(db);
+    const n = await tempmailHydrate();
     if (n) console.log(chalk.cyan(`[ HOOPER ] Temp-mail: watching ${n} inbox(es)`));
   } catch (e) {
     console.warn(`[ HOOPER ] Temp-mail hydrate failed: ${e.message}`);
@@ -1632,9 +1632,7 @@ const tempmailTimer = setInterval(async () => {
   if (status !== "open" || !HooperSocket || !tempmailSessions.size) return;
   const sock = HooperSocket;
   try {
-    const db = await import("./src/db.js");
     await tempmailPollOnce({
-      db,
       send: (jid, text) => sock.sendMessage(jid, { text }),
     });
   } catch (e) {
