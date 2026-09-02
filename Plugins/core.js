@@ -265,6 +265,7 @@ export default {
           revive: { icon: "👁️", label: "ᴠɪᴇᴡ ᴏɴᴄᴇ" },
           tools: { icon: "🧰", label: "ᴛᴏᴏʟꜱ" },
           tweet: { icon: "🐦", label: "ᴛᴡᴇᴇᴛ" },
+          tempmail: { icon: "📧", label: "ᴛᴇᴍᴘ ᴍᴀɪʟ" },
         };
 
         function formatCommands(allCommands) {
