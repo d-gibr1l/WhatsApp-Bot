@@ -99,8 +99,8 @@ const clip = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + "…" : s || "")
 
 export default {
   name: "tempmail",
-  alias: ["tempmail", "tmail", "fakemail", "tmi"],
-  uniquecommands: ["tempmail"],
+  alias: ["tempmail", "tmail", "tm", "fakemail", "tmi"],
+  uniquecommands: ["tempmail", "tm"],
   description: "Disposable email address with an inbox you can check from chat",
 
   start: async (Hooper, m, { inputCMD, args, text, prefix, doReact, db }) => {
