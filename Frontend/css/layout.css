@@ -58,6 +58,9 @@
 }
 .tab-content { display: none; }
 .tab-content.active { display: block; animation: fadeUp 0.35s var(--ease); }
+/* give panels body so short views (Modules with nothing picked) don't
+   read as a floating strip over the photo */
+.tab-content.glass-surface { min-height: 460px; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
 /* ── Glass surface (content panels) ────────────────────────────────────── */

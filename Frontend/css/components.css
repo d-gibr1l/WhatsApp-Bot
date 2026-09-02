@@ -178,7 +178,7 @@ button.input-btn {
 .form-input::placeholder { color: var(--text-muted); font-weight: 500; }
 .form-input:focus { border-color: var(--accent); box-shadow: var(--ring); background: rgba(9, 13, 22, 0.7); }
 textarea.form-input { min-height: 92px; resize: vertical; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.8rem; line-height: 1.5; }
-select.form-input { cursor: pointer; }
+select.form-input { cursor: pointer; width: 100%; text-overflow: ellipsis; }
 select.form-input option { background: #131a29; color: var(--text); }
 
 /* ── Toggle switch ─────────────────────────────────────────────────────── */
