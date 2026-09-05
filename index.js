@@ -964,26 +964,6 @@ const connectHooper = async (trigger) => {
             content = unwrapped[contentType];
         }
 
-        // ── FIX: Strip contextInfo to prevent "from a group" label ──
-        // Status messages carry contextInfo.remoteJid = "status@broadcast".
-        // Even when we download+resend as a fresh buffer, WhatsApp reads
-        // that embedded broadcast JID and renders "from a group". Deleting
-        // contextInfo from both the inner content AND the full cached
-        // message ensures a completely clean outgoing message.
-        if (content && content.contextInfo) {
-            delete content.contextInfo;
-        }
-        if (cached?.message) {
-            const stripCtx = (obj) => {
-                if (!obj || typeof obj !== "object") return;
-                for (const k of Object.keys(obj)) {
-                    if (k === "contextInfo") { delete obj[k]; continue; }
-                    if (typeof obj[k] === "object") stripCtx(obj[k]);
-                }
-            };
-            stripCtx(cached.message);
-        }
-        
         // Where the message was deleted. On LID-addressed accounts the update
         // event's remoteJid can be a @lid even for a group, so look for a
         // real @g.us across every key we have; a stored key.participant also
@@ -1092,8 +1072,12 @@ const connectHooper = async (trigger) => {
             }
         };
 
-        // Always send to owner
-        await sendDeletedMessage(ownerJid);
+        // Always send to owner (safely wrapped)
+        try {
+            await sendDeletedMessage(ownerJid);
+        } catch (e) {
+            console.error(`[ ANTI-DELETE ] Failed to DM owner:`, e);
+        }
 
         // Send to the chat if antidelete is enabled for that chat
         if (isChatEnabled) {
@@ -1118,7 +1102,11 @@ const connectHooper = async (trigger) => {
             if (integratedJids.includes(jidNormalizedUser(deleter))) skipChatBroadcast = true;
 
             if (!skipChatBroadcast) {
-                await sendDeletedMessage(groupJid || chatId);
+                try {
+                    await sendDeletedMessage(groupJid || chatId);
+                } catch (e) {
+                    console.error(`[ ANTI-DELETE ] Failed to broadcast to chat:`, e);
+                }
             }
         }
       } catch (e) {
