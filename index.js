@@ -298,6 +298,7 @@ let instanceLock = null;
 let restartTimer = null;
 let pendingClearAuth = false;
 let reconnectAttempt = 0;
+let qrRetryCount = 0;
 let activeSocketGeneration = 0;
 let socketGeneration = 0;
 let socketStartedAt = 0;
@@ -324,6 +325,10 @@ const CONNECT_STALL_TIMEOUT_MS = 180_000;
 const SOCKET_CLOSE_TIMEOUT_MS = 5_000;
 const RECONNECT_BASE_DELAY_MS = 500;
 const RECONNECT_MAX_DELAY_MS = 60_000;
+// Reconnects triggered by an expired-but-unscanned QR code use a much
+// tighter backoff — that's not a failure, it's just waiting on a human.
+const QR_RETRY_BASE_DELAY_MS = 300;
+const QR_RETRY_MAX_DELAY_MS = 4_000;
 const STABLE_CONNECTION_MS = 300_000;
 
 const isCurrentSocket = (socket, generation) =>
@@ -341,6 +346,7 @@ const markConnectionStableLater = (socket, generation) => {
   stableConnectionTimer = setTimeout(() => {
     if (isCurrentSocket(socket, generation) && status === "open") {
       reconnectAttempt = 0;
+      qrRetryCount = 0;
       console.log(chalk.green(`[ HOOPER ] Connection stable - backoff reset`));
     }
   }, STABLE_CONNECTION_MS);
@@ -389,7 +395,14 @@ const closeActiveSocket = async (reason) => {
   }
 };
 
-const getReconnectDelay = (immediate) => {
+const getReconnectDelay = (immediate, fastRetry) => {
+  if (fastRetry) {
+    const exp = Math.min(
+      QR_RETRY_MAX_DELAY_MS,
+      QR_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, qrRetryCount - 1),
+    );
+    return exp + Math.floor(exp * 0.2 * Math.random());
+  }
   if (immediate && reconnectAttempt === 1) return 250;
   const exponentialDelay = Math.min(
     RECONNECT_MAX_DELAY_MS,
@@ -401,7 +414,7 @@ const getReconnectDelay = (immediate) => {
 
 const scheduleReconnect = (
   reason,
-  { clearAuth = false, immediate = false } = {},
+  { clearAuth = false, immediate = false, fastRetry = false } = {},
 ) => {
   if (shuttingDown) return;
 
@@ -414,7 +427,8 @@ const scheduleReconnect = (
   }
 
   reconnectAttempt += 1;
-  const delay = getReconnectDelay(immediate);
+  qrRetryCount = fastRetry ? qrRetryCount + 1 : 0;
+  const delay = getReconnectDelay(immediate, fastRetry);
   status = "reconnecting";
   QR_GENERATE = "invalid";
 
@@ -478,6 +492,12 @@ async function startHooper(trigger = "initial") {
 
   return startPromise;
 }
+
+// Resolved once per process and reused on every reconnect — refetching it
+// from GitHub/WA Web on every single reconnect attempt (including the fast
+// QR-retry cycles) added several seconds of avoidable network latency
+// before a fresh QR could even be generated.
+let cachedWaVersion = null;
 
 const connectHooper = async (trigger) => {
   console.log(chalk.cyan(`[ HOOPER ] Starting connection (${trigger})...`));
@@ -571,19 +591,32 @@ const connectHooper = async (trigger) => {
 
   await installPlugin();
 
-  let { version, isLatest, error } = await fetchLatestBaileysVersion();
-  if (error || !version || version.length === 0) {
-    console.log(chalk.yellow(`[ HOOPER ] GitHub version fetch failed. Trying WA Web fetch...`));
-    const { fetchLatestWaWebVersion } = await import("@whiskeysockets/baileys");
-    try {
-      const waweb = await fetchLatestWaWebVersion();
-      if (waweb.version) version = waweb.version;
-    } catch (wawebErr) {
-      console.log(chalk.yellow(`[ HOOPER ] WA Web fetch failed. Using hardcoded version.`));
-      version = [2, 3000, 1046002285];
+  let version;
+  if (cachedWaVersion) {
+    version = cachedWaVersion;
+  } else {
+    const TIMEOUT = Symbol("timeout");
+    const withTimeout = (p, ms) =>
+      Promise.race([p, new Promise((r) => setTimeout(() => r(TIMEOUT), ms))]);
+
+    const fetched = await withTimeout(fetchLatestBaileysVersion(), 5_000);
+    version = fetched === TIMEOUT ? null : fetched.version;
+    const error = fetched === TIMEOUT ? true : fetched.error;
+    if (error || !version || version.length === 0) {
+      console.log(chalk.yellow(`[ HOOPER ] GitHub version fetch failed/slow. Trying WA Web fetch...`));
+      const { fetchLatestWaWebVersion } = await import("@whiskeysockets/baileys");
+      try {
+        const waweb = await withTimeout(fetchLatestWaWebVersion(), 5_000);
+        if (waweb !== TIMEOUT && waweb.version) version = waweb.version;
+        else throw new Error("WA Web fetch timed out");
+      } catch (wawebErr) {
+        console.log(chalk.yellow(`[ HOOPER ] WA Web fetch failed. Using hardcoded version.`));
+        version = [2, 3000, 1046002285];
+      }
     }
+    cachedWaVersion = version;
   }
-  
+
   console.log(`[ HOOPER ] Using WA Web Version:`, version);
 
   const generation = ++socketGeneration;
@@ -681,6 +714,10 @@ const connectHooper = async (trigger) => {
   Hooper.ev.on("creds.update", saveCreds);
   Hooper.serializeM = (m) => smsg(Hooper, m, store);
   Hooper.store = store;
+  // Whether this socket generation ever reached "open". While it's still
+  // false, a close just means a QR code expired unscanned — reconnect fast
+  // for a fresh one instead of applying the normal failure backoff.
+  let hasOpenedThisGeneration = false;
   Hooper.ev.on("connection.update", async (update) => {
     if (!isCurrentSocket(Hooper, generation)) return;
 
@@ -697,6 +734,7 @@ const connectHooper = async (trigger) => {
     }
 
     if (connection === "open") {
+      hasOpenedThisGeneration = true;
       QR_GENERATE = "invalid";
       healthProbeFailures = 0;
       markConnectionStableLater(Hooper, generation);
@@ -734,6 +772,11 @@ const connectHooper = async (trigger) => {
       healthProbeFailures = 0;
       clearStableConnectionTimer();
 
+      // If this socket never reached "open", the close is just an expired,
+      // unscanned QR cycle — not a real failure — so reconnect fast for a
+      // fresh code instead of climbing the normal failure backoff.
+      const neverOpened = !hasOpenedThisGeneration;
+
       console.log(
         chalk.yellow(
           `[ HOOPER ] Connection closed - ${reasonName}. Recovery starting.`,
@@ -742,6 +785,7 @@ const connectHooper = async (trigger) => {
       scheduleReconnect(`disconnect: ${reasonName}`, {
         clearAuth: shouldClearAuth,
         immediate: reason === DisconnectReason.restartRequired,
+        fastRetry: neverOpened,
       });
     }
 
