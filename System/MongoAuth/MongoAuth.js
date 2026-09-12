@@ -107,7 +107,10 @@ export default class MongoAuth {
 
     const saveCreds = async () => {
       await saveCredsLocal();
-      await this.pushToMongoDB().catch((err) =>
+      // creds.update only ever means creds.json changed, so push just that
+      // file instead of re-reading and re-uploading the whole session
+      // directory (which can hold hundreds of key files) on every event.
+      await this.pushFileToMongoDB("creds.json").catch((err) =>
         console.error(
           `[ EXCEPTION ] MongoDB session sync error: ${err.message}`,
         ),
@@ -122,17 +125,68 @@ export default class MongoAuth {
   }
 
   /**
-   * Push all local session files to MongoDB.
-   * Called by the periodic background sync (GC interval) and by saveCreds()
-   * on every credential update. Queued behind _pushChain so it can never
-   * write after (or concurrently with) _clearSession().
+   * Queues `fn` behind every previous push and behind any pending clear, so
+   * writes can never land after (or race) _clearSession().
    */
-  pushToMongoDB() {
-    const task = this._pushChain.then(() => this._pushToMongoDBInner());
+  _enqueue(fn) {
+    const task = this._pushChain.then(fn);
     // Keep the chain alive even if this push failed, so later calls (and a
     // concurrent _clearSession) still queue behind its completion.
     this._pushChain = task.catch(() => {});
     return task;
+  }
+
+  /**
+   * Push one local file to MongoDB, merging it into the existing `files`
+   * map instead of replacing the whole thing. Used by saveCreds() so a
+   * creds.update event doesn't pay for a full-directory resync.
+   */
+  pushFileToMongoDB(filename) {
+    return this._enqueue(() => this._pushFileInner(filename));
+  }
+
+  async _pushFileInner(filename) {
+    if (this._cleared) return;
+
+    const filePath = path.join(this.dir, filename);
+    let content;
+    try {
+      content = await fs.promises.readFile(filePath);
+    } catch {
+      return; // file gone/unreadable — the next full sync will reconcile
+    }
+    if (this._cleared) return;
+
+    await sessionSchema.updateOne(
+      { sessionId: this.sessionId },
+      [
+        {
+          $set: {
+            files: {
+              $mergeObjects: [
+                { $ifNull: ["$files", {}] },
+                { [filename]: content.toString("base64") },
+              ],
+            },
+            lastSync: new Date(),
+          },
+        },
+        { $unset: "session" },
+      ],
+      { upsert: true },
+    );
+  }
+
+  /**
+   * Push all local session files to MongoDB.
+   * Called by the periodic background sync (GC interval) as a full-resync
+   * safety net (it's the only thing that captures key files, which Baileys
+   * writes directly to disk with no per-file save hook). Queued behind
+   * _pushChain so it can never write after (or concurrently with)
+   * _clearSession().
+   */
+  pushToMongoDB() {
+    return this._enqueue(() => this._pushToMongoDBInner());
   }
 
   async _pushToMongoDBInner() {
