@@ -232,6 +232,7 @@ export const parseMention = (text = "") => {
 const execAsync = util.promisify(child_process.exec);
 
 export const GIFBufferToVideoBuffer = async (image) => {
+  await fs.promises.mkdir("./System/Cache", { recursive: true });
   const filename = `${Math.random().toString(36)}`;
   const gifPath = `./System/Cache/${filename}.gif`;
   const mp4Path = `./System/Cache/${filename}.mp4`;
@@ -242,6 +243,36 @@ export const GIFBufferToVideoBuffer = async (image) => {
   const buffer5 = await fs.promises.readFile(mp4Path);
   await Promise.all([unlink(mp4Path), unlink(gifPath)]);
   return buffer5;
+};
+
+/**
+ * wa-sticker-formatter converts video -> GIF (ffmpeg, no scale/fps limit)
+ * -> sharp resizes every frame -> animated webp. That cost scales with the
+ * input's resolution and frame count, so a 1080p/30fps clip makes both
+ * steps crawl. Shrinking the video first — before it ever reaches that
+ * pipeline — cuts the pixel/frame volume by an order of magnitude and
+ * turns a "takes forever" sticker into a few-second one, since the final
+ * output is only ever 512x512 anyway.
+ */
+export const shrinkVideoForSticker = async (
+  videoBuffer,
+  { maxSeconds = 6, fps = 10, maxSize = 512 } = {}
+) => {
+  await fs.promises.mkdir("./System/Cache", { recursive: true });
+  const filename = `${Math.random().toString(36)}`;
+  const inPath = `./System/Cache/${filename}-in`;
+  const outPath = `./System/Cache/${filename}-out.mp4`;
+  await fs.promises.writeFile(inPath, videoBuffer);
+  try {
+    await execAsync(
+      `"${ffmpegStatic}" -y -i "${inPath}" -t ${maxSeconds} -an -vf ` +
+        `"fps=${fps},scale='min(${maxSize},iw)':'min(${maxSize},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2" ` +
+        `-c:v libx264 -pix_fmt yuv420p -preset veryfast -movflags faststart "${outPath}"`
+    );
+    return await fs.promises.readFile(outPath);
+  } finally {
+    await Promise.all([unlink(inPath).catch(() => {}), unlink(outPath).catch(() => {})]);
+  }
 };
 
 /**

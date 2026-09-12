@@ -2,7 +2,7 @@ import fs from "fs";
 import axios from "axios";
 import { Sticker, StickerTypes } from "wa-sticker-formatter";
 import { GraphOrg as TelegraPh } from "../System/Uploader.js";
-import {   fetchJson,   getBuffer,   GIFBufferToVideoBuffer, } from "../System/Function2.js";
+import {   fetchJson,   getBuffer,   GIFBufferToVideoBuffer,   shrinkVideoForSticker, } from "../System/Function2.js";
 let mergedCommands = [
   "sticker",
   "s",
@@ -71,6 +71,12 @@ export default {
               { quoted: m }
             );
           }
+          // Shrink (resolution/fps/duration) before handing it to
+          // wa-sticker-formatter — its video path re-encodes to GIF then
+          // resizes every frame with sharp, so the cost scales with input
+          // size. The output is always 512x512 anyway, so encoding the
+          // source at full res/fps first is pure wasted time.
+          mediaMess = await shrinkVideoForSticker(mediaMess);
           let stickerMess = new Sticker(mediaMess, {
             pack: packname,
             author: pushName,
