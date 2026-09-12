@@ -1790,10 +1790,16 @@ app.get("/api/qr", (req, res) => {
 
 app.post("/api/clear-session", async (req, res) => {
   try {
-    pendingClearAuth = true;
     if (HooperSocket) {
+      // Deferred path: scheduleReconnect owns pendingClearAuth end-to-end
+      // (sets it, honors it, and resets it once the clear actually runs).
       scheduleReconnect("Manual session clear from GUI", { clearAuth: true });
     } else {
+      // Immediate path: the clear happens synchronously right here, so it
+      // must NOT touch pendingClearAuth — that flag is only meaningful for
+      // the deferred scheduleReconnect flow. Setting it here and never
+      // resetting it would make the *next unrelated* reconnect (e.g. a
+      // benign QR-expiry retry after the user re-scans) wipe auth again.
       if (clearAuthState) {
         await clearAuthState();
       }

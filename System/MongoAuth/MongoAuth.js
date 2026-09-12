@@ -46,6 +46,11 @@ export default class MongoAuth {
   constructor(sessionId) {
     this.sessionId = sanitizeSessionId(sessionId);
     this.dir = path.join(SESSION_BASE_DIR, this.sessionId);
+    // Serializes every pushToMongoDB() call (from saveCreds *and* the
+    // periodic GC sync) against _clearSession(), so a clear can never be
+    // raced by a write that was already in flight or queued.
+    this._pushChain = Promise.resolve();
+    this._cleared = false;
   }
 
   /**
@@ -118,9 +123,21 @@ export default class MongoAuth {
 
   /**
    * Push all local session files to MongoDB.
-   * Called by the periodic background sync (GC interval).
+   * Called by the periodic background sync (GC interval) and by saveCreds()
+   * on every credential update. Queued behind _pushChain so it can never
+   * write after (or concurrently with) _clearSession().
    */
-  async pushToMongoDB() {
+  pushToMongoDB() {
+    const task = this._pushChain.then(() => this._pushToMongoDBInner());
+    // Keep the chain alive even if this push failed, so later calls (and a
+    // concurrent _clearSession) still queue behind its completion.
+    this._pushChain = task.catch(() => {});
+    return task;
+  }
+
+  async _pushToMongoDBInner() {
+    if (this._cleared) return;
+
     const localExists = await this._localExists();
     if (!localExists) return;
 
@@ -146,6 +163,9 @@ export default class MongoAuth {
     }
 
     if (Object.keys(files).length === 0) return;
+    // Re-check after the readdir/readFile pass above (which yields to the
+    // event loop) — a clear that started mid-scan must still win.
+    if (this._cleared) return;
 
     await sessionSchema.updateOne(
       { sessionId: this.sessionId },
@@ -300,6 +320,11 @@ export default class MongoAuth {
   }
 
   async _clearSession() {
+    // Block new pushes and wait for any in-flight/queued one to finish, so
+    // the deleteOne below is always the last write to land.
+    this._cleared = true;
+    await this._pushChain;
+
     await fs.promises.rm(this.dir, { recursive: true, force: true });
 
     try {
