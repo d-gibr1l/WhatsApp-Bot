@@ -10,6 +10,17 @@ const __dirname = path.dirname(__filename);
 // All local sessions live under System/session/<sessionId>/
 const SESSION_BASE_DIR = path.join(__dirname, "..", "session");
 
+// MongoDB update paths split on "." to address nested fields, so a literal
+// filename like "creds.json" can't be used as a dot-notation path segment
+// (and aggregation-pipeline updates reject a "." in ANY field name at all,
+// not just in paths). Swap the dot for a look-alike character before using
+// a filename as a Mongo field name, and swap it back on the way out.
+// Pre-existing documents store plain (undecoded) filenames as keys — decode
+// is a no-op for those, so old data still reads correctly.
+const DOT_PLACEHOLDER = "．"; // fullwidth full stop — never occurs in real filenames
+const encodeFileKey = (filename) => filename.replace(/\./g, DOT_PLACEHOLDER);
+const decodeFileKey = (key) => key.replace(new RegExp(DOT_PLACEHOLDER, "g"), ".");
+
 const LEGACY_KEY_TYPE_MAP = {
   preKeys: "pre-key",
   sessions: "session",
@@ -159,20 +170,15 @@ export default class MongoAuth {
 
     await sessionSchema.updateOne(
       { sessionId: this.sessionId },
-      [
-        {
-          $set: {
-            files: {
-              $mergeObjects: [
-                { $ifNull: ["$files", {}] },
-                { [filename]: content.toString("base64") },
-              ],
-            },
-            lastSync: new Date(),
-          },
+      {
+        $set: {
+          [`files.${encodeFileKey(filename)}`]: content.toString("base64"),
+          lastSync: new Date(),
         },
-        { $unset: "session" },
-      ],
+        // Once we're storing the file-based format, the legacy single-blob
+        // field is stale — drop it so it can't shadow future reads.
+        $unset: { session: "" },
+      },
       { upsert: true },
     );
   }
@@ -209,7 +215,7 @@ export default class MongoAuth {
         const stat = await fs.promises.stat(filePath);
         if (stat.isFile()) {
           const content = await fs.promises.readFile(filePath);
-          files[entry] = content.toString("base64");
+          files[encodeFileKey(entry)] = content.toString("base64");
         }
       } catch {
         // skip unreadable files
@@ -298,7 +304,8 @@ export default class MongoAuth {
 
     if (!hasFiles) return;
     await fs.promises.mkdir(this.dir, { recursive: true });
-    for (const [filename, base64Content] of Object.entries(doc.files)) {
+    for (const [rawKey, base64Content] of Object.entries(doc.files)) {
+      const filename = decodeFileKey(rawKey);
       if (!base64Content || base64Content.length === 0) {
         console.log(
           `[ HOOPER ] [${this.sessionId}] Skipping empty entry in MongoDB session: ${filename}`,
