@@ -609,6 +609,7 @@ const connectHooper = async (trigger) => {
   await installPlugin();
 
   let version;
+  let usedFallbackVersion = false;
   if (cachedWaVersion) {
     version = cachedWaVersion;
   } else {
@@ -629,9 +630,13 @@ const connectHooper = async (trigger) => {
       } catch (wawebErr) {
         console.log(chalk.yellow(`[ HOOPER ] WA Web fetch failed. Using hardcoded version.`));
         version = [2, 3000, 1046002285];
+        usedFallbackVersion = true;
       }
     }
-    cachedWaVersion = version;
+    // Only pin a version that was actually fetched — caching the hardcoded
+    // fallback would keep a stale version for the whole process lifetime
+    // after a transient network blip.
+    if (!usedFallbackVersion) cachedWaVersion = version;
   }
 
   console.log(`[ HOOPER ] Using WA Web Version:`, version);
@@ -735,6 +740,7 @@ const connectHooper = async (trigger) => {
   // false, a close just means a QR code expired unscanned — reconnect fast
   // for a fresh one instead of applying the normal failure backoff.
   let hasOpenedThisGeneration = false;
+  let hasShownQrThisGeneration = false;
   Hooper.ev.on("connection.update", async (update) => {
     if (!isCurrentSocket(Hooper, generation)) return;
 
@@ -789,10 +795,10 @@ const connectHooper = async (trigger) => {
       healthProbeFailures = 0;
       clearStableConnectionTimer();
 
-      // If this socket never reached "open", the close is just an expired,
-      // unscanned QR cycle — not a real failure — so reconnect fast for a
-      // fresh code instead of climbing the normal failure backoff.
-      const neverOpened = !hasOpenedThisGeneration;
+      // Only an expired, unscanned QR cycle (a QR was shown, socket never
+      // opened) is benign enough to retry fast. Any other pre-open close
+      // (offline, rejected session, 4xx loop) must keep the normal backoff.
+      const neverOpened = !hasOpenedThisGeneration && hasShownQrThisGeneration;
 
       console.log(
         chalk.yellow(
@@ -807,6 +813,7 @@ const connectHooper = async (trigger) => {
     }
 
     if (qr) {
+      hasShownQrThisGeneration = true;
       status = "qr";
       // Generate the data URL once when the event fires to save CPU on API polls
       qrcode.toDataURL(qr)

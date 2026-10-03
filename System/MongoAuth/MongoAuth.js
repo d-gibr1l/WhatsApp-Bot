@@ -168,7 +168,7 @@ export default class MongoAuth {
     }
     if (this._cleared) return;
 
-    await sessionSchema.updateOne(
+    const res = await sessionSchema.updateOne(
       { sessionId: this.sessionId },
       {
         $set: {
@@ -181,6 +181,11 @@ export default class MongoAuth {
       },
       { upsert: true },
     );
+
+    // The doc didn't exist, so this created a creds-only backup. Upload the
+    // rest of the directory now (already inside the push chain, so call the
+    // inner method directly) rather than waiting for the next periodic sync.
+    if (res?.upsertedCount > 0) await this._pushToMongoDBInner();
   }
 
   /**
