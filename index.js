@@ -30,6 +30,23 @@ const __dirname = dirname(__filename);
 
 fs.writeFileSync(path.join(__dirname, "hooper.pid"), process.pid.toString());
 
+// Nothing else in the app handles stray promise rejections, so a transient
+// MongoDB Atlas hiccup (e.g. a background index build or driver heartbeat
+// timing out with SystemOverloadedError) killed the whole process even though
+// every explicit mongoose.connect() is wrapped in try/catch. Network-class
+// Mongo errors are recoverable (driver reconnects on its own), so log and
+// carry on; anything else keeps Node's default crash-on-unhandled behavior.
+const isTransientMongoError = (err) =>
+  /^Mongo(ServerSelection|Network|NetworkTimeout)Error$/.test(err?.name || "") ||
+  err?.errorLabelSet?.has?.("SystemOverloadedError");
+process.on("unhandledRejection", (reason) => {
+  if (isTransientMongoError(reason)) {
+    console.error(`[ HOOPER ] Transient MongoDB error (not fatal): ${reason.message}`);
+    return;
+  }
+  throw reason;
+});
+
 // Map of noise prefixes → clean replacement line printed to stdout once per event
 const _BAILEYS_NOISE_MAP = {
   "Failed to decrypt message with any known session":
