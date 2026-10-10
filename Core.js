@@ -297,15 +297,17 @@ export default async (Hooper, m, commands, chatUpdate) => {
     }
 
     if (isAntilinkOn && m.isGroup && !isAdmin && !isCreator && !modcheck && !isintegrated() && isBotAdmin) {
-      // Match any URL (http/https)
-      const urlRegex = /https?:\/\/[^\s]+/gi;
+      // Match any URL (http/https, chat.whatsapp.com, wa.me)
+      const urlRegex = /(?:https?:\/\/[^\s]+|chat\.whatsapp\.com\/[^\s]+|wa\.me\/[^\s]+)/gi;
       const detectedUrls = budy.match(urlRegex);
       if (detectedUrls && detectedUrls.length > 0) {
         // Allow own group invite link
         let isOwnLink = false;
         try {
           const linkgce = await getCachedInviteCode(Hooper, from);
-          isOwnLink = detectedUrls.every((u) => u.includes(`chat.whatsapp.com/${linkgce}`));
+          if (linkgce) {
+            isOwnLink = detectedUrls.every((u) => u.includes(`chat.whatsapp.com/${linkgce}`));
+          }
         } catch {}
 
         if (!isOwnLink) {
@@ -313,19 +315,29 @@ export default async (Hooper, m, commands, chatUpdate) => {
           if (!global.botDeletedMsgIds) global.botDeletedMsgIds = new Set();
           global.botDeletedMsgIds.add(m.id);
           // Auto-cleanup after 5 minutes to prevent memory leak
-          setTimeout(() => global.botDeletedMsgIds?.delete(m.id), 300000);
+          const delTimer = setTimeout(() => global.botDeletedMsgIds?.delete(m.id), 300000);
+          delTimer.unref?.();
 
           // Delete the message
-          await Hooper.sendMessage(from, {
-            delete: {
-              remoteJid: m.from,
-              fromMe: false,
-              id: m.id,
-              participant: m.sender,
-            },
-          });
-          const bvl = `\`\`\`「  Antilink System  」\`\`\`\n\n*⚠️ Link detected !*\n\n*🚫 @${m.sender.split("@")[0]}, you are not allowed to send links in this group !*\n`;
-          await Hooper.sendMessage(from, { text: bvl, mentions: [m.sender] }, { quoted: m });
+          try {
+            await Hooper.sendMessage(from, {
+              delete: {
+                remoteJid: m.from,
+                fromMe: false,
+                id: m.id,
+                participant: m.key?.participant || m.sender,
+              },
+            });
+            const tagNumber = (resolvedSender || m.sender).split("@")[0].split(":")[0];
+            const bvl = `\`\`\`「  Antilink System  」\`\`\`\n\n*⚠️ Link detected !*\n\n*🚫 @${tagNumber}, you are not allowed to send links in this group !*\n`;
+            await Hooper.sendMessage(
+              from,
+              { text: bvl, mentions: [m.sender, resolvedSender].filter(Boolean) },
+              { quoted: m },
+            );
+          } catch (delErr) {
+            console.error("[ ANTILINK ] Deletion failed:", delErr.message);
+          }
         }
       }
     }

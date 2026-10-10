@@ -66,15 +66,20 @@ export default {
       isAdmin,
     },
   ) => {
+    if (!m.isGroup) {
+      if (doReact) await doReact("❌");
+      return m.reply("*This command can only be used in groups!*");
+    }
+
     const messageSender = m.sender;
     const quotedsender = m.quoted ? m.quoted.sender : mentionByTag[0];
-    // Helper: check if a JID belongs to the bot (handles phone JID, LID, or any format)
+    const cleanJid = (j) => j?.split("@")[0]?.split(":")[0];
     const isBotJid = (jid) => {
       if (!jid) return false;
-      if (jid === botNumber || jid === botLid) return true;
-      // Also check via the LID<->JID map
+      const c = cleanJid(jid);
+      if (c === cleanJid(botNumber) || c === cleanJid(botLid)) return true;
       const mapped = global.lidToJidMap?.get(jid);
-      if (mapped && (mapped === botNumber || mapped === botLid)) return true;
+      if (mapped && (cleanJid(mapped) === cleanJid(botNumber) || cleanJid(mapped) === cleanJid(botLid))) return true;
       return false;
     };
     switch (inputCMD) {
@@ -101,7 +106,11 @@ export default {
           return m.reply(`Sorry, I can't demote myself !`);
         }
         const mentionedUser = m.quoted ? m.quoted.sender : mentionByTag[0];
-        const userId = mentionedUser || m.msg.contextInfo.participant;
+        const userId = mentionedUser || m.msg?.contextInfo?.participant;
+        if (!userId) {
+          await doReact("❔");
+          return m.reply(`Please tag a user or reply to their message to *Demote* !`);
+        }
         if (!groupAdmin.includes(userId)) {
           return Hooper.sendMessage(
             m.from,
@@ -179,7 +188,7 @@ export default {
           await Hooper.sendMessage(
             m.from,
             {
-              image: isLocal ? fs.readFileSync(ppgc) : { url: ppgc },
+              image: { url: ppgc },
               caption: `\n_🎀 Group Name:_ *${metadata.subject || "Unknown"}*\n\n_🧩 Group Link:_\n${linkcode}\n`,
             },
             { quoted: m },
@@ -278,7 +287,11 @@ export default {
           return m.reply(`I am already an *Admin* of this group!`);
         }
         const mentionedUser = m.quoted ? m.quoted.sender : mentionByTag[0];
-        const userId = mentionedUser || m.msg.contextInfo.participant;
+        const userId = mentionedUser || m.msg?.contextInfo?.participant;
+        if (!userId) {
+          await doReact("❔");
+          return m.reply(`Please tag a user or reply to their message to *Promote* !`);
+        }
         if (groupAdmin.includes(userId)) {
           return Hooper.sendMessage(
             m.from,
@@ -339,7 +352,11 @@ export default {
           return m.reply(`I cannot *Remove* myself from this group !`);
         }
         const mentionedUser = m.quoted ? m.quoted.sender : mentionByTag[0];
-        const users = mentionedUser || m.msg.contextInfo.participant;
+        const users = mentionedUser || m.msg?.contextInfo?.participant;
+        if (!users) {
+          await doReact("❔");
+          return m.reply(`Please tag a user or reply to their message to *Remove* !`);
+        }
         await doReact("⛔");
         // Cannot remove the group creator
         if (metadata.owner && (users === metadata.owner || users.replace(/[^0-9]/g, "") === metadata.owner.replace(/[^0-9]/g, ""))) {
