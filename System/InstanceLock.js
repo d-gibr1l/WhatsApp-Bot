@@ -22,26 +22,33 @@ export default class InstanceLock {
    * @returns {Promise<{ requiresDelay: boolean }>} True if a recent lock exists, meaning we should delay.
    */
   async claimLock() {
-    // 1. Check existing lock
-    const currentLock = await LockModel.findById(this.lockId);
-    let requiresDelay = false;
-
-    if (currentLock) {
-      const msSinceLastHeartbeat = Date.now() - currentLock.lastHeartbeat.getTime();
-      if (msSinceLastHeartbeat < 10000) {
-        // Heartbeat is active (less than 10s old). A deployment is likely happening.
-        requiresDelay = true;
+    try {
+      if (mongoose.connection.readyState !== 1) {
+        return { requiresDelay: false };
       }
+      // 1. Check existing lock
+      const currentLock = await LockModel.findById(this.lockId);
+      let requiresDelay = false;
+
+      if (currentLock) {
+        const msSinceLastHeartbeat = Date.now() - currentLock.lastHeartbeat.getTime();
+        if (msSinceLastHeartbeat < 10000) {
+          // Heartbeat is active (less than 10s old). A deployment is likely happening.
+          requiresDelay = true;
+        }
+      }
+
+      // 2. Overwrite the lock with our instanceId
+      await LockModel.updateOne(
+        { _id: this.lockId },
+        { $set: { instanceId: this.instanceId, lastHeartbeat: new Date() } },
+        { upsert: true }
+      );
+
+      return { requiresDelay };
+    } catch (err) {
+      return { requiresDelay: false };
     }
-
-    // 2. Overwrite the lock with our instanceId
-    await LockModel.updateOne(
-      { _id: this.lockId },
-      { $set: { instanceId: this.instanceId, lastHeartbeat: new Date() } },
-      { upsert: true }
-    );
-
-    return { requiresDelay };
   }
 
   /**
@@ -53,22 +60,36 @@ export default class InstanceLock {
 
     this.heartbeatTimer = setInterval(async () => {
       try {
+        if (mongoose.connection.readyState !== 1) {
+          return; // Ignore transient connection loss
+        }
         // Attempt to update the heartbeat ONLY if we still own the lock
         const doc = await LockModel.findOneAndUpdate(
           { _id: this.lockId, instanceId: this.instanceId },
           { $set: { lastHeartbeat: new Date() } }
         );
 
-        // If no document was updated, we lost the lock.
+        // If no document was updated, verify if lock was truly stolen by another instance
         if (!doc) {
-          clearInterval(this.heartbeatTimer);
-          onStolen();
+          const current = await LockModel.findById(this.lockId);
+          if (current && current.instanceId !== this.instanceId) {
+            clearInterval(this.heartbeatTimer);
+            try { onStolen(); } catch {}
+          } else if (!current) {
+            // Lock doc was deleted or missing; re-upsert lock for this instance
+            await LockModel.updateOne(
+              { _id: this.lockId },
+              { $set: { instanceId: this.instanceId, lastHeartbeat: new Date() } },
+              { upsert: true }
+            );
+          }
         }
       } catch (err) {
         // Ignore network blips. If MongoDB goes down, we shouldn't kill the bot immediately.
         // We only die if another instance definitively stole the lock.
       }
     }, 3000);
+    this.heartbeatTimer.unref?.();
   }
 
   /**
@@ -77,7 +98,9 @@ export default class InstanceLock {
   async releaseLock() {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     try {
-      await LockModel.deleteOne({ _id: this.lockId, instanceId: this.instanceId });
+      if (mongoose.connection.readyState === 1) {
+        await LockModel.deleteOne({ _id: this.lockId, instanceId: this.instanceId });
+      }
     } catch (err) {
       // Ignore cleanup errors
     }

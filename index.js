@@ -395,12 +395,15 @@ const closeActiveSocket = async (reason) => {
         statusCode: DisconnectReason.connectionClosed,
       }),
     );
+    let closeTimer;
+    const timeoutPromise = new Promise((resolve) => {
+      closeTimer = setTimeout(() => resolve(false), SOCKET_CLOSE_TIMEOUT_MS);
+    });
     const closedCleanly = await Promise.race([
       endPromise.then(() => true),
-      new Promise((resolve) =>
-        setTimeout(() => resolve(false), SOCKET_CLOSE_TIMEOUT_MS),
-      ),
+      timeoutPromise,
     ]);
+    if (closeTimer) clearTimeout(closeTimer);
 
     if (!closedCleanly) {
       console.log(
@@ -409,10 +412,15 @@ const closeActiveSocket = async (reason) => {
         ),
       );
       socket.ws?.socket?.terminate?.();
+      let forceTimer;
+      const forceTimeout = new Promise((resolve) => {
+        forceTimer = setTimeout(resolve, 1_000);
+      });
       await Promise.race([
         endPromise,
-        new Promise((resolve) => setTimeout(resolve, 1_000)),
+        forceTimeout,
       ]);
+      if (forceTimer) clearTimeout(forceTimer);
     }
   } catch (err) {
     console.error(
@@ -494,6 +502,7 @@ const scheduleReconnect = (
       sessionSyncPaused = false;
     }
   }, delay);
+  restartTimer.unref?.();
 };
 
 async function startHooper(trigger = "initial") {
@@ -841,19 +850,17 @@ const connectHooper = async (trigger) => {
     
     const botJid = Hooper.user.id.split(":")[0] + "@s.whatsapp.net";
     if ((m.action === "remove" || m.action === "leave") && m.participants.includes(botJid)) {
-      const { setGroupStatus } = await import("./src/db.js");
-      await setGroupStatus(m.id, false);
+      await db.setGroupStatus(m.id, false);
     }
   });
 
   Hooper.ev.on("groups.upsert", async (groups) => {
     if (!isCurrentSocket(Hooper, generation)) return;
-    const { updateGroupName } = await import("./src/db.js");
     for (const group of groups) {
       if (group.id) {
         invalidateGroupMetadata(group.id);
         if (group.subject) {
-          await updateGroupName(group.id, group.subject);
+          await db.updateGroupName(group.id, group.subject);
         }
       }
     }
@@ -861,12 +868,11 @@ const connectHooper = async (trigger) => {
 
   Hooper.ev.on("groups.update", async (groups) => {
     if (!isCurrentSocket(Hooper, generation)) return;
-    const { updateGroupName } = await import("./src/db.js");
     for (const group of groups) {
       if (group.id) {
         invalidateGroupMetadata(group.id);
         if (group.subject) {
-          await updateGroupName(group.id, group.subject);
+          await db.updateGroupName(group.id, group.subject);
         }
       }
     }
@@ -912,7 +918,6 @@ const connectHooper = async (trigger) => {
     if (m.key?.remoteJid === "status@broadcast") {
       // Auto-Status Forwarder
       try {
-         const db = await import("./src/db.js");
          const targetsStr = await db.getSetting("auto_status_targets", "");
          const targets = targetsStr ? targetsStr.split(",") : [];
          if (m.key.participant && targets.includes(m.key.participant)) {
@@ -1679,6 +1684,8 @@ const runWatchdog = async () => {
 const watchdogTimer = setInterval(() => {
   void runWatchdog();
 }, WATCHDOG_INTERVAL_MS);
+watchdogTimer.unref?.();
+
 const messageCacheTimer = setInterval(
   () => {
     if (typeof store.pruneMessages === "function") {
@@ -1690,6 +1697,8 @@ const messageCacheTimer = setInterval(
     Math.max(60_000, Math.floor(MESSAGE_CACHE_TTL_MS / 2)),
   ),
 );
+messageCacheTimer.unref?.();
+
 console.log(
   chalk.cyan(
     `[ HOOPER ] Connection watchdog active - probing every ` +
@@ -1711,6 +1720,7 @@ const tempmailTimer = setInterval(async () => {
     console.error("[ TEMPMAIL ] poll cycle error:", e?.message || e);
   }
 }, 7000);
+tempmailTimer.unref?.();
 
 let maintenanceTimer;
 if (typeof global.gc === "function") {
@@ -1726,6 +1736,7 @@ if (typeof global.gc === "function") {
     },
     GC_INTERVAL_MINUTES * 60 * 1000,
   );
+  maintenanceTimer.unref?.();
   console.log(
     chalk.cyan(
       `[ HOOPER ] GC scheduler active — running every ${GC_INTERVAL_MINUTES} minute(s)`,
@@ -1742,6 +1753,7 @@ if (typeof global.gc === "function") {
     },
     GC_INTERVAL_MINUTES * 60 * 1000,
   );
+  maintenanceTimer.unref?.();
 }
 
 const shutdown = async (signal) => {
