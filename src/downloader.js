@@ -4,7 +4,7 @@ import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
 import { pipeline } from "stream/promises";
 import { Readable } from "stream";
-import { getSetting } from "./db.js";
+import * as db from "./db.js";
 import { heavyQueue } from "./queue.js";
 
 // ─── yt-dlp Path & Auto-Updater ──────────────────────────────────────────────
@@ -79,7 +79,7 @@ export function extractUrl(text) {
 
 export async function getCookiesPath() {
   try {
-    const cookies = await getSetting("yt_cookies", null);
+    const cookies = await db.getSetting("yt_cookies", null);
     if (!cookies?.trim()) return null;
     const cookiePath = join(tmpdir(), `cookies_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`);
     await fsPromises.writeFile(cookiePath, cookies);
@@ -90,6 +90,20 @@ export async function getCookiesPath() {
 }
 
 // ─── yt-dlp info fetch ────────────────────────────────────────────────────────
+
+async function cleanUpTmp(tmpBase, cookiePath) {
+  if (cookiePath) await fsPromises.unlink(cookiePath).catch(() => {});
+  try {
+    const dir = dirname(tmpBase);
+    const prefix = basename(tmpBase);
+    const files = await fsPromises.readdir(dir);
+    for (const f of files) {
+      if (f.startsWith(prefix)) {
+        await fsPromises.unlink(join(dir, f)).catch(() => {});
+      }
+    }
+  } catch {}
+}
 
 export async function getMediaInfo(url) {
   const platform = detectPlatform(url);
@@ -108,8 +122,9 @@ export async function getMediaInfo(url) {
     let output = "";
     const proc = spawn(getYtDlpPath(), args);
     
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
       proc.kill();
+      if (cookiePath) await fsPromises.unlink(cookiePath).catch(() => {});
       reject(new Error("Media info fetch timed out (15s)"));
     }, 15000);
 
@@ -129,7 +144,11 @@ export async function getMediaInfo(url) {
         });
       } catch { reject(new Error("Failed to parse media info.")); }
     });
-    proc.on("error", reject);
+    proc.on("error", async (err) => {
+      clearTimeout(timeout);
+      if (cookiePath) await fsPromises.unlink(cookiePath).catch(() => {});
+      reject(err);
+    });
   });
 }
 
@@ -187,8 +206,9 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
     proc.stdout.on("data", d => { stdoutOut += d.toString(); });
     proc.stderr.on("data", d => { errorLog += d.toString(); });
 
-    const timeout = setTimeout(() => {
+    const timeout = setTimeout(async () => {
       proc.kill();
+      await cleanUpTmp(tmpBase, cookiePath);
       reject(new Error("Download timed out (3 mins)"));
     }, 180000);
 
@@ -197,6 +217,7 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
       if (cookiePath) await fsPromises.unlink(cookiePath).catch(() => {});
 
       if (code !== 0) {
+        await cleanUpTmp(tmpBase, cookiePath);
         const errorLines = errorLog.trim().split("\n");
         const mainError = errorLines.find(line => line.includes("ERROR:")) || errorLines[errorLines.length - 1] || "Unknown error";
         return reject(new Error(`yt-dlp failed: ${mainError.slice(0, 250)}`));
@@ -233,11 +254,16 @@ export async function downloadWithYtDlp(url, audioOnly = false, quality = "720")
 
         return resolve({ filePath: finalPath, contentType: mimeTypes[ext] || "video/mp4", title });
       } catch (err) {
+        await cleanUpTmp(tmpBase, cookiePath);
         reject(err);
       }
     });
 
-    proc.on("error", reject);
+    proc.on("error", async (err) => {
+      clearTimeout(timeout);
+      await cleanUpTmp(tmpBase, cookiePath);
+      reject(err);
+    });
   }));
 }
 
@@ -252,7 +278,7 @@ export const downloadYouTubeToBuffer = async (url, audioOnly) => {
 // ─── RapidAPI fallback ────────────────────────────────────────────────────────
 
 export async function getApiKey() {
-  let key = await getSetting("rapidapi_key", null);
+  let key = await db.getSetting("rapidapi_key", null);
   if (!key) throw new Error("RapidAPI key not set");
   key = key.trim();
   if (key.includes(';')) {
@@ -404,7 +430,12 @@ export async function downloadWithApi(url) {
   
   const tmpBase = join(tmpdir(), `api_dl_${Date.now()}_${Math.random().toString(36).slice(2)}.mp4`);
   const fileStream = createWriteStream(tmpBase);
-  await pipeline(Readable.fromWeb(res.body), fileStream);
+  try {
+    await pipeline(Readable.fromWeb(res.body), fileStream);
+  } catch (err) {
+    if (existsSync(tmpBase)) await fsPromises.unlink(tmpBase).catch(() => {});
+    throw err;
+  }
   
   return { filePath: tmpBase, contentType: "video/mp4", title: info.title, platform: info.platform };
 }

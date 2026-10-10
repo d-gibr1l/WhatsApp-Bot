@@ -72,7 +72,7 @@ export default {
             await Hooper.sendMessage(
               m.from,
               {
-                video: fs.readFileSync(filePath),
+                video: { url: filePath },
                 mimetype: contentType,
                 caption: `🎬 *${title}*\n\n> Powered by ${botName}`,
               },
@@ -108,7 +108,7 @@ export default {
             await Hooper.sendMessage(
               m.from,
               {
-                audio: fs.readFileSync(filePath),
+                audio: { url: filePath },
                 mimetype: "audio/mpeg",
                 contextInfo: {
                   externalAdReply: {

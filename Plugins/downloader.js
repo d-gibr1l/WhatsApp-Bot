@@ -72,8 +72,8 @@ export default {
         try {
           const isAudio = contentType && contentType.startsWith("audio");
           const mediaMsg = isAudio 
-             ? { audio: fs.readFileSync(filePath), mimetype: contentType } 
-             : { video: fs.readFileSync(filePath), mimetype: contentType, caption: `🎬 *${title}*` };
+             ? { audio: { url: filePath }, mimetype: contentType } 
+             : { video: { url: filePath }, mimetype: contentType, caption: `🎬 *${title}*` };
              
           await Hooper.sendMessage(m.from, mediaMsg, { quoted: m });
         } finally {
@@ -88,8 +88,8 @@ export default {
         const fs = await import("fs");
         try {
           const mediaMsg = isAudio
-             ? { audio: fs.readFileSync(filePath), mimetype: contentType }
-             : { video: fs.readFileSync(filePath), mimetype: contentType, caption: `🎬 *${title}*` };
+             ? { audio: { url: filePath }, mimetype: contentType }
+             : { video: { url: filePath }, mimetype: contentType, caption: `🎬 *${title}*` };
           await Hooper.sendMessage(m.from, mediaMsg, { quoted: m });
         } finally {
           if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
