@@ -118,7 +118,7 @@ const app = express();
 const PORT = global.port;
 import welcomeLeft from "./System/Welcome.js";
 import { readcommands, commands } from "./System/ReadCommands.js";
-import core from "./Core.js";
+import core, { invalidateGroupMetadata } from "./Core.js";
 commands.prefix = global.prefa;
 import mongoose from "mongoose";
 import qrcode from "qrcode";
@@ -827,6 +827,7 @@ const connectHooper = async (trigger) => {
 
   Hooper.ev.on("group-participants.update", async (m) => {
     if (!isCurrentSocket(Hooper, generation)) return;
+    invalidateGroupMetadata(m.id);
     welcomeLeft(Hooper, m);
     
     const botJid = Hooper.user.id.split(":")[0] + "@s.whatsapp.net";
@@ -840,8 +841,11 @@ const connectHooper = async (trigger) => {
     if (!isCurrentSocket(Hooper, generation)) return;
     const { updateGroupName } = await import("./src/db.js");
     for (const group of groups) {
-      if (group.id && group.subject) {
-        await updateGroupName(group.id, group.subject);
+      if (group.id) {
+        invalidateGroupMetadata(group.id);
+        if (group.subject) {
+          await updateGroupName(group.id, group.subject);
+        }
       }
     }
   });
@@ -850,8 +854,11 @@ const connectHooper = async (trigger) => {
     if (!isCurrentSocket(Hooper, generation)) return;
     const { updateGroupName } = await import("./src/db.js");
     for (const group of groups) {
-      if (group.id && group.subject) {
-        await updateGroupName(group.id, group.subject);
+      if (group.id) {
+        invalidateGroupMetadata(group.id);
+        if (group.subject) {
+          await updateGroupName(group.id, group.subject);
+        }
       }
     }
   });

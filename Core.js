@@ -15,14 +15,77 @@ import {
   checkBanGroup,
   checkAntilink,
   checkGroupChatbot,
+  checkAllowedChat,
 } from "./System/MongoDB/MongoDb_Core.js";
 global.Levels = Levels;
+
+// Singleton database instance
+const jsonDriver = new JSONDriver();
+const db = new QuickDB({ driver: jsonDriver });
+
+// ─── Group Metadata & Invite Code Caching ──────────────────────────────────────
+const groupMetadataCache = new Map();
+const GROUP_METADATA_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+export function invalidateGroupMetadata(groupId) {
+  if (groupId) groupMetadataCache.delete(groupId);
+}
+
+export async function getCachedGroupMetadata(Hooper, from) {
+  if (!from) return {};
+  const cached = groupMetadataCache.get(from);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.data;
+  }
+  try {
+    const data = await Hooper.groupMetadata(from);
+    if (data && typeof data === "object") {
+      groupMetadataCache.set(from, {
+        data,
+        expiresAt: Date.now() + GROUP_METADATA_TTL_MS,
+      });
+      return data;
+    }
+  } catch (err) {
+    if (cached?.data) return cached.data;
+  }
+  return {};
+}
+
+const inviteCodeCache = new Map();
+const INVITE_CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+async function getCachedInviteCode(Hooper, from) {
+  const cached = inviteCodeCache.get(from);
+  if (cached && Date.now() < cached.expiresAt) return cached.code;
+  try {
+    const code = await Hooper.groupInviteCode(from);
+    if (code) {
+      inviteCodeCache.set(from, {
+        code,
+        expiresAt: Date.now() + INVITE_CODE_TTL_MS,
+      });
+      return code;
+    }
+  } catch {}
+  return "";
+}
+
+// ─── Throttled About / Status Update ──────────────────────────────────────────
+let lastStatusUpdate = 0;
+const STATUS_UPDATE_INTERVAL_MS = 60 * 60 * 1000; // Throttle to at most once per 60 minutes
+
+function updateStatusThrottled(Hooper, text) {
+  const now = Date.now();
+  if (now - lastStatusUpdate >= STATUS_UPDATE_INTERVAL_MS) {
+    lastStatusUpdate = now;
+    Hooper.setStatus(text).catch(() => {});
+  }
+}
+
 export default async (Hooper, m, commands, chatUpdate) => {
   const prefix = global.prefa;
   try {
-    const jsonDriver = new JSONDriver();
-    const db = new QuickDB({ driver: jsonDriver });
-
     let { type, isGroup, sender, from } = m;
     let body =
       type == "buttonsResponseMessage"
@@ -40,7 +103,7 @@ export default async (Hooper, m, commands, chatUpdate) => {
     const text = args.join(" ");
 
     const metadata = m.isGroup
-      ? await Hooper.groupMetadata(from).catch(() => ({}))
+      ? await getCachedGroupMetadata(Hooper, from)
       : {};
     const pushname = m.pushName || "NO name";
     const participants = m.isGroup ? metadata.participants || [] : [sender];
@@ -195,7 +258,6 @@ export default async (Hooper, m, commands, chatUpdate) => {
     const isPmChatbotOn = await checkPmChatbot();
     const isGroupChatbotOn = await checkGroupChatbot(m.from);
     const botWorkMode = await getBotMode();
-    const { checkAllowedChat } = await import("./System/MongoDB/MongoDb_Core.js");
     const isAllowedChat = await checkAllowedChat(m.from);
     const infoCommands = ["mods", "modlist", "owner", "owners", "support", "supportgc", "groups", "mute", "allow", "antidelete", "mode"];
 
@@ -242,7 +304,7 @@ export default async (Hooper, m, commands, chatUpdate) => {
         // Allow own group invite link
         let isOwnLink = false;
         try {
-          const linkgce = await Hooper.groupInviteCode(from);
+          const linkgce = await getCachedInviteCode(Hooper, from);
           isOwnLink = detectedUrls.every((u) => u.includes(`chat.whatsapp.com/${linkgce}`));
         } catch {}
 
@@ -381,7 +443,7 @@ export default async (Hooper, m, commands, chatUpdate) => {
     const uptime = () => formatTime(process.uptime());
 
     let upTxt = `〘  ${botName} Personal Edition  〙    ⚡ Uptime: ${uptime()}`;
-    Hooper.setStatus(upTxt);
+    updateStatusThrottled(Hooper, upTxt);
 
     cmd.start(Hooper, m, {
       name: "Hooper",
