@@ -76,17 +76,40 @@ export function createDashboardAuth({ envPassword = null, storedHash = null, per
   function isLockedOut(ip) {
     const entry = failedAttempts.get(ip);
     if (!entry) return false;
-    if (entry.lockedUntil && Date.now() < entry.lockedUntil) return true;
-    if (entry.lockedUntil && Date.now() >= entry.lockedUntil) failedAttempts.delete(ip);
+    const now = Date.now();
+    if (entry.lockedUntil) {
+      if (now < entry.lockedUntil) return true;
+      failedAttempts.delete(ip);
+      return false;
+    }
+    if (entry.lastAttempt && now - entry.lastAttempt > FAILED_ATTEMPT_WINDOW_MS) {
+      failedAttempts.delete(ip);
+      return false;
+    }
     return false;
   }
 
+  const FAILED_ATTEMPT_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
+
   function recordFailure(ip) {
-    const entry = failedAttempts.get(ip) || { count: 0, lockedUntil: 0 };
+    const now = Date.now();
+    const entry = failedAttempts.get(ip) || { count: 0, lockedUntil: 0, lastAttempt: now };
+    if (entry.lastAttempt && now - entry.lastAttempt > FAILED_ATTEMPT_WINDOW_MS) {
+      entry.count = 0;
+    }
+    entry.lastAttempt = now;
     entry.count += 1;
     if (entry.count >= MAX_FAILED_ATTEMPTS) {
-      entry.lockedUntil = Date.now() + LOCKOUT_MS;
+      entry.lockedUntil = now + LOCKOUT_MS;
       entry.count = 0;
+    }
+    // Prune stale entries if map grows
+    if (failedAttempts.size > 1000) {
+      for (const [k, v] of failedAttempts.entries()) {
+        if ((v.lockedUntil && now >= v.lockedUntil) || (v.lastAttempt && now - v.lastAttempt > FAILED_ATTEMPT_WINDOW_MS)) {
+          failedAttempts.delete(k);
+        }
+      }
     }
     failedAttempts.set(ip, entry);
   }
@@ -95,7 +118,13 @@ export function createDashboardAuth({ envPassword = null, storedHash = null, per
 
   function createSession() {
     const token = crypto.randomBytes(32).toString("base64url");
-    sessions.set(token, Date.now() + SESSION_TTL_MS);
+    const now = Date.now();
+    sessions.set(token, now + SESSION_TTL_MS);
+    if (sessions.size > 500) {
+      for (const [t, exp] of sessions.entries()) {
+        if (now > exp) sessions.delete(t);
+      }
+    }
     return token;
   }
 
@@ -113,12 +142,16 @@ export function createDashboardAuth({ envPassword = null, storedHash = null, per
   const destroySession = (token) => { if (token) sessions.delete(token); };
 
   function parseCookie(cookieHeader, name) {
-    if (!cookieHeader) return null;
+    if (!cookieHeader || typeof cookieHeader !== "string") return null;
     for (const part of cookieHeader.split(";")) {
       const idx = part.indexOf("=");
       if (idx === -1) continue;
       if (part.slice(0, idx).trim() === name) {
-        return decodeURIComponent(part.slice(idx + 1).trim());
+        try {
+          return decodeURIComponent(part.slice(idx + 1).trim());
+        } catch {
+          return null;
+        }
       }
     }
     return null;

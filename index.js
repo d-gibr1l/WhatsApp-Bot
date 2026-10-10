@@ -115,6 +115,7 @@ process.stderr.write = (chunk, ...rest) => {
 
 import express from "express";
 const app = express();
+app.set("trust proxy", 1);
 const PORT = global.port;
 import welcomeLeft from "./System/Welcome.js";
 import { readcommands, commands } from "./System/ReadCommands.js";
@@ -131,12 +132,21 @@ import {
 import chalk from "chalk";
 import { spawn } from "child_process";
 import { createDashboardAuth } from "./src/dashboard-auth.js";
+import * as db from "./src/db.js";
 
 if (fs.existsSync("./wireproxy.conf")) {
   console.log(chalk.cyan("[ HOOPER ] Starting Wireproxy SOCKS5 proxy..."));
   const wp = spawn("wireproxy", ["-c", "wireproxy.conf"], { stdio: "inherit" });
   wp.on("error", (e) => console.log(chalk.red("[ HOOPER ] Wireproxy start failed: " + e.message)));
 }
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
 
 app.use(express.json());
 
@@ -150,8 +160,7 @@ const DASHBOARD_ENV_PASSWORD = process.env.DASHBOARD_PASSWORD?.trim() || null;
 const dashboardAuth = createDashboardAuth({
   envPassword: DASHBOARD_ENV_PASSWORD,
   persistHash: async (hash) => {
-    const mod = await import("./src/db.js");
-    await mod.setSetting("dashboard_password_hash", hash);
+    await db.setSetting("dashboard_password_hash", hash);
   },
 });
 if (DASHBOARD_ENV_PASSWORD) {
@@ -1844,9 +1853,13 @@ app.post("/api/clear-session", async (req, res) => {
 });
 
 app.post("/api/pair", async (req, res) => {
-  const { phone } = req.body;
-  if (!phone) {
+  const { phone } = req.body || {};
+  if (!phone || typeof phone !== "string") {
     return res.status(400).json({ error: "Phone number is required." });
+  }
+  const cleaned = phone.replace(/[^0-9]/g, "");
+  if (cleaned.length < 7 || cleaned.length > 15) {
+    return res.status(400).json({ error: "Invalid phone number format." });
   }
   if (status === "open") {
     return res.status(400).json({ error: "Session is already connected!" });
@@ -1857,7 +1870,6 @@ app.post("/api/pair", async (req, res) => {
       .json({ error: "Bot socket is not ready yet. Please wait a moment." });
   }
   try {
-    const cleaned = phone.replace(/[^0-9]/g, "");
     let code = await HooperSocket.requestPairingCode(cleaned);
     code = code?.match(/.{1,4}/g)?.join("-") || code;
     console.log(
@@ -1900,8 +1912,7 @@ app.get("/api/uptime", (req, res) => {
 
 app.get("/api/groups", async (req, res) => {
   try {
-    const { getAllGroups } = await import("./src/db.js");
-    const data = await getAllGroups();
+    const data = await db.getAllGroups();
     res.json(data || []);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1910,14 +1921,16 @@ app.get("/api/groups", async (req, res) => {
 
 app.post("/api/groups/:id/toggle", async (req, res) => {
   try {
-    const { feature, value } = req.body;
+    const { feature, value } = req.body || {};
     const groupId = req.params.id;
+    if (!groupId || typeof groupId !== "string" || !groupId.endsWith("@g.us")) {
+      return res.status(400).json({ error: "Invalid group JID." });
+    }
     const allowed = ["antilink", "antidelete", "chatBot", "switchWelcome", "nsfw", "botSwitch", "bangroup", "allowed"];
     if (!allowed.includes(feature)) {
       return res.status(400).json({ error: `Invalid feature: ${feature}` });
     }
-    const { updateGroupFeature } = await import("./src/db.js");
-    await updateGroupFeature(groupId, feature, value);
+    await db.updateGroupFeature(groupId, feature, Boolean(value));
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1926,8 +1939,7 @@ app.post("/api/groups/:id/toggle", async (req, res) => {
 
 app.get("/api/bans", async (req, res) => {
   try {
-    const { getBannedUsersAndGroups } = await import("./src/db.js");
-    const data = await getBannedUsersAndGroups();
+    const data = await db.getBannedUsersAndGroups();
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1936,13 +1948,15 @@ app.get("/api/bans", async (req, res) => {
 
 app.post("/api/bans", async (req, res) => {
   try {
-    const { id, type } = req.body;
-    if (!id || !type) return res.status(400).json({ error: "id and type required" });
-    const mod = await import("./src/db.js");
+    const { id, type } = req.body || {};
+    if (!id || typeof id !== "string" || !type) {
+      return res.status(400).json({ error: "id and type required" });
+    }
+    const cleanId = id.trim();
     if (type === "user") {
-      await mod.banUser(id);
+      await db.banUser(cleanId);
     } else if (type === "group") {
-      await mod.banGroup(id);
+      await db.banGroup(cleanId);
     } else {
       return res.status(400).json({ error: "type must be 'user' or 'group'" });
     }
@@ -1955,13 +1969,15 @@ app.post("/api/bans", async (req, res) => {
 app.delete("/api/bans/:id", async (req, res) => {
   try {
     const { type } = req.query;
-    const id = req.params.id;
-    if (!type) return res.status(400).json({ error: "type query param required" });
-    const mod = await import("./src/db.js");
+    const id = (req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "id is required" });
+    if (!type || (type !== "user" && type !== "group")) {
+      return res.status(400).json({ error: "type must be 'user' or 'group'" });
+    }
     if (type === "user") {
-      await mod.unbanUser(id);
+      await db.unbanUser(id);
     } else if (type === "group") {
-      await mod.unbanGroup(id);
+      await db.unbanGroup(id);
     }
     res.json({ success: true });
   } catch (err) {
@@ -1988,7 +2004,6 @@ app.get("/api/plugins", (req, res) => {
 
 app.get("/api/config", async (req, res) => {
   try {
-    const mod = await import("./src/db.js");
     const config = {
       prefix: global.prefa,
       mods: (global.owner || []).join(","),
@@ -2000,8 +2015,8 @@ app.get("/api/config", async (req, res) => {
       tenorAPI: (global.tenorAPIKeys || []).join(","),
       tmdbAPI: global.tmdbAPIKey || "",
       gcInterval: process.env.GC_INTERVAL_MINUTES || "5",
-      ytCookies: await mod.getSetting("yt_cookies") || "",
-      rapidapiKey: await mod.getSetting("rapidapi_key") || "",
+      ytCookies: (await db.getSetting("yt_cookies")) || "",
+      rapidapiKey: (await db.getSetting("rapidapi_key")) || "",
     };
     res.json(config);
   } catch (err) {
@@ -2029,38 +2044,33 @@ const ALLOWED_CONFIG_KEYS = new Set([
 
 app.post("/api/config", async (req, res) => {
   try {
-    const { key, value } = req.body;
-    if (!key) return res.status(400).json({ error: "key is required" });
+    const { key, value } = req.body || {};
+    if (!key || typeof key !== "string") return res.status(400).json({ error: "key is required" });
     if (!ALLOWED_CONFIG_KEYS.has(key)) {
       return res.status(400).json({ error: `Unknown config key: ${key}` });
     }
+    if (value !== undefined && typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+      return res.status(400).json({ error: "Invalid value type" });
+    }
 
-    const mod = await import("./src/db.js");
-    await mod.setSetting(key, value);
+    const strVal = value !== undefined && value !== null ? String(value) : "";
+    await db.setSetting(key, strVal);
 
     if (key === "HOOPER_PREFIX") {
-      global.prefa = value || "-";
+      global.prefa = strVal || "-";
       commands.prefix = global.prefa;
     }
-    if (key === "HOOPER_MODS") global.owner = value ? value.split(",") : [];
-    if (key === "HOOPER_PACKNAME") global.packname = value || "HOOPER";
-    if (key === "HOOPER_AUTHOR") global.author = value || "by: HOOPER";
-    if (key === "HOOPER_GEMINI_API") global.geminiAPIKeys = value ? value.split(",") : [];
-    if (key === "HOOPER_OPENAI_API") global.openAiAPIKeys = value ? value.split(",") : [];
-    if (key === "HOOPER_CLAUDE_API") global.claudeAPIKeys = value ? value.split(",") : [];
-    if (key === "HOOPER_TENOR_API") global.tenorAPIKeys = value ? value.split(",") : [];
-    if (key === "HOOPER_TMDB_API") global.tmdbAPIKey = value;
-    if (key === "HOOPER_GC_INTERVAL") process.env.GC_INTERVAL_MINUTES = value;
-    if (key === "yt_cookies") {
-      const fs = await import("fs");
-      if (value) {
-        fs.writeFileSync("cookies.txt", value, { encoding: "utf-8" });
-      } else {
-        if (fs.existsSync("cookies.txt")) fs.unlinkSync("cookies.txt");
-      }
-    }
+    if (key === "HOOPER_MODS") global.owner = strVal ? strVal.split(",") : [];
+    if (key === "HOOPER_PACKNAME") global.packname = strVal || "HOOPER";
+    if (key === "HOOPER_AUTHOR") global.author = strVal || "by: HOOPER";
+    if (key === "HOOPER_GEMINI_API") global.geminiAPIKeys = strVal ? strVal.split(",") : [];
+    if (key === "HOOPER_OPENAI_API") global.openAiAPIKeys = strVal ? strVal.split(",") : [];
+    if (key === "HOOPER_CLAUDE_API") global.claudeAPIKeys = strVal ? strVal.split(",") : [];
+    if (key === "HOOPER_TENOR_API") global.tenorAPIKeys = strVal ? strVal.split(",") : [];
+    if (key === "HOOPER_TMDB_API") global.tmdbAPIKey = strVal;
+    if (key === "HOOPER_GC_INTERVAL") process.env.GC_INTERVAL_MINUTES = strVal;
 
-    res.json({ success: true, key, value });
+    res.json({ success: true, key, value: strVal });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

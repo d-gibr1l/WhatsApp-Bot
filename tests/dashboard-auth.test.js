@@ -198,3 +198,14 @@ test("setStoredHash: a hash loaded after construction lifts setup mode", () => {
   auth.login(fakeReq({ body: { password: "loaded-from-db" } }), ok);
   assert.equal(ok.body.success, true);
 });
+
+test("requireAuth: gracefully rejects malformed URI percent-encoding in cookies without throwing", () => {
+  const auth = createDashboardAuth({});
+  const res = fakeRes();
+  let passed = false;
+  // %E0%A4%A is an incomplete/malformed UTF-8 sequence that throws URIError in unhandled decodeURIComponent
+  auth.requireAuth(fakeReq({ cookie: "hooper_session=%E0%A4%A" }), res, () => { passed = true; });
+  assert.equal(passed, false);
+  assert.equal(res.statusCode, 401);
+});
+
