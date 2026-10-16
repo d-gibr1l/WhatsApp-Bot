@@ -51,6 +51,14 @@
 | `MESSAGE_CACHE_TTL_MINUTES` | Anti-delete message retention in minutes (default: `360`, minimum: `30`)                | Optional    |
 | `MESSAGE_CACHE_MAX_PER_CHAT` | Maximum anti-delete messages retained per chat (default: `500`, minimum: `50`)         | Optional    |
 
+### 🍃 Quick MongoDB Atlas Setup (Free & Fast)
+
+1. Go to [mongodb.com/atlas](https://www.mongodb.com/cloud/atlas/register) and create a **Free Shared Cluster (M0)**.
+2. In **Network Access**, click **Add IP Address** → **Allow Access from Anywhere (`0.0.0.0/0`)**.
+3. In **Database Access**, create a user (e.g. `hooperbot`) and password.
+4. Click **Connect** → **Drivers** → Copy the `mongodb+srv://...` link.
+5. Paste it as `MONGODB` in your `.env` or Render environment settings. Done!
+
 ---
 
 ## 📦 Local Installation
