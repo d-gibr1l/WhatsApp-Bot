@@ -156,6 +156,34 @@ button.input-btn {
 .info-card p { font-size: 0.86rem; color: var(--text-soft); margin: 5px 0 14px; line-height: 1.5; }
 .info-card p:last-child { margin-bottom: 0; }
 
+/* ── Emoji chips (View Once trigger list) ──────────────────────────────── */
+.emoji-chips { display: flex; flex-wrap: wrap; gap: 8px; min-height: 36px; align-items: center; }
+.emoji-chips-empty { font-size: 0.82rem; color: var(--text-muted); }
+.emoji-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 12px;
+  font-size: 1.25rem;
+  line-height: 1.2;
+  background: var(--field);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+}
+.emoji-chip-remove {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.emoji-chip-remove:hover { color: var(--text); background: var(--card-hover); }
+
 /* ── Forms ─────────────────────────────────────────────────────────────── */
 .input-group { display: flex; gap: 8px; width: 100%; align-items: stretch; }
 .input-group--stack { flex-direction: column; }
@@ -248,31 +276,6 @@ input:focus-visible + .slider { box-shadow: var(--ring); }
   text-align: center;
 }
 .danger-zone p { color: var(--text-muted); font-size: 0.84rem; margin-top: 10px; }
-
-/* ── Auth overlay ──────────────────────────────────────────────────────── */
-#auth-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 18px;
-  background: rgba(6, 9, 16, 0.55);
-  backdrop-filter: blur(10px);
-}
-#auth-overlay form {
-  width: 100%;
-  max-width: 350px;
-  display: none;
-  flex-direction: column;
-  gap: 13px;
-}
-#auth-overlay h1 { font-size: 1.2rem; }
-#auth-overlay p { color: var(--text-muted); font-size: 0.86rem; margin-top: -4px; }
-#auth-overlay .form-input { font-size: 0.95rem; padding: 11px 13px; }
-#auth-overlay button { margin-top: 4px; }
-.auth-error { color: var(--danger); font-size: 0.82rem; min-height: 1.1em; font-weight: 600; }
 
 /* ── Toasts ────────────────────────────────────────────────────────────── */
 #toast-container {

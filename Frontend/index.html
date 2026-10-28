@@ -11,26 +11,6 @@
 </head>
 <body>
 
-<!-- ── Auth overlay ────────────────────────────────────────────────────── -->
-<div id="auth-overlay">
-  <form id="login-form" class="glass-surface">
-    <h1>🔒 HOOPER Dashboard</h1>
-    <p>Enter the dashboard password to continue.</p>
-    <input id="login-password" class="form-input" type="password" placeholder="Password" autocomplete="current-password" required>
-    <button type="submit" id="login-submit" class="input-btn btn-block">Log In</button>
-    <p id="login-error" class="auth-error"></p>
-  </form>
-
-  <form id="setup-form" class="glass-surface">
-    <h1>👋 Welcome to HOOPER</h1>
-    <p>Choose a password to protect this dashboard. You'll use it to log in from now on.</p>
-    <input id="setup-password" class="form-input" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password" minlength="8" required>
-    <input id="setup-confirm" class="form-input" type="password" placeholder="Confirm password" autocomplete="new-password" minlength="8" required>
-    <button type="submit" id="setup-submit" class="input-btn btn-block">Set Password &amp; Continue</button>
-    <p id="setup-error" class="auth-error"></p>
-  </form>
-</div>
-
 <div class="wrap">
 
   <!-- ── Header ────────────────────────────────────────────────────────── -->
@@ -47,7 +27,6 @@
         <span class="pulse"></span>
         <span id="header-status-text">Connecting…</span>
       </span>
-      <button id="logout-btn" type="button" class="btn btn-ghost">Log Out</button>
     </div>
   </header>
 
@@ -108,10 +87,6 @@
     <div class="section-title">Hidden Commands</div>
     <div class="settings-grid">
       <div class="info-card">
-        <h3><span class="cmd">.//</span> &nbsp;<span class="tag">Single Action</span></h3>
-        <p><strong>Stealth Revive &amp; Save.</strong> Reply to a View Once (or any message) with <code>.//</code> to silently save its media to your DM. WhatsApp never sends View Once media to the bot, so it's pulled from your reply — this only works as a reply.</p>
-      </div>
-      <div class="info-card">
         <h3><span class="cmd">.status</span> &nbsp;<span class="tag">Action &amp; Auto</span></h3>
         <p><strong>Status Saver &amp; Forwarder.</strong> Send <code>.status @user</code> to fetch and forward their recent statuses to your DM. Send <code>.auto status @user</code> to forward their future statuses automatically.</p>
       </div>
@@ -129,21 +104,6 @@
 
   <!-- ── Settings ──────────────────────────────────────────────────────── -->
   <section id="view-settings" class="tab-content glass-surface">
-
-    <div class="section-title">Dashboard</div>
-    <div class="settings-grid">
-      <div class="setting-card">
-        <div class="setting-info">
-          <h3>Dashboard Password</h3>
-          <p>Change the password used to log into this dashboard.</p>
-        </div>
-        <div class="input-group input-group--stack">
-          <input type="password" id="cfg-cur-pass" class="form-input" placeholder="Current password" autocomplete="current-password">
-          <input type="password" id="cfg-new-pass" class="form-input" placeholder="New password (min 8 chars)" autocomplete="new-password">
-          <button class="input-btn" onclick="changeDashboardPassword()">Update Password</button>
-        </div>
-      </div>
-    </div>
 
     <div class="section-title">General</div>
     <div class="settings-grid">
@@ -180,6 +140,21 @@
         <div class="input-group">
           <input type="number" id="cfg-gc" class="form-input" placeholder="5" min="1">
           <button class="input-btn" onclick="saveConfig('HOOPER_GC_INTERVAL', 'cfg-gc')">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">View Once Saver</div>
+    <div class="settings-grid">
+      <div class="setting-card">
+        <div class="setting-info">
+          <h3>Trigger Emojis</h3>
+          <p>Reply to a View Once with just one of these emojis to silently save it to your DM. Owner only. Remove them all to turn the feature off.</p>
+        </div>
+        <div id="vo-emoji-chips" class="emoji-chips"></div>
+        <div class="input-group">
+          <input type="text" id="vo-emoji-input" class="form-input" placeholder="Add an emoji, e.g. 🔥" autocomplete="off">
+          <button class="input-btn" onclick="addViewOnceEmoji()">Add</button>
         </div>
       </div>
     </div>

@@ -15,6 +15,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
   "HOOPER_GC_INTERVAL",
   "yt_cookies",
   "rapidapi_key",
+  "HOOPER_VIEWONCE_EMOJIS",
 ]);
 
 const ALLOWED_GROUP_FEATURES = new Set([

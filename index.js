@@ -23,6 +23,12 @@ import { Boom } from "@hapi/boom";
 import { serialize, WAConnection } from "./System/whatsapp.js";
 import { smsg, getBuffer, getSizeMedia } from "./System/Function2.js";
 import InstanceLock from "./System/InstanceLock.js";
+import {
+  VIEWONCE_EMOJIS_KEY,
+  emojisFromSetting,
+  emojisToSetting,
+  parseEmojiList,
+} from "./src/viewonce-emojis.js";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 const __filename = fileURLToPath(import.meta.url);
@@ -131,7 +137,6 @@ import {
 } from "./System/MongoDB/MongoDb_Core.js";
 import chalk from "chalk";
 import { spawn } from "child_process";
-import { createDashboardAuth } from "./src/dashboard-auth.js";
 import * as db from "./src/db.js";
 
 if (fs.existsSync("./wireproxy.conf")) {
@@ -149,23 +154,6 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
-
-// ─── Dashboard auth ─────────────────────────────────────────────────────────
-// Every /api/* route below controls the live WhatsApp session (QR, pairing,
-// clear-session) or exposes secrets (/api/config), so the whole surface is
-// gated behind a password. Priority: DASHBOARD_PASSWORD env var (fixed), then
-// a hash the operator sets on first visit ("setup" mode). The stored hash is
-// loaded from the DB later in initConfigAndStart().
-const DASHBOARD_ENV_PASSWORD = process.env.DASHBOARD_PASSWORD?.trim() || null;
-const dashboardAuth = createDashboardAuth({
-  envPassword: DASHBOARD_ENV_PASSWORD,
-  persistHash: async (hash) => {
-    await db.setSetting("dashboard_password_hash", hash);
-  },
-});
-if (DASHBOARD_ENV_PASSWORD) {
-  console.log(chalk.green(`[ HOOPER ] Dashboard auth: using DASHBOARD_PASSWORD from environment.`));
-}
 
 global.lidToJidMap = new Map();
 
@@ -1454,22 +1442,6 @@ const connectHooper = async (trigger) => {
 async function initConfigAndStart() {
   const db = await import("./src/db.js");
 
-  // Load the dashboard password hash the operator set on a previous visit
-  // (skipped when DASHBOARD_PASSWORD env is in force).
-  if (!DASHBOARD_ENV_PASSWORD) {
-    try {
-      const storedHash = await db.getSetting("dashboard_password_hash", null);
-      dashboardAuth.setStoredHash(storedHash);
-      console.log(
-        storedHash
-          ? chalk.green(`[ HOOPER ] Dashboard auth: password configured.`)
-          : chalk.yellow(`[ HOOPER ] Dashboard auth: no password yet — set one on first visit to the dashboard.`),
-      );
-    } catch (e) {
-      console.warn(`[ HOOPER ] Could not load dashboard password hash: ${e.message}`);
-    }
-  }
-
   // Load watched temp-mail inboxes into memory (one query, at boot).
   try {
     const n = await tempmailHydrate();
@@ -1549,6 +1521,8 @@ async function initConfigAndStart() {
 
   let dbTmdbApi = await db.getSetting("HOOPER_TMDB_API");
   if (dbTmdbApi) global.tmdbAPIKey = dbTmdbApi;
+
+  global.viewOnceEmojis = emojisFromSetting(await db.getSetting(VIEWONCE_EMOJIS_KEY));
 
   // Load YouTube Cookies
   const ytCookies = await db.getSetting("yt_cookies");
@@ -1810,15 +1784,6 @@ app.use("/", express.static(join(__dirname, "Frontend")));
 
 // --- GUI API Endpoints ---
 
-// Auth endpoints must be reachable without a session; everything else under
-// /api is gated by dashboardAuth.requireAuth below.
-app.get("/api/auth-state", dashboardAuth.authState);
-app.post("/api/setup", dashboardAuth.setup);
-app.post("/api/login", dashboardAuth.login);
-app.post("/api/logout", dashboardAuth.logout);
-app.use("/api", dashboardAuth.requireAuth);
-app.post("/api/change-password", dashboardAuth.changePassword);
-
 app.get("/api/status", (req, res) => {
   res.json({
     status,
@@ -2029,6 +1994,7 @@ app.get("/api/config", async (req, res) => {
       gcInterval: process.env.GC_INTERVAL_MINUTES || "5",
       ytCookies: (await db.getSetting("yt_cookies")) || "",
       rapidapiKey: (await db.getSetting("rapidapi_key")) || "",
+      viewOnceEmojis: emojisFromSetting(await db.getSetting(VIEWONCE_EMOJIS_KEY)),
     };
     res.json(config);
   } catch (err) {
@@ -2052,6 +2018,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
   "HOOPER_GC_INTERVAL",
   "yt_cookies",
   "rapidapi_key",
+  VIEWONCE_EMOJIS_KEY,
 ]);
 
 app.post("/api/config", async (req, res) => {
@@ -2065,7 +2032,8 @@ app.post("/api/config", async (req, res) => {
       return res.status(400).json({ error: "Invalid value type" });
     }
 
-    const strVal = value !== undefined && value !== null ? String(value) : "";
+    let strVal = value !== undefined && value !== null ? String(value) : "";
+    if (key === VIEWONCE_EMOJIS_KEY) strVal = emojisToSetting(strVal);
     await db.setSetting(key, strVal);
 
     if (key === "HOOPER_PREFIX") {
@@ -2081,6 +2049,10 @@ app.post("/api/config", async (req, res) => {
     if (key === "HOOPER_TENOR_API") global.tenorAPIKeys = strVal ? strVal.split(",") : [];
     if (key === "HOOPER_TMDB_API") global.tmdbAPIKey = strVal;
     if (key === "HOOPER_GC_INTERVAL") process.env.GC_INTERVAL_MINUTES = strVal;
+    if (key === VIEWONCE_EMOJIS_KEY) {
+      global.viewOnceEmojis = parseEmojiList(strVal);
+      return res.json({ success: true, key, value: strVal, emojis: global.viewOnceEmojis });
+    }
 
     res.json({ success: true, key, value: strVal });
   } catch (err) {

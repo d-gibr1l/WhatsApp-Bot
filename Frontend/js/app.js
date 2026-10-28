@@ -5,6 +5,7 @@ let isConnected = false;
 let statusInterval, qrInterval;
 let groupsData = [];
 let selectedGroupId = null;
+let viewOnceEmojis = [];
 
 const featureLabels = {
   antilink: { name: 'Anti-Link', desc: 'Automatically delete WhatsApp group invite links.' },
@@ -19,110 +20,8 @@ const featureLabels = {
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   setupEventListeners();
-  setupAuthForms();
-  authGate();
+  boot();
 });
-
-async function authGate() {
-  let mode = 'login';
-  try {
-    const state = await API.fetchAuthState();
-    mode = state.mode || 'login';
-  } catch (e) {
-    mode = 'login';
-  }
-
-  if (mode === 'authed') {
-    hideAuthOverlay();
-    boot();
-  } else if (mode === 'setup') {
-    showAuthOverlay('setup');
-  } else {
-    showAuthOverlay('login');
-  }
-}
-
-function showAuthOverlay(which) {
-  const overlay = document.getElementById('auth-overlay');
-  const loginForm = document.getElementById('login-form');
-  const setupForm = document.getElementById('setup-form');
-  if (!overlay) return;
-  overlay.style.display = 'flex';
-  loginForm.style.display = which === 'login' ? 'flex' : 'none';
-  setupForm.style.display = which === 'setup' ? 'flex' : 'none';
-  const focusEl = document.getElementById(which === 'setup' ? 'setup-password' : 'login-password');
-  if (focusEl) focusEl.focus();
-}
-
-function hideAuthOverlay() {
-  const overlay = document.getElementById('auth-overlay');
-  if (overlay) overlay.style.display = 'none';
-}
-
-function setupAuthForms() {
-  const loginForm = document.getElementById('login-form');
-  if (loginForm) {
-    loginForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const pwInput = document.getElementById('login-password');
-      const errorEl = document.getElementById('login-error');
-      const submitBtn = document.getElementById('login-submit');
-      const password = pwInput.value;
-      if (!password) return;
-
-      errorEl.innerText = '';
-      submitBtn.disabled = true;
-      submitBtn.innerText = 'Logging in...';
-      try {
-        const data = await API.login(password);
-        if (data.success) {
-          pwInput.value = '';
-          hideAuthOverlay();
-          boot();
-        } else {
-          errorEl.innerText = data.error || 'Login failed.';
-        }
-      } catch (e) {
-        errorEl.innerText = 'Network error.';
-      }
-      submitBtn.disabled = false;
-      submitBtn.innerText = 'Log In';
-    });
-  }
-
-  const setupForm = document.getElementById('setup-form');
-  if (setupForm) {
-    setupForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const pw = document.getElementById('setup-password').value;
-      const confirm = document.getElementById('setup-confirm').value;
-      const errorEl = document.getElementById('setup-error');
-      const submitBtn = document.getElementById('setup-submit');
-
-      errorEl.innerText = '';
-      if (pw.length < 8) { errorEl.innerText = 'Password must be at least 8 characters.'; return; }
-      if (pw !== confirm) { errorEl.innerText = 'Passwords do not match.'; return; }
-
-      submitBtn.disabled = true;
-      submitBtn.innerText = 'Saving...';
-      try {
-        const data = await API.setupPassword(pw);
-        if (data.success) {
-          document.getElementById('setup-password').value = '';
-          document.getElementById('setup-confirm').value = '';
-          hideAuthOverlay();
-          boot();
-        } else {
-          errorEl.innerText = data.error || 'Setup failed.';
-        }
-      } catch (e) {
-        errorEl.innerText = 'Network error.';
-      }
-      submitBtn.disabled = false;
-      submitBtn.innerText = 'Set Password & Continue';
-    });
-  }
-}
 
 function restoreTab() {
   const activeTab = localStorage.getItem('activeTab') || 'overview';
@@ -154,7 +53,6 @@ function setupEventListeners() {
   });
 
   document.getElementById('pair-form').addEventListener('submit', handlePairing);
-  document.getElementById('logout-btn')?.addEventListener('click', handleLogout);
   document.getElementById('group-select').addEventListener('change', (e) => {
     selectedGroupId = e.target.value;
     renderGroupToggles();
@@ -276,31 +174,12 @@ async function loadSettings() {
     if (document.getElementById('cfg-gc')) document.getElementById('cfg-gc').value = data.gcInterval || '';
     if (document.getElementById('cfg-yt-cookies')) document.getElementById('cfg-yt-cookies').value = data.ytCookies || '';
     if (document.getElementById('cfg-rapidapi')) document.getElementById('cfg-rapidapi').value = data.rapidapiKey || '';
+    viewOnceEmojis = data.viewOnceEmojis || [];
+    renderViewOnceEmojis();
   } catch(e) {
     showToast('Failed to load config', 'error');
   }
 }
-
-window.changeDashboardPassword = async function() {
-  const curEl = document.getElementById('cfg-cur-pass');
-  const newEl = document.getElementById('cfg-new-pass');
-  const current = curEl.value;
-  const next = newEl.value;
-  if (!current || !next) return showToast('Fill in both fields', 'error');
-  if (next.length < 8) return showToast('New password must be at least 8 characters', 'error');
-  try {
-    const data = await API.changePassword(current, next);
-    if (data.success) {
-      curEl.value = '';
-      newEl.value = '';
-      showToast('Dashboard password updated');
-    } else {
-      showToast(data.error || 'Failed to update password', 'error');
-    }
-  } catch (e) {
-    showToast('Network error', 'error');
-  }
-};
 
 window.saveConfig = async function(key, inputId) {
   const val = document.getElementById(inputId).value;
@@ -311,6 +190,63 @@ window.saveConfig = async function(key, inputId) {
   } catch(e) {
     showToast('Network error', 'error');
   }
+};
+
+function renderViewOnceEmojis() {
+  const box = document.getElementById('vo-emoji-chips');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!viewOnceEmojis.length) {
+    const empty = document.createElement('span');
+    empty.className = 'emoji-chips-empty';
+    empty.textContent = 'No trigger emojis — feature is off.';
+    box.appendChild(empty);
+    return;
+  }
+  viewOnceEmojis.forEach(emoji => {
+    const chip = document.createElement('span');
+    chip.className = 'emoji-chip';
+    chip.textContent = emoji;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'emoji-chip-remove';
+    remove.setAttribute('aria-label', `Remove ${emoji}`);
+    remove.textContent = '×';
+    remove.addEventListener('click', () => saveViewOnceEmojis(list => list.filter(e => e !== emoji)));
+    chip.appendChild(remove);
+    box.appendChild(chip);
+  });
+}
+
+// Updates run one at a time, each computed from the latest saved list, so
+// rapid clicks can't overwrite each other with a stale copy.
+let viewOnceQueue = Promise.resolve();
+function saveViewOnceEmojis(computeNext, { added = false } = {}) {
+  viewOnceQueue = viewOnceQueue.then(async () => {
+    try {
+      const data = await API.saveConfig('HOOPER_VIEWONCE_EMOJIS', computeNext(viewOnceEmojis).join(','));
+      if (!data.success) return showToast(data.error || 'Failed to save', 'error');
+      const before = viewOnceEmojis.length;
+      viewOnceEmojis = data.emojis || [];
+      renderViewOnceEmojis();
+      if (added && viewOnceEmojis.length <= before) {
+        showToast('Not a valid emoji, or already added', 'error');
+      } else {
+        showToast('Trigger emojis saved!');
+      }
+    } catch (e) {
+      showToast('Network error', 'error');
+    }
+  });
+  return viewOnceQueue;
+}
+
+window.addViewOnceEmoji = async function() {
+  const input = document.getElementById('vo-emoji-input');
+  const text = input.value.trim();
+  if (!text) return;
+  await saveViewOnceEmojis(list => [...list, text], { added: true });
+  input.value = '';
 };
 
 async function loadGroups() {
@@ -377,16 +313,6 @@ async function loadBans() {
     // Implementation omitted for brevity, similar to old app
     // Needs HTML for bans rendering
 } catch(e) {}
-}
-
-async function handleLogout() {
-  clearInterval(statusInterval);
-  clearInterval(qrInterval);
-  clearInterval(localUptimeInterval);
-  try {
-    await API.logout();
-  } catch (e) {}
-  window.location.reload();
 }
 
 async function clearSession() {

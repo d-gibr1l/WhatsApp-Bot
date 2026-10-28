@@ -17,6 +17,8 @@ import {
   checkGroupChatbot,
   checkAllowedChat,
 } from "./System/MongoDB/MongoDb_Core.js";
+import { isViewOnceQuoted, saveViewOnce } from "./System/ViewOnceSaver.js";
+import { DEFAULT_VIEWONCE_EMOJIS, isViewOnceTrigger } from "./src/viewonce-emojis.js";
 global.Levels = Levels;
 
 // Singleton database instance
@@ -98,7 +100,6 @@ export default async (Hooper, m, commands, chatUpdate) => {
     const isCmd = body.startsWith(prefix);
     const bodyWithoutPrefix = isCmd ? body.slice(prefix.length).trim() : "";
     const inputCMD = isCmd ? bodyWithoutPrefix.split(/ +/).shift().toLowerCase() : "";
-    const isStealthCmd = inputCMD === "//";
     const args = isCmd ? bodyWithoutPrefix.split(/ +/).slice(1) : [];
     const text = args.join(" ");
 
@@ -249,6 +250,17 @@ export default async (Hooper, m, commands, chatUpdate) => {
       );
     }
 
+    // Owner replies to a View Once with a configured emoji -> silently save it to their DM.
+    // Runs before mode/mute checks so it works in every chat.
+    if (
+      isCreator &&
+      isViewOnceQuoted(m.quoted) &&
+      isViewOnceTrigger(body, global.viewOnceEmojis ?? DEFAULT_VIEWONCE_EMOJIS)
+    ) {
+      await saveViewOnce(Hooper, m);
+      return;
+    }
+
     // ----------------------------- System Configuration (Do not modify this part) ---------------------------- //
 
     const isbannedUser = await checkBan(m.sender);
@@ -266,8 +278,8 @@ export default async (Hooper, m, commands, chatUpdate) => {
         return; // Silently ignore banned users
       }
       
-      // The .// save command and info commands bypass mode/mute restrictions for creators/mods
-      const isBypassCmd = isStealthCmd || (infoCommands.includes(inputCMD) && (isCreator || modcheck));
+      // Info commands bypass mode/mute restrictions for creators/mods
+      const isBypassCmd = infoCommands.includes(inputCMD) && (isCreator || modcheck);
       
       if (!isBypassCmd) {
         if (botWorkMode === "private") {

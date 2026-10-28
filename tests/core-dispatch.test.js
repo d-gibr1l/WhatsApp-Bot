@@ -58,6 +58,76 @@ test('Core dispatch: silently ignores lone prefix or dot without replying or rea
   assert.equal(reacted, false);
 });
 
+function viewOnceHarness({ sender, text, quotedOverrides = {} }) {
+  const sent = [];
+  let downloads = 0;
+  const hooper = {
+    decodeJid: async (jid) => jid,
+    sendMessage: async (jid, content) => { sent.push({ jid, content }); },
+    downloadMediaMessage: async () => { downloads++; return Buffer.from('media'); },
+    user: { id: '2340000000001@s.whatsapp.net', lid: '2340000000001@lid' },
+  };
+  const m = {
+    text,
+    type: 'extendedTextMessage',
+    message: { extendedTextMessage: { contextInfo: null } },
+    sender,
+    from: '2342222222222@s.whatsapp.net',
+    isGroup: false,
+    reply: () => {},
+    quoted: {
+      type: 'imageMessage',
+      msg: { mimetype: 'image/jpeg', viewOnce: true, caption: 'secret' },
+      sender: '2342222222222@s.whatsapp.net',
+      ...quotedOverrides,
+    },
+  };
+  return { hooper, m, sent, downloads: () => downloads };
+}
+
+test('Core dispatch: owner replying with 👀 to a View Once saves it to their DM', async () => {
+  global.viewOnceEmojis = ['👀'];
+  const { hooper, m, sent, downloads } = viewOnceHarness({ sender: '2340000000001@s.whatsapp.net', text: '👀' });
+  const core = (await import('../Core.js')).default;
+  await core(hooper, m, new Map());
+  assert.equal(downloads(), 1);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].jid, '2340000000001@s.whatsapp.net');
+  assert.ok(sent[0].content.image);
+  assert.match(sent[0].content.caption, /viewonce saved from @2342222222222/);
+});
+
+test('Core dispatch: View Once emoji trigger ignores non-owners, other emojis and non-View-Once replies', async () => {
+  const core = (await import('../Core.js')).default;
+  global.viewOnceEmojis = ['👀'];
+
+  const stranger = viewOnceHarness({ sender: '2341111111111@s.whatsapp.net', text: '👀' });
+  await core(stranger.hooper, stranger.m, new Map());
+  assert.equal(stranger.downloads(), 0);
+
+  const wrongEmoji = viewOnceHarness({ sender: '2340000000001@s.whatsapp.net', text: '🔥' });
+  await core(wrongEmoji.hooper, wrongEmoji.m, new Map());
+  assert.equal(wrongEmoji.downloads(), 0);
+
+  const normalMedia = viewOnceHarness({
+    sender: '2340000000001@s.whatsapp.net',
+    text: '👀',
+    quotedOverrides: { msg: { mimetype: 'image/jpeg' } },
+  });
+  await core(normalMedia.hooper, normalMedia.m, new Map());
+  assert.equal(normalMedia.downloads(), 0);
+
+  global.viewOnceEmojis = ['🔥'];
+  const custom = viewOnceHarness({ sender: '2340000000001@s.whatsapp.net', text: '🔥' });
+  await core(custom.hooper, custom.m, new Map());
+  assert.equal(custom.downloads(), 1);
+
+  global.viewOnceEmojis = [];
+  const disabled = viewOnceHarness({ sender: '2340000000001@s.whatsapp.net', text: '👀' });
+  await core(disabled.hooper, disabled.m, new Map());
+  assert.equal(disabled.downloads(), 0);
+});
+
 test.after(async () => {
   const mongoose = (await import('mongoose')).default;
   await mongoose.disconnect().catch(() => {});
