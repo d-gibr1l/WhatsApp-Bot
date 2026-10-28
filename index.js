@@ -597,7 +597,7 @@ const connectHooper = async (trigger) => {
 
   console.log(
     chalk.cyan(
-      `[ HOOPER ] v${global.botVersion}  |  Node.js ${process.version}  |  ${process.platform}/${process.arch}`,
+      `[ HOOPER ] v${global.botVersion}  |  Node.js ${process.version}  |  ${process.platform}/${process.arch}  |  build ${(process.env.KOYEB_GIT_SHA || "local").slice(0, 7)}`,
     ),
   );
 

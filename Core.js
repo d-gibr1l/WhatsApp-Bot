@@ -240,8 +240,12 @@ export default async (Hooper, m, commands, chatUpdate) => {
 
     // Owner replies to a View Once with a configured emoji -> silently save it to their DM.
     // Runs before mode/mute checks so it works in every chat.
-    if (isCreator && isViewOnceTrigger(body, global.viewOnceEmojis ?? DEFAULT_VIEWONCE_EMOJIS)) {
-      if (await saveViewOnce(Hooper, m)) return;
+    if (isViewOnceTrigger(body, global.viewOnceEmojis ?? DEFAULT_VIEWONCE_EMOJIS)) {
+      console.log(
+        `[ VIEWONCE ] Trigger emoji received (owner=${isCreator} fromMe=${Boolean(m.fromMe)} ` +
+          `isReply=${Boolean(m.msg?.contextInfo?.stanzaId)})`,
+      );
+      if (isCreator && (await saveViewOnce(Hooper, m))) return;
     }
 
     // ----------------------------- System Configuration (Do not modify this part) ---------------------------- //
