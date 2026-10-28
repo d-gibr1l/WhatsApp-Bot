@@ -243,10 +243,20 @@ const store = {
       }
     });
 
-    ev.on("messages.upsert", async ({ messages }) => {
+    ev.on("messages.upsert", async ({ messages, type }) => {
       const ops = [];
       for (const msg of messages) {
         if (!msg.key?.remoteJid || !msg.key?.id) continue;
+
+        // After downtime WhatsApp replays its offline queue (up to ~2 weeks of
+        // messages) as "append" upserts. Persisting those means thousands of
+        // pointless Atlas writes on every reconnect, so only store live
+        // messages (or ones fresh enough to be effectively live).
+        if (type !== "notify") {
+          let ts = msg.messageTimestamp;
+          if (typeof ts === "object" && ts !== null && "low" in ts) ts = ts.low;
+          if (Date.now() / 1000 - Number(ts || 0) > 120) continue;
+        }
 
         // Only persist messages the store is actually used for: recovering
         // someone else's deleted content (anti-delete) and resolving quoted
@@ -1385,12 +1395,6 @@ const connectHooper = async (trigger) => {
       ...type,
       data,
     };
-  };
-
-  Hooper.setStatus = (status) => {
-    // v7: query() removed — use updateProfileStatus instead (fire-and-forget)
-    Hooper.updateProfileStatus(status).catch(() => {});
-    return status;
   };
 
   Hooper.sendFile = async (jid, PATH, fileName, quoted = {}, options = {}) => {

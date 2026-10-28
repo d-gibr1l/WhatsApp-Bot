@@ -73,18 +73,6 @@ async function getCachedInviteCode(Hooper, from) {
   return "";
 }
 
-// ─── Throttled About / Status Update ──────────────────────────────────────────
-let lastStatusUpdate = 0;
-const STATUS_UPDATE_INTERVAL_MS = 60 * 60 * 1000; // Throttle to at most once per 60 minutes
-
-function updateStatusThrottled(Hooper, text) {
-  const now = Date.now();
-  if (now - lastStatusUpdate >= STATUS_UPDATE_INTERVAL_MS) {
-    lastStatusUpdate = now;
-    Hooper.setStatus(text).catch(() => {});
-  }
-}
-
 export default async (Hooper, m, commands, chatUpdate) => {
   const prefix = global.prefa;
   try {
@@ -456,18 +444,6 @@ export default async (Hooper, m, commands, chatUpdate) => {
     global.botImage6 = charConfig.botImage6;
 
     // ------------------------------------------------------------------------------------------------------- //
-
-    const pad = (s) => (s < 10 ? "0" : "") + s;
-    const formatTime = (seconds) => {
-      const hours = Math.floor(seconds / (60 * 60));
-      const minutes = Math.floor((seconds % (60 * 60)) / 60);
-      const secs = Math.floor(seconds % 60);
-      return `${pad(hours)}:${pad(minutes)}:${pad(secs)}`;
-    };
-    const uptime = () => formatTime(process.uptime());
-
-    let upTxt = `〘  ${botName} Personal Edition  〙    ⚡ Uptime: ${uptime()}`;
-    updateStatusThrottled(Hooper, upTxt);
 
     cmd.start(Hooper, m, {
       name: "Hooper",
