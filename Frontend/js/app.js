@@ -5,7 +5,6 @@ let isConnected = false;
 let statusInterval, qrInterval;
 let groupsData = [];
 let selectedGroupId = null;
-let viewOnceEmojis = [];
 
 const featureLabels = {
   antilink: { name: 'Anti-Link', desc: 'Automatically delete WhatsApp group invite links.' },
@@ -174,8 +173,6 @@ async function loadSettings() {
     if (document.getElementById('cfg-gc')) document.getElementById('cfg-gc').value = data.gcInterval || '';
     if (document.getElementById('cfg-yt-cookies')) document.getElementById('cfg-yt-cookies').value = data.ytCookies || '';
     if (document.getElementById('cfg-rapidapi')) document.getElementById('cfg-rapidapi').value = data.rapidapiKey || '';
-    viewOnceEmojis = data.viewOnceEmojis || [];
-    renderViewOnceEmojis();
   } catch(e) {
     showToast('Failed to load config', 'error');
   }
@@ -190,63 +187,6 @@ window.saveConfig = async function(key, inputId) {
   } catch(e) {
     showToast('Network error', 'error');
   }
-};
-
-function renderViewOnceEmojis() {
-  const box = document.getElementById('vo-emoji-chips');
-  if (!box) return;
-  box.innerHTML = '';
-  if (!viewOnceEmojis.length) {
-    const empty = document.createElement('span');
-    empty.className = 'emoji-chips-empty';
-    empty.textContent = 'No trigger emojis — feature is off.';
-    box.appendChild(empty);
-    return;
-  }
-  viewOnceEmojis.forEach(emoji => {
-    const chip = document.createElement('span');
-    chip.className = 'emoji-chip';
-    chip.textContent = emoji;
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'emoji-chip-remove';
-    remove.setAttribute('aria-label', `Remove ${emoji}`);
-    remove.textContent = '×';
-    remove.addEventListener('click', () => saveViewOnceEmojis(list => list.filter(e => e !== emoji)));
-    chip.appendChild(remove);
-    box.appendChild(chip);
-  });
-}
-
-// Updates run one at a time, each computed from the latest saved list, so
-// rapid clicks can't overwrite each other with a stale copy.
-let viewOnceQueue = Promise.resolve();
-function saveViewOnceEmojis(computeNext, { added = false } = {}) {
-  viewOnceQueue = viewOnceQueue.then(async () => {
-    try {
-      const data = await API.saveConfig('HOOPER_VIEWONCE_EMOJIS', computeNext(viewOnceEmojis).join(','));
-      if (!data.success) return showToast(data.error || 'Failed to save', 'error');
-      const before = viewOnceEmojis.length;
-      viewOnceEmojis = data.emojis || [];
-      renderViewOnceEmojis();
-      if (added && viewOnceEmojis.length <= before) {
-        showToast('Not a valid emoji, or already added', 'error');
-      } else {
-        showToast('Trigger emojis saved!');
-      }
-    } catch (e) {
-      showToast('Network error', 'error');
-    }
-  });
-  return viewOnceQueue;
-}
-
-window.addViewOnceEmoji = async function() {
-  const input = document.getElementById('vo-emoji-input');
-  const text = input.value.trim();
-  if (!text) return;
-  await saveViewOnceEmojis(list => [...list, text], { added: true });
-  input.value = '';
 };
 
 async function loadGroups() {

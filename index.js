@@ -23,13 +23,6 @@ import { Boom } from "@hapi/boom";
 import { serialize, WAConnection } from "./System/whatsapp.js";
 import { smsg, getBuffer, getSizeMedia } from "./System/Function2.js";
 import InstanceLock from "./System/InstanceLock.js";
-import { rememberViewOnce } from "./System/ViewOnceSaver.js";
-import {
-  VIEWONCE_EMOJIS_KEY,
-  emojisFromSetting,
-  emojisToSetting,
-  parseEmojiList,
-} from "./src/viewonce-emojis.js";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 const __filename = fileURLToPath(import.meta.url);
@@ -879,7 +872,6 @@ const connectHooper = async (trigger) => {
 
   Hooper.ev.on("messages.upsert", async (chatUpdate) => {
     if (!isCurrentSocket(Hooper, generation)) return;
-    for (const _m of chatUpdate.messages || []) rememberViewOnce(_m);
     if (chatUpdate.type !== "notify") return;
     const msg = chatUpdate.messages?.[0];
     if (!msg) return;
@@ -1528,7 +1520,6 @@ async function initConfigAndStart() {
   let dbTmdbApi = await db.getSetting("HOOPER_TMDB_API");
   if (dbTmdbApi) global.tmdbAPIKey = dbTmdbApi;
 
-  global.viewOnceEmojis = emojisFromSetting(await db.getSetting(VIEWONCE_EMOJIS_KEY));
 
   // Load YouTube Cookies
   const ytCookies = await db.getSetting("yt_cookies");
@@ -2000,7 +1991,6 @@ app.get("/api/config", async (req, res) => {
       gcInterval: process.env.GC_INTERVAL_MINUTES || "5",
       ytCookies: (await db.getSetting("yt_cookies")) || "",
       rapidapiKey: (await db.getSetting("rapidapi_key")) || "",
-      viewOnceEmojis: emojisFromSetting(await db.getSetting(VIEWONCE_EMOJIS_KEY)),
     };
     res.json(config);
   } catch (err) {
@@ -2024,8 +2014,7 @@ const ALLOWED_CONFIG_KEYS = new Set([
   "HOOPER_GC_INTERVAL",
   "yt_cookies",
   "rapidapi_key",
-  VIEWONCE_EMOJIS_KEY,
-]);
+])
 
 app.post("/api/config", async (req, res) => {
   try {
@@ -2038,8 +2027,7 @@ app.post("/api/config", async (req, res) => {
       return res.status(400).json({ error: "Invalid value type" });
     }
 
-    let strVal = value !== undefined && value !== null ? String(value) : "";
-    if (key === VIEWONCE_EMOJIS_KEY) strVal = emojisToSetting(strVal);
+    const strVal = value !== undefined && value !== null ? String(value) : "";
     await db.setSetting(key, strVal);
 
     if (key === "HOOPER_PREFIX") {
@@ -2055,10 +2043,6 @@ app.post("/api/config", async (req, res) => {
     if (key === "HOOPER_TENOR_API") global.tenorAPIKeys = strVal ? strVal.split(",") : [];
     if (key === "HOOPER_TMDB_API") global.tmdbAPIKey = strVal;
     if (key === "HOOPER_GC_INTERVAL") process.env.GC_INTERVAL_MINUTES = strVal;
-    if (key === VIEWONCE_EMOJIS_KEY) {
-      global.viewOnceEmojis = parseEmojiList(strVal);
-      return res.json({ success: true, key, value: strVal, emojis: global.viewOnceEmojis });
-    }
 
     res.json({ success: true, key, value: strVal });
   } catch (err) {

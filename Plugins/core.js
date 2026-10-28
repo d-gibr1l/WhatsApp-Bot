@@ -303,9 +303,9 @@ export default {
         }
         let allCommands = [...global.cachedCommands];
         
-        // Hide 'groups', 'status' and 'revive' plugins if not chatting directly with the bot as the creator
+        // Hide 'groups', 'status', and 'stealth-revive' plugins if not chatting directly with the bot as the creator
         if (m.isGroup || !isCreator) {
-          allCommands = allCommands.filter(arr => arr[0] !== "groups.js" && arr[0] !== "status.js" && arr[0] !== "revive.js");
+          allCommands = allCommands.filter(arr => arr[0] !== "groups.js" && arr[0] !== "status.js" && arr[0] !== "stealth-revive.js" && arr[0] !== "revive.js");
         }
         
         // Hide moderator and admin-only commands if user is not authorized

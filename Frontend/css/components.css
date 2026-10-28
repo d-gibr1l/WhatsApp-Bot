@@ -156,34 +156,6 @@ button.input-btn {
 .info-card p { font-size: 0.86rem; color: var(--text-soft); margin: 5px 0 14px; line-height: 1.5; }
 .info-card p:last-child { margin-bottom: 0; }
 
-/* ── Emoji chips (View Once trigger list) ──────────────────────────────── */
-.emoji-chips { display: flex; flex-wrap: wrap; gap: 8px; min-height: 36px; align-items: center; }
-.emoji-chips-empty { font-size: 0.82rem; color: var(--text-muted); }
-.emoji-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px 4px 12px;
-  font-size: 1.25rem;
-  line-height: 1.2;
-  background: var(--field);
-  border: 1px solid var(--glass-border);
-  border-radius: 999px;
-}
-.emoji-chip-remove {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  font-size: 0.95rem;
-  line-height: 1;
-  color: var(--text-muted);
-  background: transparent;
-  border: none;
-  border-radius: 50%;
-  cursor: pointer;
-}
-.emoji-chip-remove:hover { color: var(--text); background: var(--card-hover); }
-
 /* ── Forms ─────────────────────────────────────────────────────────────── */
 .input-group { display: flex; gap: 8px; width: 100%; align-items: stretch; }
 .input-group--stack { flex-direction: column; }
