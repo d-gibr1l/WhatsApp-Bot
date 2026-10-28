@@ -97,7 +97,7 @@ test('Core dispatch: owner replying with 👀 to a View Once saves it to their D
   assert.match(sent[0].content.caption, /viewonce saved from @2342222222222/);
 });
 
-test('Core dispatch: View Once emoji trigger ignores non-owners, other emojis and non-View-Once replies', async () => {
+test('Core dispatch: View Once emoji trigger ignores non-owners, other emojis and non-media replies', async () => {
   const core = (await import('../Core.js')).default;
   global.viewOnceEmojis = ['👀'];
 
@@ -109,13 +109,23 @@ test('Core dispatch: View Once emoji trigger ignores non-owners, other emojis an
   await core(wrongEmoji.hooper, wrongEmoji.m, new Map());
   assert.equal(wrongEmoji.downloads(), 0);
 
-  const normalMedia = viewOnceHarness({
+  const quotedText = viewOnceHarness({
     sender: '2340000000001@s.whatsapp.net',
     text: '👀',
-    quotedOverrides: { msg: { mimetype: 'image/jpeg' } },
+    quotedOverrides: { type: 'conversation', msg: undefined },
   });
-  await core(normalMedia.hooper, normalMedia.m, new Map());
-  assert.equal(normalMedia.downloads(), 0);
+  await core(quotedText.hooper, quotedText.m, new Map());
+  assert.equal(quotedText.downloads(), 0);
+
+  // The viewOnce flag is not reliably present on a quoted copy — must still save.
+  const noFlag = viewOnceHarness({
+    sender: '2340000000001@s.whatsapp.net',
+    text: '👀',
+    quotedOverrides: { msg: { mimetype: 'video/mp4' }, type: 'videoMessage' },
+  });
+  await core(noFlag.hooper, noFlag.m, new Map());
+  assert.equal(noFlag.downloads(), 1);
+  assert.ok(noFlag.sent[0].content.video);
 
   global.viewOnceEmojis = ['🔥'];
   const custom = viewOnceHarness({ sender: '2340000000001@s.whatsapp.net', text: '🔥' });

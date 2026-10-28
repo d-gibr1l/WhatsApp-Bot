@@ -17,7 +17,7 @@ import {
   checkGroupChatbot,
   checkAllowedChat,
 } from "./System/MongoDB/MongoDb_Core.js";
-import { isViewOnceQuoted, saveViewOnce } from "./System/ViewOnceSaver.js";
+import { quotedMediaKind, saveViewOnce } from "./System/ViewOnceSaver.js";
 import { DEFAULT_VIEWONCE_EMOJIS, isViewOnceTrigger } from "./src/viewonce-emojis.js";
 global.Levels = Levels;
 
@@ -250,15 +250,18 @@ export default async (Hooper, m, commands, chatUpdate) => {
       );
     }
 
-    // Owner replies to a View Once with a configured emoji -> silently save it to their DM.
-    // Runs before mode/mute checks so it works in every chat.
+    // Owner replies to a media message (View Once) with a configured emoji -> silently save it
+    // to their DM. Runs before mode/mute checks so it works in every chat.
     if (
       isCreator &&
-      isViewOnceQuoted(m.quoted) &&
+      m.quoted &&
       isViewOnceTrigger(body, global.viewOnceEmojis ?? DEFAULT_VIEWONCE_EMOJIS)
     ) {
-      await saveViewOnce(Hooper, m);
-      return;
+      if (quotedMediaKind(m.quoted)) {
+        await saveViewOnce(Hooper, m);
+        return;
+      }
+      console.log(`[ VIEWONCE ] Trigger ignored — quoted message is not image/video/audio (type=${m.quoted.type})`);
     }
 
     // ----------------------------- System Configuration (Do not modify this part) ---------------------------- //

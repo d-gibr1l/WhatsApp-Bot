@@ -1,5 +1,14 @@
-export const isViewOnceQuoted = (quoted) =>
-  Boolean(quoted && (quoted.msg?.viewOnce || quoted.type?.toLowerCase().includes("viewonce")));
+// serialize() unwraps the View Once wrapper and WhatsApp doesn't reliably keep
+// the viewOnce flag on the quoted copy, so "is it view-once" can't be trusted.
+// Gate on "is it downloadable media" instead.
+export function quotedMediaKind(quoted) {
+  if (!quoted) return null;
+  const mime = quoted.msg?.mimetype || "";
+  if (/image/.test(mime) || quoted.type === "imageMessage") return "image";
+  if (/video/.test(mime) || quoted.type === "videoMessage") return "video";
+  if (/audio/.test(mime) || quoted.type === "audioMessage") return "audio";
+  return null;
+}
 
 // WhatsApp never delivers View Once media to the bot directly — the media key
 // only arrives inside the owner's reply (quoted copy), so this only works as a reply.
@@ -7,22 +16,16 @@ export async function saveViewOnce(Hooper, m) {
   const q = m.quoted;
   const target = m.sender;
   try {
-    const mime = q.msg?.mimetype || "";
-    const kind = /image/.test(mime) || q.type === "imageMessage" ? "image"
-      : /video/.test(mime) || q.type === "videoMessage" ? "video"
-      : /audio/.test(mime) || q.type === "audioMessage" ? "audio"
-      : null;
+    const kind = quotedMediaKind(q);
     if (!kind) return;
 
     const buffer = await Hooper.downloadMediaMessage(q.msg || q);
-    if (!buffer?.length) {
-      console.error("[ VIEWONCE ] Downloaded buffer is empty");
-      return;
-    }
+    if (!buffer?.length) throw new Error("WhatsApp returned no media for that message");
 
     const senderNumber = q.sender.split("@")[0];
     const originalCaption = q.msg?.caption ? `\n\n${q.msg.caption}` : "";
-    const caption = `viewonce saved from @${senderNumber}${originalCaption}`;
+    const label = q.msg?.viewOnce ? "viewonce saved" : "saved";
+    const caption = `${label} from @${senderNumber}${originalCaption}`;
     const mentions = [q.sender];
 
     if (kind === "audio") {
