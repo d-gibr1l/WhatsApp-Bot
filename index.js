@@ -23,6 +23,7 @@ import { Boom } from "@hapi/boom";
 import { serialize, WAConnection } from "./System/whatsapp.js";
 import { smsg, getBuffer, getSizeMedia } from "./System/Function2.js";
 import InstanceLock from "./System/InstanceLock.js";
+import { rememberViewOnce } from "./System/ViewOnceSaver.js";
 import {
   VIEWONCE_EMOJIS_KEY,
   emojisFromSetting,
@@ -878,6 +879,7 @@ const connectHooper = async (trigger) => {
 
   Hooper.ev.on("messages.upsert", async (chatUpdate) => {
     if (!isCurrentSocket(Hooper, generation)) return;
+    for (const _m of chatUpdate.messages || []) rememberViewOnce(_m);
     if (chatUpdate.type !== "notify") return;
     const msg = chatUpdate.messages?.[0];
     if (!msg) return;

@@ -138,6 +138,53 @@ test('Core dispatch: View Once emoji trigger ignores non-owners, other emojis an
   assert.equal(disabled.downloads(), 0);
 });
 
+test('Core dispatch: 👀 reply with NO quoted content resolves the View Once from the cache by id', async () => {
+  const { rememberViewOnce } = await import('../System/ViewOnceSaver.js');
+  const core = (await import('../Core.js')).default;
+  global.viewOnceEmojis = ['👀'];
+
+  rememberViewOnce({
+    key: { id: 'VO-CACHED-1', fromMe: true, remoteJid: '2342222222222@s.whatsapp.net' },
+    message: { viewOnceMessageV2: { message: { imageMessage: { mimetype: 'image/jpeg', viewOnce: true, caption: 'cap' } } } },
+  });
+
+  const h = viewOnceHarness({ sender: '2340000000001@s.whatsapp.net', text: '👀' });
+  h.m.quoted = null;
+  h.m.msg = { contextInfo: { stanzaId: 'VO-CACHED-1' } };
+  await core(h.hooper, h.m, new Map());
+  assert.equal(h.downloads(), 1);
+  assert.equal(h.sent.length, 1);
+  assert.ok(h.sent[0].content.image);
+  assert.equal(h.sent[0].content.caption, ['viewonce saved from @2340000000001', '', 'cap'].join('\n'));
+
+  // Unknown id or a plain (non-reply) 👀 must be ignored and not swallowed.
+  const unknown = viewOnceHarness({ sender: '2340000000001@s.whatsapp.net', text: '👀' });
+  unknown.m.quoted = null;
+  unknown.m.msg = { contextInfo: { stanzaId: 'NOT-CACHED' } };
+  await core(unknown.hooper, unknown.m, new Map());
+  assert.equal(unknown.downloads(), 0);
+
+  const plain = viewOnceHarness({ sender: '2340000000001@s.whatsapp.net', text: '👀' });
+  plain.m.quoted = null;
+  await core(plain.hooper, plain.m, new Map());
+  assert.equal(plain.downloads(), 0);
+});
+
+test('rememberViewOnce: only keeps view-once messages', async () => {
+  const { rememberViewOnce, saveViewOnce } = await import('../System/ViewOnceSaver.js');
+  rememberViewOnce({ key: { id: 'NORMAL-1' }, message: { imageMessage: { mimetype: 'image/jpeg' } } });
+  const sent = [];
+  const hooper = { downloadMediaMessage: async () => Buffer.from('x'), sendMessage: async (...a) => sent.push(a) };
+  const handled = await saveViewOnce(hooper, { sender: 'a@s.whatsapp.net', msg: { contextInfo: { stanzaId: 'NORMAL-1' } }, quoted: null });
+  assert.equal(handled, false);
+  assert.equal(sent.length, 0);
+
+  rememberViewOnce({ key: { id: 'FLAGGED-1', participant: '2349@s.whatsapp.net' }, message: { videoMessage: { mimetype: 'video/mp4', viewOnce: true } } });
+  const ok = await saveViewOnce(hooper, { sender: 'a@s.whatsapp.net', msg: { contextInfo: { stanzaId: 'FLAGGED-1' } }, quoted: null });
+  assert.equal(ok, true);
+  assert.ok(sent[0][1].video);
+});
+
 test.after(async () => {
   const mongoose = (await import('mongoose')).default;
   await mongoose.disconnect().catch(() => {});
