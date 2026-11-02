@@ -82,7 +82,6 @@ export default {
       banData,
       prefix,
       db,
-      isintegrated,
       doReact,
       args,
       itsMe,
@@ -103,7 +102,6 @@ export default {
     const isUsermod = await checkMod(m.sender);
     if (
       !isCreator &&
-      !isintegrated() &&
       !isUsermod &&
       inputCMD !== "charlist" &&
       inputCMD !== "characters" &&
@@ -125,7 +123,7 @@ export default {
         const mentionedUser = m.quoted ? m.quoted.sender : mentionByTag[0];
         const userId = mentionedUser;
         const isTargetMod = await checkMod(userId);
-        if (!isCreator && !isintegrated() && isTargetMod) {
+        if (!isCreator && isTargetMod) {
           await doReact("❌");
           return m.reply(
             "Sorry, only my *Owner* can use this command ! *Added Mods* does not have this permission.",
@@ -172,7 +170,7 @@ export default {
         const mentionedUser = m.quoted ? m.quoted.sender : mentionByTag[0];
         const userId = mentionedUser;
         const isTargetMod = await checkMod(userId);
-        if (!isCreator && !isintegrated() && isTargetMod) {
+        if (!isCreator && isTargetMod) {
           await doReact("❌");
           return m.reply(
             "Sorry, only my *Owner* can use this command ! *Added Mods* does not have this permission.",
@@ -283,7 +281,7 @@ export default {
         }
         const mentionedUser = m.quoted ? m.quoted.sender : mentionByTag[0];
         const chechSenderModStatus = await checkMod(m.sender);
-        if (!chechSenderModStatus && !isCreator && !isintegrated()) {
+        if (!chechSenderModStatus && !isCreator) {
           await doReact("❌");
           return Hooper.sendMessage(m.from, {
             text: `Sorry, only *Owners* and *Mods* can use this command !`,
@@ -341,7 +339,7 @@ export default {
         }
         const mentionedUser = m.quoted ? m.quoted.sender : mentionByTag[0];
         const chechSenderModStatus = await checkMod(m.sender);
-        if (!chechSenderModStatus && !isCreator && !isintegrated()) {
+        if (!chechSenderModStatus && !isCreator) {
           await doReact("❌");
           return Hooper.sendMessage(m.from, {
             text: `Sorry, only *Owners* and *Mods* can use this command !`,
@@ -442,7 +440,7 @@ export default {
           );
         }
         const chechSenderModStatus = await checkMod(m.sender);
-        if (!chechSenderModStatus && !isCreator && !isintegrated()) {
+        if (!chechSenderModStatus && !isCreator) {
           await doReact("❌");
           return Hooper.sendMessage(m.from, {
             text: `Sorry, only *Owners* and *Mods* can use this command !`,
@@ -571,7 +569,7 @@ export default {
           );
         }
         const chechSenderModStatus = await checkMod(m.sender);
-        if (!chechSenderModStatus && !isCreator && !isintegrated()) {
+        if (!chechSenderModStatus && !isCreator) {
           await doReact("❌");
           return Hooper.sendMessage(m.from, {
             text: `Sorry, only *Owners* and *Mods* can use this command !`,
@@ -618,7 +616,7 @@ export default {
           return m.reply(`This command can only be used in groups !`);
         }
         const chechSenderModStatus = await checkMod(m.sender);
-        if (!chechSenderModStatus && !isCreator && !isintegrated()) {
+        if (!chechSenderModStatus && !isCreator) {
           await doReact("❌");
           return Hooper.sendMessage(m.from, {
             text: `Sorry, only *Owners* and *Mods* can use this command !`,
@@ -646,7 +644,7 @@ export default {
           return m.reply(`This command can only be used in groups !`);
         }
         const chechSenderModStatus = await checkMod(m.sender);
-        if (!chechSenderModStatus && !isCreator && !isintegrated()) {
+        if (!chechSenderModStatus && !isCreator) {
           await doReact("❌");
           return Hooper.sendMessage(m.from, {
             text: `Sorry, only *Owners* and *Mods* can use this command !`,
@@ -676,7 +674,7 @@ export default {
           );
         }
         const chechSenderModStatus = await checkMod(m.sender);
-        if (!chechSenderModStatus && !isCreator && !isintegrated()) {
+        if (!chechSenderModStatus && !isCreator) {
           await doReact("❌");
           return Hooper.sendMessage(m.from, {
             text: `Sorry, only *Owners* and *Mods* can use this command !`,

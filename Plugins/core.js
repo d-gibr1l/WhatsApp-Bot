@@ -33,7 +33,6 @@ export default {
       text,
       args,
       isCreator,
-      isintegrated,
     },
   ) => {
     const alivePics = ["./Assets/Hooper.jpg", "./Assets/ping_alive.jpg"];
@@ -374,7 +373,7 @@ export default {
 
       case "reboot":
       case "restart": {
-        if (!isCreator && !isintegrated) {
+        if (!isCreator) {
           await doReact("❌");
           return Hooper.sendMessage(
             m.from,

@@ -39,31 +39,42 @@ export async function updateYtDlp() {
 
 // ─── Platform Detection ───────────────────────────────────────────────────────
 
+const PLATFORM_DOMAINS = {
+  youtube:     ["youtube.com", "youtu.be", "youtube-nocookie.com"],
+  tiktok:      ["tiktok.com"],
+  instagram:   ["instagram.com", "ig.me"],
+  twitter:     ["twitter.com", "x.com", "fxtwitter.com", "vxtwitter.com"],
+  facebook:    ["facebook.com", "fb.watch", "fb.com", "messenger.com"],
+  reddit:      ["reddit.com", "redd.it"],
+  twitch:      ["twitch.tv"],
+  vimeo:       ["vimeo.com"],
+  pinterest:   ["pinterest.com", "pin.it"],
+  soundcloud:  ["soundcloud.com"],
+  spotify:     ["spotify.com"],
+  snapchat:    ["snapchat.com"],
+  threads:     ["threads.net"],
+  tumblr:      ["tumblr.com"],
+  dailymotion: ["dailymotion.com", "dai.ly"],
+  rumble:      ["rumble.com"],
+  bilibili:    ["bilibili.com", "b23.tv"],
+  imgur:       ["imgur.com"],
+};
+
+// Match on the URL's hostname only — matching anywhere in the string let
+// "https://any-host/?x=youtube.com" through, so yt-dlp would fetch arbitrary URLs.
 export function detectPlatform(url) {
   if (!url) return null;
-  const patterns = {
-    youtube:     /youtube\.com|youtu\.be|youtube-nocookie\.com/,
-    tiktok:      /tiktok\.com/,
-    instagram:   /instagram\.com|ig\.me/,
-    twitter:     /twitter\.com|x\.com|fxtwitter\.com|vxtwitter\.com/,
-    facebook:    /facebook\.com|fb\.watch|fb\.com|messenger\.com/,
-    reddit:      /reddit\.com|redd\.it/,
-    twitch:      /twitch\.tv/,
-    vimeo:       /vimeo\.com/,
-    pinterest:   /pinterest\.com|pin\.it/,
-    soundcloud:  /soundcloud\.com/,
-    spotify:     /spotify\.com/,
-    snapchat:    /snapchat\.com/,
-    threads:     /threads\.net/,
-    tumblr:      /tumblr\.com/,
-    dailymotion: /dailymotion\.com|dai\.ly/,
-    rumble:      /rumble\.com/,
-    bilibili:    /bilibili\.com|b23\.tv/,
-    imgur:       /imgur\.com/,
-    ytsearch:    /^ytsearch\d*:/,
-  };
-  for (const [platform, regex] of Object.entries(patterns)) {
-    if (regex.test(url.toLowerCase())) return platform;
+  if (/^ytsearch\d*:/i.test(url)) return "ytsearch";
+  let host;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    host = parsed.hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  for (const [platform, domains] of Object.entries(PLATFORM_DOMAINS)) {
+    if (domains.some((d) => host === d || host.endsWith(`.${d}`))) return platform;
   }
   return null;
 }

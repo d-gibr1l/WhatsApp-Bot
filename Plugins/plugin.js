@@ -7,7 +7,6 @@ import {
   isPluginPresent,
   delPlugin,
   getAllPlugins,
-  checkMod,
 } from "../System/MongoDB/MongoDb_Core.js";
 
 const mergedCommands = ["install", "uninstall", "plugins", "pluginlist"];
@@ -26,17 +25,16 @@ export default {
       prefix,
       inputCMD,
       isCreator,
-      isintegrated,
       doReact,
     },
   ) => {
     switch (inputCMD) {
       case "install": {
-        const chechSenderModStatus = await checkMod(m.sender);
-        if (!chechSenderModStatus && !isCreator && !isintegrated()) {
+        // Installing a plugin runs arbitrary code on the server — owner only.
+        if (!isCreator) {
           await doReact("❌");
           return Hooper.sendMessage(m.from, {
-            text: `Sorry, only *Bot Moderators* can use this command !`,
+            text: `Sorry, only the *Bot Owner* can use this command !`,
             quoted: m,
           });
         }
@@ -111,11 +109,11 @@ export default {
       }
 
       case "uninstall": {
-        const chechSenderModStatus = await checkMod(m.sender);
-        if (!chechSenderModStatus && !isCreator && !isintegrated()) {
+        // Installing a plugin runs arbitrary code on the server — owner only.
+        if (!isCreator) {
           await doReact("❌");
           return Hooper.sendMessage(m.from, {
-            text: `Sorry, only *Bot Moderators* can use this command !`,
+            text: `Sorry, only the *Bot Owner* can use this command !`,
             quoted: m,
           });
         }

@@ -162,12 +162,16 @@ export default {
           await doReact("❌");
           return m.reply(`*This command can only be used in groups!*`);
         }
+        if (!isAdmin) {
+          await doReact("❌");
+          return m.reply(`*You* must be *Admin* in order to use this Command!`);
+        }
         if (!isBotAdmin) {
           await doReact("❌");
           return m.reply(`*Bot* must be *Admin* in order to use this Command!`);
         }
         await doReact("🧩");
-        
+
         let link;
         try {
           link = await Hooper.groupInviteCode(m.from);

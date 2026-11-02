@@ -26,7 +26,7 @@ export default {
   start: async (
     Hooper,
     m,
-    { inputCMD, text, quoted, mime, doReact, prefix, isCreator, isintegrated },
+    { inputCMD, text, quoted, mime, doReact, prefix, isCreator },
   ) => {
     switch (inputCMD) {
       case "hd":

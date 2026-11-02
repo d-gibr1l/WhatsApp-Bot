@@ -46,6 +46,20 @@ test('detectPlatform returns null for unknown platforms or invalid inputs', () =
   assert.strictEqual(detectPlatform(null), null);
 });
 
+test('detectPlatform matches subdomains and search queries', () => {
+  assert.strictEqual(detectPlatform('https://m.youtube.com/watch?v=1'), 'youtube');
+  assert.strictEqual(detectPlatform('https://vm.tiktok.com/abc'), 'tiktok');
+  assert.strictEqual(detectPlatform('ytsearch5:lofi beats'), 'ytsearch');
+});
+
+test('detectPlatform only trusts the hostname, not the rest of the URL', () => {
+  assert.strictEqual(detectPlatform('https://169.254.169.254/latest?x=youtube.com'), null);
+  assert.strictEqual(detectPlatform('https://evil.example/youtube.com/watch'), null);
+  assert.strictEqual(detectPlatform('https://notyoutube.com/watch'), null);
+  assert.strictEqual(detectPlatform('https://youtube.com.evil.example/watch'), null);
+  assert.strictEqual(detectPlatform('ftp://youtube.com/x'), null);
+});
+
 test('getYtDlpPath returns a string path', () => {
   const path = getYtDlpPath();
   assert.strictEqual(typeof path, 'string');

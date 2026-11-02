@@ -2,5 +2,6 @@ node_modules
 .git
 .env
 atlas.pid
+hooper.pid
 atlas.log
 *.log
