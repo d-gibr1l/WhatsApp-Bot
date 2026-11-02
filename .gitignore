@@ -16,3 +16,7 @@ atlas.log
 atlas.pid
 hooper.pid
 CONTEXT.md
+
+# Local-only: runtime YouTube cookies and ad-hoc test scripts (may hold keys)
+cookies.txt
+_scratch/

@@ -119,3 +119,21 @@ export function sanitizeMentions(list) {
   }
   return [...seen];
 }
+
+const EXPIRED_MEDIA_STATUSES = new Set([403, 404, 410]);
+
+/**
+ * WhatsApp's CDN drops media some time after it's sent; a deleted message's
+ * download then fails with 403/404/410. That's expected, not a bug, so it
+ * gets a one-line log (no CDN URL — it carries an access token). Anything
+ * else is unexpected and keeps its stack trace.
+ *
+ * @returns {{ expired: boolean, reason: string }}
+ */
+export function describeMediaError(err) {
+  const status = err?.output?.statusCode ?? err?.statusCode;
+  if (EXPIRED_MEDIA_STATUSES.has(status)) {
+    return { expired: true, reason: `media no longer available on WhatsApp's servers (HTTP ${status})` };
+  }
+  return { expired: false, reason: err?.message || String(err) };
+}

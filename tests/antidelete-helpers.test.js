@@ -5,6 +5,7 @@ import {
   resolveParties,
   pickMedia,
   sanitizeMentions,
+  describeMediaError,
 } from "../src/antidelete-helpers.js";
 
 // ── resolveUser ──────────────────────────────────────────────────────────
@@ -194,4 +195,27 @@ test("sanitizeMentions: dedupes (admin revoking their own message mentions them 
     sanitizeMentions(["15551234567@s.whatsapp.net", "15551234567@s.whatsapp.net"]),
     ["15551234567@s.whatsapp.net"],
   );
+});
+
+// ── describeMediaError ───────────────────────────────────────────────────
+
+test("describeMediaError: expired CDN media (403/404/410) is a short, URL-free reason", () => {
+  for (const statusCode of [403, 404, 410]) {
+    const err = Object.assign(new Error("Failed to fetch stream from https://mmg.whatsapp.net/x.enc?oh=SECRET"), {
+      output: { statusCode },
+    });
+    const { expired, reason } = describeMediaError(err);
+    assert.equal(expired, true);
+    assert.match(reason, new RegExp(`HTTP ${statusCode}`));
+    assert.doesNotMatch(reason, /mmg\.whatsapp\.net|SECRET/);
+  }
+});
+
+test("describeMediaError: other failures are not treated as expired", () => {
+  assert.deepEqual(describeMediaError(Object.assign(new Error("boom"), { output: { statusCode: 500 } })), {
+    expired: false,
+    reason: "boom",
+  });
+  assert.deepEqual(describeMediaError(new Error("socket hang up")), { expired: false, reason: "socket hang up" });
+  assert.equal(describeMediaError(undefined).expired, false);
 });

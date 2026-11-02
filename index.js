@@ -177,7 +177,7 @@ const MESSAGE_CACHE_MAX_PER_CHAT = Math.max(
 );
 
 import { messageData, contactData } from "./System/MongoDB/MongoDB_Schema.js";
-import { resolveParties, pickMedia, sanitizeMentions } from "./src/antidelete-helpers.js";
+import { resolveParties, pickMedia, sanitizeMentions, describeMediaError } from "./src/antidelete-helpers.js";
 import {
   sessions as tempmailSessions,
   pollOnce as tempmailPollOnce,
@@ -1122,7 +1122,9 @@ const connectHooper = async (trigger) => {
                         await Hooper.sendMessage(targetJid, { video: mediaBuffer, caption: finalCaption, mentions: mentionsList });
                     }
                 } catch (e) {
-                    console.error(`[ ANTI-DELETE ] Failed to recover ${mediaLabel} (${contentType}):`, e);
+                    const { expired, reason } = describeMediaError(e);
+                    if (expired) console.warn(`[ ANTI-DELETE ] Couldn't recover ${mediaLabel} (${contentType}): ${reason}`);
+                    else console.error(`[ ANTI-DELETE ] Failed to recover ${mediaLabel} (${contentType}):`, e);
                     await Hooper.sendMessage(targetJid, { text: finalCaption, mentions: mentionsList });
                 }
             } else if (mediaType) {
@@ -1141,7 +1143,9 @@ const connectHooper = async (trigger) => {
                     else if (mediaType === "sticker") await Hooper.sendMessage(targetJid, { sticker: mediaBuffer }, { quoted: alertMsg });
                     else await Hooper.sendMessage(targetJid, { document: mediaBuffer, mimetype: content.mimetype || "application/octet-stream", fileName: content.fileName || "document" }, { quoted: alertMsg });
                 } catch (e) {
-                    console.error(`[ ANTI-DELETE ] Failed to recover ${mediaLabel} (${contentType}):`, e);
+                    const { expired, reason } = describeMediaError(e);
+                    if (expired) console.warn(`[ ANTI-DELETE ] Couldn't recover ${mediaLabel} (${contentType}): ${reason}`);
+                    else console.error(`[ ANTI-DELETE ] Failed to recover ${mediaLabel} (${contentType}):`, e);
                     await Hooper.sendMessage(targetJid, { text: `⚠️ Failed to recover the deleted ${mediaLabel}.` }, { quoted: alertMsg });
                 }
             } else {
